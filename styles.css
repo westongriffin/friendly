@@ -83,7 +83,7 @@ img{max-width:100%}
 .btn.lg{padding:13px 20px;font-size:16px;border-radius:13px} .btn.full{width:100%}
 .btn.small{padding:6px 12px;font-size:13px;border-radius:9px;min-height:36px}
 /* Comfortable thumb targets for icon-only controls (mobile audit) */
-.wall-del,.btn.ghost.small,[data-upvote],[data-delc],[data-delsong],[data-xopen],[data-dele],[data-dels],[data-uninvite],.link-back{min-height:36px;min-width:36px;display:inline-flex;align-items:center;justify-content:center}
+.wall-del,.btn.ghost.small,[data-upvote],[data-delc],[data-delsong],[data-xopen],[data-dele],[data-dels],[data-uninvite],.link-back,.ev-back{min-height:36px;min-width:36px;display:inline-flex;align-items:center;justify-content:center}
 .btn.ghost{background:transparent;color:var(--muted)} .btn.ghost:hover{color:var(--ink)}
 .btn.danger-ghost{background:transparent;color:var(--bad)}
 .btn.venmo{background:#008CFF;color:#fff} .btn.apple{background:#111;color:#fff}
