@@ -1,7 +1,7 @@
 {
   "name": "friendly-functions",
   "description": "Push notifications, day-of reminders, and optional SMS for Friendly.",
-  "engines": { "node": "20" },
+  "engines": { "node": "22" },
   "main": "index.js",
   "dependencies": {
     "firebase-admin": "^12.6.0",
