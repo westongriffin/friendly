@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Privacy Policy — Friendly</title>
+<meta name="description" content="How Friendly handles your information: what we store, who can see it, and how to delete it.">
+<meta name="theme-color" content="#FFFEFC">
+<meta name="color-scheme" content="light">
+<link rel="icon" type="image/svg+xml" href="./icons/icon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>
+  :root{--bg:#FFFEFC;--ink:#2A2019;--muted:#6F6259;--accent:#FF6B57;--tile:#FFF1E0;--line:#EFE6DA}
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink)}
+  body{font:16px/1.65 "Instrument Sans",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:720px;margin:0 auto;padding:32px 20px 80px}
+  .brand{display:flex;align-items:center;gap:12px;text-decoration:none;color:var(--ink);font-family:"Bricolage Grotesque",sans-serif;font-weight:700;font-size:20px}
+  .brand img{width:40px;height:40px;border-radius:11px}
+  h1{font-family:"Bricolage Grotesque",sans-serif;font-weight:700;font-size:clamp(30px,6vw,40px);line-height:1.1;margin:36px 0 8px;letter-spacing:-.01em}
+  .date{color:var(--muted);margin:0 0 28px}
+  h2{font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:22px;margin:36px 0 10px}
+  p,li{max-width:64ch}
+  ul{padding-left:22px}
+  li{margin:6px 0}
+  .card{background:var(--tile);border-radius:16px;padding:16px 18px;margin:18px 0}
+  a{color:var(--accent);font-weight:600;text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{font-family:ui-monospace,Menlo,monospace;font-size:.92em;background:var(--tile);padding:1px 6px;border-radius:6px}
+  footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="brand" href="./"><img src="./icons/icon-192.png" alt="">Friendly</a>
+
+  <h1>Privacy Policy</h1>
+  <p class="date">Last updated September 8, 2026</p>
+
+  <p>Friendly is your friend group's home base — the app you use together to plan get-togethers
+  and settle up afterwards. Everything in it is invite-only. This page explains, in plain language, what
+  information Friendly stores, who can see it, and how you can delete it.</p>
+
+  <div class="card">
+    <strong>The short version.</strong> We store what you type into Friendly so your friends can see it.
+    We don't sell your information, we don't show ads, and we don't track you across other apps or
+    websites. You can delete your account and its data at any time.
+  </div>
+
+  <h2 id="collect">What we store</h2>
+  <ul>
+    <li><strong>Your account:</strong> your name, email address, and password (stored by Google Firebase
+      Authentication — we never see the password itself). Optionally, your phone number and your Venmo
+      handle if you add them so friends can pay you back.</li>
+    <li><strong>Your groups and events:</strong> group names and members; event titles, dates, times,
+      locations, notes, themes, and cover images; RSVPs, +1s, hypes, answers to host questions, and
+      waitlist/approval status.</li>
+    <li><strong>What you share at events:</strong> party-wall comments, photos you add, polls and votes,
+      and playlist songs.</li>
+    <li><strong>Expenses:</strong> the descriptions, amounts, and splits you enter, and settlements you
+      record. Friendly never collects or stores payment cards, bank details, or Venmo/Apple Cash
+      credentials — those apps open on their own when you choose to pay.</li>
+    <li><strong>Contacts you choose to invite:</strong> in the iPhone app, if you allow access to Contacts,
+      Friendly reads your address book <em>on your device</em> so you can pick people by name or phone
+      number. Only the name and phone number or email of the people you actually invite are stored, on
+      that invitation. Your address book is never uploaded.</li>
+    <li><strong>Push notification token:</strong> if you turn on notifications in the iPhone app, a
+      device token so we can deliver them. Turn notifications off in iOS Settings at any time.</li>
+    <li><strong>AI cover prompts:</strong> if you ask Friendly to generate a cover image, the description
+      you type is sent to an image-generation service to make the picture (see “Services we use”).
+      The prompt is used only to generate that image; the image is stored with your event.</li>
+  </ul>
+
+  <h2 id="see">Who can see it</h2>
+  <p>Only the people involved. Group content is visible to that group's members and people invited to
+  it; event content is visible to the host, co-hosts, and invited guests; expenses are visible to the
+  people they involve. These limits are enforced by our server rules, not just the app's screens.
+  Nothing in Friendly is public or searchable by other users.</p>
+
+  <h2 id="use">How we use it</h2>
+  <p>To run Friendly: showing your events to your guests, sending the notifications you've opted into
+  (new invites, comments, RSVPs, and a reminder the morning of an event), and keeping track of who owes
+  whom. That's it. We do not use your information for advertising, we do not sell or rent it, and we
+  do not build profiles of you for anyone else.</p>
+
+  <h2 id="services">Services we use</h2>
+  <ul>
+    <li><strong>Google Firebase / Google Cloud</strong> (United States) hosts our database, sign-in, and
+      notification delivery. <a href="https://firebase.google.com/support/privacy" rel="noopener">Firebase privacy</a>.</li>
+    <li><strong>Google Cloud Vertex AI (Gemini)</strong> generates AI cover images from your prompt,
+      inside our own Google Cloud project. If Google's service is unavailable, the prompt is sent to
+      <a href="https://pollinations.ai" rel="noopener">Pollinations.ai</a>, an independent free image
+      generator, as a fallback. In both cases only the prompt text is sent — never your name, email, or
+      event details.</li>
+    <li><strong>Apple Push Notifications</strong> delivers notifications to iPhones.</li>
+    <li><strong>GitHub Pages</strong> serves this website.</li>
+  </ul>
+  <p>We don't use analytics or advertising SDKs, and there are no third-party trackers in the app or on
+  this site.</p>
+
+  <h2 id="delete">Deleting your information</h2>
+  <ul>
+    <li><strong>Events, groups, comments, photos, expenses:</strong> delete them in the app whenever you
+      like. Hosts can remove guests; group owners can remove members.</li>
+    <li><strong>Your account:</strong> use <strong>Delete account</strong> in the app's settings. This
+      removes your profile, your sign-in, your push token, and your personal fields from groups. Content
+      you posted into shared events (like a comment on someone else's party wall) may remain visible to
+      that event's guests, attributed to “a former member.”</li>
+    <li>You can also email us (address below) and we'll delete your account for you within 7 days.</li>
+  </ul>
+
+  <h2 id="kids">Children</h2>
+  <p>Friendly is not directed to children under 13, and we don't knowingly collect information from
+  them. If you believe a child has created an account, email us and we'll remove it.</p>
+
+  <h2 id="changes">Changes</h2>
+  <p>If we change how Friendly handles your information, we'll update this page and the date at the
+  top. Material changes will also be announced in the app.</p>
+
+  <h2 id="contact">Contact</h2>
+  <p>Questions or requests: <a href="mailto:privacy@officialfriendly.com">privacy@officialfriendly.com</a></p>
+
+  <footer>© 2026 Friendly · <a href="./">officialfriendly.com</a></footer>
+</div>
+</body>
+</html>

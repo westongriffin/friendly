@@ -22,6 +22,16 @@ input,select,textarea{font:inherit;color:var(--ink);min-width:0;max-width:100%}
 a{color:inherit;text-decoration:none;cursor:pointer}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .hidden{display:none!important}
+/* Event-page components (party wall, polls) reused on plain app pages: map the
+   theme variables onto the app palette. */
+.th-plain{--th-font:var(--display);--th-ink:var(--ink);--th-sub:var(--muted);--th-accent:var(--accent);--th-on-accent:var(--on-accent);--th-chip:var(--surface2);--th-card:var(--surface);padding:16px 18px}
+.th-plain .wall-form input{background:var(--bg);border-color:var(--line);color:var(--ink)}
+.th-plain .poll-opt{background:var(--surface2);border-color:var(--line)} .th-plain .poll-bar{opacity:.35}
+/* Address suggestions (Google Places) under a location input */
+.places-list{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);margin-top:4px;overflow:hidden}
+.places-list button{display:flex;flex-direction:column;width:100%;text-align:left;padding:9px 12px;gap:1px}
+.places-list button+button{border-top:1px solid var(--line)} .places-list button:hover{background:var(--surface2)}
+.places-list span{font-size:12px;color:var(--muted)}
 .muted{color:var(--muted)} .sm{font-size:12.5px} .mono{font-family:var(--mono)}
 h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;margin:0;text-wrap:balance}
 img{max-width:100%}

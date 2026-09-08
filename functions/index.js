@@ -36,7 +36,9 @@ const IMAGE_MODELS = [
 const vertexHost = loc => (loc === "global" ? "" : loc + "-") + "aiplatform.googleapis.com";
 const gauth = new GoogleAuth({ scopes: "https://www.googleapis.com/auth/cloud-platform" });
 
-const FLAIR = ", vibrant party invitation art, bold, celebratory, high quality";
+// "Invitation art" made models paint dates/RSVP text onto covers; ask for
+// pure imagery instead.
+const FLAIR = ", vibrant celebratory illustration, bold colors, high quality. Pure imagery only: no text, no words, no letters, no numbers, no dates, no calendars, no signs or banners with writing";
 
 // Firestore docs cap at 1MB and these models return multi-MB PNGs, so
 // normalize to a ~1024px JPEG data URL (~100-200KB).
@@ -150,6 +152,24 @@ exports.onComment = onDocumentCreated("events/{id}/comments/{cid}", async e => {
   await notify((ev.invitedUids || []).filter(u => u !== c.authorId),
     firstName(c.authorName) + " on " + ev.title, String(c.text).slice(0, 120),
     "/#/e/" + e.params.id);
+});
+
+// Group chat message -> tell the other members.
+exports.onGroupComment = onDocumentCreated("groups/{gid}/comments/{cid}", async e => {
+  const c = e.data && e.data.data(); if (!c) return;
+  const g = (await db.doc("groups/" + e.params.gid).get()).data(); if (!g) return;
+  await notify((g.memberUids || []).filter(u => u !== c.authorId),
+    firstName(c.authorName) + " in " + g.name, String(c.text).slice(0, 120),
+    "/#/g/" + e.params.gid);
+});
+
+// Expense discussion -> tell the people involved.
+exports.onExpenseComment = onDocumentCreated("expenses/{xid}/comments/{cid}", async e => {
+  const c = e.data && e.data.data(); if (!c) return;
+  const x = (await db.doc("expenses/" + e.params.xid).get()).data(); if (!x) return;
+  await notify((x.involved || []).filter(u => u !== c.authorId),
+    firstName(c.authorName) + " on " + (x.desc || "an expense"), String(c.text).slice(0, 120),
+    "/#/x/" + e.params.xid);
 });
 
 // RSVP change -> tell the host who's coming.

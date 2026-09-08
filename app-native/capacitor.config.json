@@ -7,11 +7,17 @@
     "cleartext": false
   },
   "ios": {
-    "contentInset": "always"
+    "contentInset": "always",
+    "backgroundColor": "#FFFEFC"
   },
   "plugins": {
     "PushNotifications": {
-      "presentationOptions": ["badge", "sound", "alert"]
+      "presentationOptions": [
+        "badge",
+        "sound",
+        "alert"
+      ]
     }
-  }
+  },
+  "backgroundColor": "#FFFEFC"
 }

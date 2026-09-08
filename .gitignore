@@ -12,3 +12,4 @@ app-native/ios/App/App.xcodeproj/project.xcworkspace/xcuserdata/
 app-native/ios/App/CapApp-SPM/.build/
 *.xcuserstate
 app-native/ios/DerivedData/
+.claude/
