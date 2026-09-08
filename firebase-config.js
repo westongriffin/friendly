@@ -15,4 +15,4 @@ export const firebaseConfig = {
 // APIs & Services → enable "Places API (New)" → Credentials → Create API key →
 // restrict it to HTTP referrers https://officialfriendly.com/* and to the
 // Places API (New) → paste it here.
-export const mapsKey = "";
+export const mapsKey = "AIzaSyDGf2O_wK32SP2K6-4tSJRFPBrrnOe7IB8";
