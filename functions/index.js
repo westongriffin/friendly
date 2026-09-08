@@ -42,14 +42,22 @@ async function imagenGenerate(prompt) {
 }
 
 // Fallback generator: free, no key. Keeps covers working even where the org
-// blocks Vertex publisher-model access.
+// blocks Vertex publisher-model access. "flux" is their fast backend; the
+// default one rate-limits under load, so try a second model before giving up.
 async function pollinationsGenerate(prompt) {
-  const seed = Math.floor(Math.random() * 1e6);
-  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt + FLAIR)}?width=1024&height=640&nologo=true&seed=${seed}`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error("pollinations " + r.status);
-  const buf = Buffer.from(await r.arrayBuffer());
-  return "data:image/jpeg;base64," + buf.toString("base64");
+  let lastErr;
+  for (const model of ["flux", "turbo"]) {
+    const seed = Math.floor(Math.random() * 1e6);
+    const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt + FLAIR)}?width=1024&height=640&nologo=true&model=${model}&seed=${seed}`;
+    try {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error("pollinations/" + model + " " + r.status);
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (buf.length < 5000) throw new Error("pollinations/" + model + " returned no image");
+      return "data:image/jpeg;base64," + buf.toString("base64");
+    } catch (e) { lastErr = e; logger.warn(e.message + " — trying next model"); }
+  }
+  throw lastErr;
 }
 
 exports.onCoverRequest = onDocumentCreated({ document: "coverRequests/{id}", region: "us-central1", timeoutSeconds: 120, memory: "512MiB" }, async e => {

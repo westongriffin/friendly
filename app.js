@@ -82,7 +82,7 @@ async function generateCover(prompt) {
     if (image) return compressImage(image, 1024, 0.8);
   } catch (e) { console.warn("Imagen unavailable, using fallback:", e && e.message); }
   const seed = Math.floor(Math.random() * 1e6);
-  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt + ", vibrant party invitation art, bold, high quality")}?width=1024&height=640&nologo=true&seed=${seed}`;
+  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt + ", vibrant party invitation art, bold, high quality")}?width=1024&height=640&nologo=true&model=flux&seed=${seed}`;
   const res = await fetch(url); if (!res.ok) throw new Error("Generator busy — try again");
   return compressImage(await blobToURL(await res.blob()), 1024, 0.74);
 }
