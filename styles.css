@@ -75,6 +75,10 @@ img{max-width:100%}
 .badge{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;border-radius:9px;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:grid;place-items:center;padding:0 5px}
 .act-row{display:flex;align-items:center;gap:12px;padding:12px 15px;border-top:1px solid var(--line)} .act-row:first-child{border-top:0} .act-row.new{background:var(--surface2)}
 .notif-card{display:flex;align-items:center;gap:12px;padding:13px 15px;margin-bottom:14px;flex-wrap:wrap}
+.kind-seg{margin-bottom:14px}
+.meet-card{display:flex;align-items:center;gap:12px;padding:13px 15px;cursor:pointer}
+.pv-wrap{position:relative;z-index:1;max-width:520px;margin:0 auto;padding:24px 16px}
+.pv-card{overflow:hidden;margin-bottom:16px} .pv-cover{width:100%;aspect-ratio:16/9;object-fit:cover;display:block} .pv-body{padding:16px 18px}
 .ev-card{position:relative} .new-pill{position:absolute;top:10px;left:10px;background:var(--sun);color:var(--on-sun);font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;z-index:2}
 .section-head h2{font-size:19px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}

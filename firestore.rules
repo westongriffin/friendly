@@ -19,6 +19,14 @@ service cloud.firestore {
       allow read: if signedIn() && uid() in resource.data.uids;
     }
 
+    // ---- Public previews of "anyone with the link" events (written by functions) ----
+    match /previews/{eventId} { allow read: if true; }
+
+    // ---- Nudges: a host asks the function to remind non-responders ----
+    match /nudges/{nudgeId} {
+      allow create: if signedIn() && request.resource.data.by == uid();
+    }
+
     // ---- Reports: anyone signed in can file one; only admins see them ----
     match /reports/{reportId} {
       allow create: if signedIn() && request.resource.data.reporterId == uid()

@@ -299,7 +299,7 @@ function avatar(uid, cls = "") { const name = (S.contacts.get(uid) || {}).name |
 function render() {
   const root = el("app");
   if (!S.ready) { root.innerHTML = `<div class="splash"><div class="logo-mark"></div><p>Loading…</p></div>`; return; }
-  if (!S.user) { renderAuth(root); return; }
+  if (!S.user) { if (S.route.name === "event") { renderPreview(root, S.route.id); return; } renderAuth(root); return; }
   if (!S.profile) { root.innerHTML = `<div class="splash"><div class="logo-mark"></div><p>Setting up your profile…</p></div>`; return; }
   const r = S.route;
   if (r.name === "event") return renderEventPage(root, r.id);
@@ -463,6 +463,7 @@ function homeBody() {
 function emptyState(emoji, title, sub) { return `<div class="card empty"><div class="big">${emoji}</div><b>${esc(title)}</b><p class="muted">${esc(sub)}</p></div>`; }
 
 function eventCard(ev) {
+  if (ev.kind === "meeting") return meetingCard(ev);
   const th = themeOf(ev.theme);
   const d = evDate(ev);
   const going = goingCount(ev);
@@ -676,7 +677,7 @@ async function leaveGroup(g) {
 const compose = { theme: DEFAULT_THEME, emoji: "🎉", cover: null, coverTab: "emoji",
   title: "", date: "", time: "", end: "", where: "", notes: "", cap: "", approval: false,
   questions: [], invitees: new Set(), cohosts: new Set(), groupId: "" };
-function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), cohosts: new Set(), groupId: "" }); }
+function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), cohosts: new Set(), groupId: "", kind: "event", repeat: "", guestEmails: "" }); }
 function composeBody() {
   const emojis = ["🎉", "🍕", "🌮", "🍻", "🎂", "🎬", "🎮", "🏖️", "🥾", "⚽", "🎲", "🍜", "🎃", "🎄", "🕺", "🔥"];
   const groups = [...S.groups.values()];
@@ -684,6 +685,12 @@ function composeBody() {
   return `
   <button class="link-back" data-go="#/">‹ Cancel</button>
   <div class="compose">
+    <div class="seg kind-seg" id="kindSeg">
+      <button type="button" class="${compose.kind !== "meeting" ? "on" : ""}" data-kind="event">🎉 Event</button>
+      <button type="button" class="${compose.kind === "meeting" ? "on" : ""}" data-kind="meeting">📅 Meeting</button>
+    </div>
+    ${compose.kind === "meeting" ? `<p class="muted sm" style="margin:-4px 0 12px">A plain calendar entry: title, time, place, who. Everyone gets a calendar invite by email.</p>` : ""}
+    <div class="${compose.kind === "meeting" ? "hidden" : ""}">
     <div class="compose-preview t-${th.id}" id="cPreview" style="--th-accent:${th.accent};--th-ink:${th.ink};--th-on-accent:${th.onAccent};font-family:${th.font},system-ui">
       ${compose.cover ? `<div class="preview-cover"><img src="${compose.cover}" alt=""></div>` : ""}
       <canvas class="preview-canvas" id="cCanvas"></canvas>
@@ -708,9 +715,10 @@ function composeBody() {
     <div class="theme-strip" id="themeStrip">
       ${THEMES.map(t => `<button class="theme-swatch t-${t.id} ${t.id === compose.theme ? "on" : ""}" data-theme="${t.id}" title="${t.name}"><span class="theme-swatch-bg"></span><span class="theme-name" style="font-family:${t.font},system-ui">${esc(t.name)}</span></button>`).join("")}
     </div>
+    </div>
 
     <div class="form-card card">
-      <label class="field"><span>What's the plan?</span><input id="cTitle" maxlength="80" value="${esc(compose.title)}" placeholder="Rooftop taco night"></label>
+      <label class="field"><span>${compose.kind === "meeting" ? "Meeting title" : "What's the plan?"}</span><input id="cTitle" maxlength="80" value="${esc(compose.title)}" placeholder="Rooftop taco night"></label>
       <div class="two">
         <label class="field"><span>Date</span><input id="cDate" type="date" value="${compose.date || todayStr()}"></label>
         <label class="field"><span>Start</span><input id="cTime" type="time" value="${compose.time}"></label>
@@ -721,6 +729,11 @@ function composeBody() {
       </div>
       <label class="field"><span>Where</span><input id="cWhere" maxlength="90" value="${esc(compose.where)}" placeholder="Address or vibe"></label>
       <label class="field"><span>The details</span><textarea id="cNotes" maxlength="600" placeholder="Dress code, what to bring, parking…">${esc(compose.notes)}</textarea></label>
+      <div class="two">
+        <label class="field"><span>Repeats</span><select id="cRepeat"><option value="" ${!compose.repeat ? "selected" : ""}>Never</option><option value="weekly" ${compose.repeat === "weekly" ? "selected" : ""}>Every week</option><option value="biweekly" ${compose.repeat === "biweekly" ? "selected" : ""}>Every 2 weeks</option><option value="monthly" ${compose.repeat === "monthly" ? "selected" : ""}>Every month</option></select></label>
+        <label class="field"><span>Also email invites to</span><input id="cEmails" value="${esc(compose.guestEmails || "")}" placeholder="pat@example.com, sam@…"></label>
+      </div>
+      <p class="muted sm" style="margin:-4px 0 0">Guests get a calendar invite at their email on file. Add anyone who isn't on Friendly here.</p>
     </div>
 
     <div class="section-head"><h2>Who's invited</h2></div>
@@ -731,6 +744,7 @@ function composeBody() {
         <span class="field-label">Friends</span>
         <div class="check-grid" id="cInvitees">${contactChecks("inv", compose.invitees)}</div>
       </div>
+      <div class="${compose.kind === "meeting" ? "hidden" : ""}">
       <details class="adv"><summary>Co-hosts &amp; approval</summary>
         <span class="field-label" style="margin-top:10px">Co-hosts (can edit &amp; manage)</span>
         <div class="check-grid" id="cCohosts">${contactChecks("coh", compose.cohosts)}</div>
@@ -739,8 +753,10 @@ function composeBody() {
       <label class="switch" style="margin-top:12px"><input type="checkbox" id="cOpenLink" ${compose.openLink === false ? "" : "checked"}><span>Anyone with the link can join (so you can text people who aren't on Friendly yet)</span></label>
       <button type="button" class="btn small" id="cTextInvite" style="margin-top:10px">💬 Create &amp; text friends the invite</button>
       <p class="muted sm" style="margin:6px 0 0">Creates the event, then opens Messages with the invite and link already written, sent from your own number.</p>
+      </div>
     </div>
 
+    <div class="${compose.kind === "meeting" ? "hidden" : ""}">
     <div class="section-head"><h2>RSVP questions <span class="muted sm">optional</span></h2></div>
     <div class="form-card card">
       <div id="qList" class="stack">${compose.questions.map(q => qRow(q)).join("")}</div>
@@ -748,7 +764,8 @@ function composeBody() {
       <p class="muted sm" style="margin:8px 0 0">e.g. “What are you bringing?” · “Any dietary restrictions?”</p>
     </div>
 
-    <button class="btn primary lg full" id="createEventBtn">Create event &amp; send invites</button>
+    </div>
+    <button class="btn primary lg full" id="createEventBtn">${compose.kind === "meeting" ? "Create meeting &amp; send invites" : "Create event &amp; send invites"}</button>
   </div>`;
 }
 function qRow(q) { return `<div class="q-row" data-q="${q.id}"><input value="${esc(q.q)}" data-qedit="${q.id}" maxlength="80" placeholder="Your question"><button class="btn ghost small" data-qdel="${q.id}">✕</button></div>`; }
@@ -769,6 +786,7 @@ function syncCompose() {
   compose.end = el("cEnd").value; compose.where = el("cWhere").value; compose.notes = el("cNotes").value;
   compose.cap = el("cCap").value; if (el("cApproval")) compose.approval = el("cApproval").checked;
   if (el("cOpenLink")) compose.openLink = el("cOpenLink").checked;
+  if (el("cRepeat")) compose.repeat = el("cRepeat").value; if (el("cEmails")) compose.guestEmails = el("cEmails").value;
 }
 function wireCompose() {
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
@@ -786,6 +804,7 @@ function wireCompose() {
   el("addQ").onclick = () => { compose.questions.push({ id: newId().slice(0, 6), q: "" }); el("qList").insertAdjacentHTML("beforeend", qRow(compose.questions[compose.questions.length - 1])); wireQ(); };
   wireQ();
   el("createEventBtn").onclick = () => createEvent(false);
+  document.querySelectorAll("[data-kind]").forEach(b => b.onclick = () => { syncCompose(); compose.kind = b.dataset.kind; render(); });
   el("cTextInvite").onclick = () => createEvent(true);
 }
 function refreshCoverUI() {
@@ -833,13 +852,15 @@ async function createEvent(thenText) {
     capacity: Number(el("cCap").value) || 0, approval: !!el("cApproval").checked,
     questions, rsvps: { [myUid()]: "going" }, plusOnes: {}, hypes: {}, answers: {},
     openLink: el("cOpenLink") ? el("cOpenLink").checked : true,
+    kind: compose.kind === "meeting" ? "meeting" : "event", repeat: el("cRepeat") ? el("cRepeat").value : "",
+    guestEmails: (el("cEmails") ? el("cEmails").value : "").split(",").map(x => x.trim().toLowerCase()).filter(x => x.includes("@")), sequence: 0,
     createdAt: Date.now()
   };
   try {
     el("createEventBtn").disabled = true; el("createEventBtn").textContent = "Creating…";
     await setDoc(doc(db, "events", id), ev);
     composeStop(); resetCompose();
-    go("#/e/" + id); toast("Event created, invites are live");
+    go("#/e/" + id); toast((ev.kind === "meeting" ? "Meeting" : "Event") + " created, invites are on their way");
     // "Create & text": hand off to Messages once the event page is up.
     if (thenText) setTimeout(() => textEventInvite({ id, ...ev }), 400);
   } catch (e) { toast("Couldn't create: " + e.message); el("createEventBtn").disabled = false; el("createEventBtn").textContent = "Create event & send invites"; }
@@ -852,6 +873,7 @@ function renderEventPage(root, id) {
   cleanupEvent();
   const ev = S.events.get(id);
   if (!ev) { root.innerHTML = shell(`<div class="card empty"><b>Loading event…</b><p class="muted">If this stays, you may not have access.</p><button class="btn" data-go="#/">Home</button></div>`); wireShell(); getDoc(doc(db, "events", id)).then(d => { if (d.exists()) { S.events.set(id, { id, ...d.data() }); render(); } }); return; }
+  if (ev.kind === "meeting") { root.innerHTML = shell(meetingBody(ev)); wireShell(); wireMeeting(ev); return; }
   const th = themeOf(ev.theme);
   root.innerHTML = `<div class="event-page t-${th.id}" id="evPage" style="--th-font:${th.font},system-ui;--th-ink:${th.ink};--th-sub:${th.sub};--th-accent:${th.accent};--th-on-accent:${th.onAccent};--th-chip:${th.chip};--th-card:${th.card}">
     <canvas class="event-bg-canvas" id="evCanvas"></canvas>
@@ -936,6 +958,7 @@ function eventInner(ev) {
     <div class="glass-head">Guest list <span>${(ev.invitedUids || []).length} invited</span></div>
     ${guestList || `<p class="muted-th">No guests yet.</p>`}
     ${manage && (ev.questions || []).length ? `<button class="btn-th ghost small" id="viewAnswers">View RSVP answers</button>` : ""}
+    ${manage && (ev.invitedUids || []).filter(u => u !== me && !(ev.rsvps || {})[u]).length ? `<button class="btn-th ghost small" id="nudgeBtn">Nudge ${(ev.invitedUids || []).filter(u => u !== me && !(ev.rsvps || {})[u]).length} who haven't answered</button>` : ""}
   </div>
 
   <div class="ev-card-glass" id="pollsCard">${pollsInner(ev)}</div>
@@ -982,6 +1005,7 @@ function wireEventPage(ev) {
   document.querySelectorAll("[data-promote]").forEach(b => b.onclick = () => hostSetRsvp(ev, b.dataset.promote, "going"));
   if (el("saveAnswers")) el("saveAnswers").onclick = () => saveAnswers(ev);
   if (el("viewAnswers")) el("viewAnswers").onclick = () => showAnswers(ev);
+  if (el("nudgeBtn")) el("nudgeBtn").onclick = () => nudge(ev, el("nudgeBtn"));
   const share = $("[data-share]"); if (share) share.onclick = () => shareEvent(ev);
   const txt = $("[data-text]"); if (txt) txt.onclick = () => textEventInvite(ev);
   const join = $("[data-join]"); if (join) join.onclick = () => joinViaLink(ev, join);
@@ -1007,11 +1031,19 @@ function pollsInner(ev, hint = "Add a poll to help decide: food, time, theme.") 
       const n = Object.values(p.votes || {}).filter(v => v === i).length;
       const pct = total ? Math.round(n / total * 100) : 0;
       return `<div class="poll-opt ${mine === i ? "mine" : ""}" data-vote="${p.id}|${i}"><div class="poll-bar" style="transform:scaleX(${total ? n / total : 0})"></div><div class="poll-opt-in"><span>${esc(o)}</span><span>${pct}%</span></div></div>`;
-    }).join("")}<div class="muted-th sm" style="margin-top:4px">${total} vote${total === 1 ? "" : "s"}${manage ? ` · <a data-delpoll="${p.id}">remove</a>` : ""}</div></div>`;
+    }).join("")}<div class="muted-th sm" style="margin-top:4px">${total} vote${total === 1 ? "" : "s"}${manage ? ` · <a data-delpoll="${p.id}">remove</a>` : ""}${planBtn(ev, p)}</div></div>`;
   }).join("");
   return `<div class="glass-head">Polls${manage ? ` <a class="btn-th ghost small" id="addPoll">＋ Add</a>` : `<span>${S.polls.length}</span>`}</div>${list || `<p class="muted-th">${manage ? esc(hint) : "No polls yet."}</p>`}`;
 }
+// Group date polls: the leading dated option can become an event in one tap.
+function planBtn(ev, p) {
+  if (!(ev._col && ev._col[0] === "groups") || !p.dates) return "";
+  const counts = {}; Object.values(p.votes || {}).forEach(i => counts[i] = (counts[i] || 0) + 1);
+  const lead = Object.keys(p.dates).sort((a, b) => (counts[b] || 0) - (counts[a] || 0))[0]; if (lead == null) return "";
+  return ` · <a data-plan="${p.dates[lead]}|${esc(p.q)}">📅 Plan it for ${esc(p.options[lead])}</a>`;
+}
 function wirePolls(ev) {
+  document.querySelectorAll("[data-plan]").forEach(a => a.onclick = () => { const [date, q] = a.dataset.plan.split("|"); resetCompose(); compose.date = date; compose.groupId = ev._col ? ev.id : ""; compose.title = ""; go("#/new"); toast("Date set to " + date + ", pick a title"); });
   document.querySelectorAll("[data-vote]").forEach(b => b.onclick = () => { const [pid, i] = b.dataset.vote.split("|"); votePoll(ev, pid, +i); });
   if (el("addPoll")) el("addPoll").onclick = () => addPollDialog(ev);
   document.querySelectorAll("[data-delpoll]").forEach(b => b.onclick = () => deleteDoc(doc(subCol(ev, "polls"), b.dataset.delpoll)).catch(e => toast(e.message)));
@@ -1025,13 +1057,16 @@ function addPollDialog(ev) {
     "Add poll", async () => {
       const q = el("pq").value.trim(); const opts = el("popts").value.split("\n").map(s => s.trim()).filter(Boolean);
       if (!q || opts.length < 2) return toast("Add a question and at least two options.");
-      try { await addDoc(subCol(ev, "polls"), { q, options: opts, votes: {}, authorId: myUid(), createdAt: Date.now() }); closeDialog(); } catch (e) { toast(e.message); }
+      const dates = {}; opts.forEach((o, i) => { if (dateByLabel[o]) dates[i] = dateByLabel[o]; });
+      try { await addDoc(subCol(ev, "polls"), { q, options: opts, dates, votes: {}, authorId: myUid(), createdAt: Date.now() }); closeDialog(); } catch (e) { toast(e.message); }
     });
-  // Date polls: each picked date becomes an option like "Sat, Oct 4".
+  // Date polls: each picked date becomes an option like "Sat, Oct 4" (and remembers the real date).
+  const dateByLabel = {};
   el("pAddDate").onclick = () => {
     const v = el("pdate").value; if (!v) return toast("Pick a date first.");
     const [y, m, d] = v.split("-").map(Number);
     const label = new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    dateByLabel[label] = v;
     const ta = el("popts"); ta.value = [...ta.value.split("\n").filter(Boolean), label].join("\n"); el("pdate").value = "";
     if (!el("pq").value.trim()) el("pq").value = "Which day works?";
   };
@@ -1170,9 +1205,10 @@ function editEvent(ev) {
     <div class="two"><label class="field"><span>Date</span><input id="eDate" type="date" value="${ev.date}"></label>
     <label class="field"><span>Start</span><input id="eTime" type="time" value="${ev.time || ""}"></label></div>
     <label class="field"><span>Where</span><input id="eWhere" value="${esc(ev.location || "")}"></label>
+    <label class="field"><span>Repeats</span><select id="eRepeat"><option value="" ${!ev.repeat ? "selected" : ""}>Never</option><option value="weekly" ${ev.repeat === "weekly" ? "selected" : ""}>Every week</option><option value="biweekly" ${ev.repeat === "biweekly" ? "selected" : ""}>Every 2 weeks</option><option value="monthly" ${ev.repeat === "monthly" ? "selected" : ""}>Every month</option></select></label>
     <label class="field"><span>Details</span><textarea id="eNotes">${esc(ev.notes || "")}</textarea></label>`,
     "Save", async () => {
-      try { await updateDoc(doc(db, "events", ev.id), { title: el("eTitle").value.trim(), date: el("eDate").value, time: el("eTime").value, location: el("eWhere").value.trim(), notes: el("eNotes").value.trim() }); closeDialog(); toast("Saved"); } catch (e) { toast(e.message); }
+      try { await updateDoc(doc(db, "events", ev.id), { title: el("eTitle").value.trim(), date: el("eDate").value, time: el("eTime").value, location: el("eWhere").value.trim(), notes: el("eNotes").value.trim(), repeat: el("eRepeat").value }); closeDialog(); toast("Saved"); } catch (e) { toast(e.message); }
     });
   attachPlaces(el("eWhere"));
 }
@@ -1478,6 +1514,80 @@ function activityBody() {
 function wireActivity() {
   document.querySelectorAll("[data-act]").forEach(a => a.onclick = e => { e.preventDefault(); location.hash = String(a.dataset.act).replace(/^.*#/, "#"); });
   if (unreadCount()) updateDoc(doc(db, "users", myUid()), { activitySeenAt: Date.now() }).catch(() => {});
+}
+
+// ---------- MEETINGS (plain calendar entries, rendered in the normal shell) ----------
+function meetingBody(ev) {
+  const me = myUid(); const myR = (ev.rsvps || {})[me]; const invited = (ev.invitedUids || []).includes(me); const manage = canManage(ev);
+  const g = statusGroups(ev);
+  const row = (label, uids) => uids.length ? `<div class="muted sm" style="margin:8px 0 4px;font-weight:600">${label} · ${uids.length}</div>${uids.map(u => `<div class="member-row" style="padding:6px 0">${avatar(u, "sm")}<span>${esc(nameOf(u))}${u === ev.hostId ? " · organizer" : ""}</span></div>`).join("")}` : "";
+  return `
+  <button class="link-back" data-go="#/">‹ Back</button>
+  <div class="group-hero"><span class="li" style="width:52px;height:52px;font-size:24px">📅</span>
+    <div><h1>${esc(ev.title)}</h1><div class="muted">${esc(fmtWhen(ev))}${ev.repeat ? " · repeats " + { weekly: "weekly", biweekly: "every 2 weeks", monthly: "monthly" }[ev.repeat] : ""}</div></div></div>
+  <div class="card" style="padding:14px 16px">
+    ${ev.location ? `<p style="margin:0 0 8px">📍 <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">${esc(ev.location)}</a></p>` : ""}
+    <p class="muted" style="margin:0 0 8px">Organized by ${esc(nameOf(ev.hostId) === "Someone" ? (ev.hostName || "the organizer") : nameOf(ev.hostId))}</p>
+    ${ev.notes ? `<p style="margin:0;white-space:pre-wrap">${esc(ev.notes)}</p>` : ""}
+  </div>
+  ${invited ? `<div class="btnrow" style="margin-top:14px">
+    <button class="btn ${myR === "going" ? "primary" : ""}" data-rsvp="going">${myR === "going" ? "✓ Accepted" : "Accept"}</button>
+    <button class="btn ${myR === "maybe" ? "primary" : ""}" data-rsvp="maybe">${myR === "maybe" ? "✓ Maybe" : "Maybe"}</button>
+    <button class="btn ${myR === "no" ? "primary" : ""}" data-rsvp="no">${myR === "no" ? "✓ Declined" : "Decline"}</button>
+  </div>` : ev.openLink ? `<div class="btnrow" style="margin-top:14px"><button class="btn primary" data-join>Join this meeting</button></div>` : `<p class="muted" style="margin-top:12px">You're viewing this meeting but aren't on the invite list.</p>`}
+  <div class="btnrow" style="margin-top:10px">
+    <button class="btn small" data-cal>Add to calendar</button>
+    ${manage ? `<button class="btn small" data-text>Text invite</button><button class="btn small" data-nudge>Nudge non-responders</button><button class="btn small" data-edit>Edit</button><button class="btn small danger-ghost" data-del>Delete</button>` : ""}
+  </div>
+  <div class="section-head" style="margin-top:22px"><h2>Who's coming</h2></div>
+  <div class="card" style="padding:8px 16px">${row("Accepted", g.going) + row("Maybe", g.maybe) + row("Declined", g.no) + row("No answer yet", g.none) || `<p class="muted">Nobody invited yet.</p>`}</div>
+  <div class="card th-plain" id="wall" style="margin-top:22px"><p class="muted">Loading…</p></div>`;
+}
+function wireMeeting(ev) {
+  document.querySelectorAll("[data-rsvp]").forEach(b => b.onclick = () => setRsvp(ev, b.dataset.rsvp));
+  const j = $("[data-join]"); if (j) j.onclick = () => joinViaLink(ev, j);
+  const cal = $("[data-cal]"); if (cal) cal.onclick = () => downloadIcs(ev);
+  const txt = $("[data-text]"); if (txt) txt.onclick = () => textEventInvite(ev);
+  const nd = $("[data-nudge]"); if (nd) nd.onclick = () => nudge(ev, nd);
+  const ed = $("[data-edit]"); if (ed) ed.onclick = () => editEvent(ev);
+  const dl = $("[data-del]"); if (dl) dl.onclick = () => delEvent(ev);
+  const pseudo = { id: ev.id, _col: ["events", ev.id], _manage: false, title: ev.title };
+  S.comments = [];
+  S.evSubs.push(onSnapshot(subCol(pseudo, "comments"), snap => { S.comments = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.createdAt - b.createdAt); const w = el("wall"); if (w) { w.innerHTML = wallInner(pseudo, "Notes & questions"); wireWall(pseudo); } }, err => toast(err.message)));
+}
+// Host asks the guests who haven't answered to RSVP (Cloud Function delivers).
+async function nudge(ev, btn) {
+  const pending = (ev.invitedUids || []).filter(u => u !== myUid() && !(ev.rsvps || {})[u]);
+  if (!pending.length) return toast("Everyone has answered already.");
+  if (btn) { btn.disabled = true; btn.textContent = "Nudging…"; }
+  try { await addDoc(collection(db, "nudges"), { eventId: ev.id, by: myUid(), createdAt: Date.now() }); toast("Nudged " + pending.length + " " + (pending.length === 1 ? "person" : "people")); }
+  catch (e) { toast(e.message); }
+  if (btn) { btn.disabled = false; btn.textContent = "Nudge non-responders"; }
+}
+function meetingCard(ev) {
+  const d = evDate(ev); const myR = (ev.rsvps || {})[myUid()];
+  const going = (ev.invitedUids || []).filter(u => (ev.rsvps || {})[u] === "going").length;
+  return `<a class="card meet-card" data-ev="${ev.id}"><span class="li">📅</span>
+    <div style="flex:1;min-width:0"><b>${esc(ev.title)}</b><div class="muted sm">${MONTHS[d.getMonth()]} ${d.getDate()}${ev.time ? " · " + fmtTime(ev.time) : ""}${ev.location ? " · " + esc(ev.location) : ""}</div><div class="muted sm">${going} accepted${ev.repeat ? " · ↻ repeats" : ""}</div></div>
+    ${myR ? `<span class="you-pill ${myR}">${{ going: "Accepted", maybe: "Maybe", no: "Declined" }[myR] || ""}</span>` : `<span class="chev">›</span>`}${isNewEvent(ev) ? `<span class="new-pill" style="position:static;margin-left:6px">New</span>` : ""}</a>`;
+}
+
+// ---------- signed-out preview of a link invite ----------
+async function renderPreview(root, id) {
+  root.innerHTML = `<div class="auth-wrap"><canvas id="authbg" class="auth-bg"></canvas><div class="pv-wrap"><div class="card pv-card"><p class="muted">Loading invite…</p></div><div id="authRoot"></div></div></div>`;
+  startParticles(el("authbg"), "confetti");
+  let p = null; try { const d = await getDoc(doc(db, "previews", id)); p = d.exists() ? d.data() : null; } catch {}
+  const card = $(".pv-card"); if (!card) return;
+  if (!p) { card.innerHTML = `<b>This invite needs a sign-in.</b><p class="muted" style="margin:6px 0 0">Sign in or create an account below and the event will open.</p>`; }
+  else {
+    const when = fmtWhen({ date: p.date, time: p.time, endTime: p.endTime });
+    card.innerHTML = `${p.cover ? `<img class="pv-cover" src="${p.cover}" alt="">` : ""}<div class="pv-body">
+      <p class="muted sm" style="margin:0 0 4px">${esc(p.hostName || "A friend")} invited you${p.kind === "meeting" ? " to a meeting" : ""}</p>
+      <h2 style="margin:0 0 6px">${p.kind === "meeting" ? "📅" : esc(p.emoji || "🎉")} ${esc(p.title)}</h2>
+      <p style="margin:0 0 4px">${esc(when)}</p>${p.location ? `<p class="muted" style="margin:0 0 4px">📍 ${esc(p.location)}</p>` : ""}
+      <p class="muted sm" style="margin:8px 0 0">${p.going} going${p.capacity ? " / " + p.capacity : ""} · Sign in or create a free account below to RSVP.</p></div>`;
+  }
+  renderAuth(el("authRoot"));
 }
 
 // ---------- dialog helper ----------
