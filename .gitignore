@@ -7,3 +7,8 @@ app-native/ios/App/Pods/
 app-native/ios/App/App/public/
 functions/node_modules/
 .firebase/
+app-native/ios/App/App.xcodeproj/xcuserdata/
+app-native/ios/App/App.xcodeproj/project.xcworkspace/xcuserdata/
+app-native/ios/App/CapApp-SPM/.build/
+*.xcuserstate
+app-native/ios/DerivedData/
