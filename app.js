@@ -8,7 +8,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection,
-  query, where, onSnapshot, addDoc
+  query, where, onSnapshot, addDoc, arrayUnion
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
 import { THEMES, themeOf, applyTheme, startParticles, DEFAULT_THEME } from "./themes.js";
@@ -16,6 +16,23 @@ import { THEMES, themeOf, applyTheme, startParticles, DEFAULT_THEME } from "./th
 const fb = initializeApp(firebaseConfig);
 const auth = getAuth(fb);
 const db = getFirestore(fb);
+
+// Native bridge (present only inside the Capacitor iOS/Android app). All of
+// this degrades to web behavior when window.Capacitor is absent.
+const CAP = window.Capacitor || null;
+const NATIVE = !!(CAP && CAP.isNativePlatform && CAP.isNativePlatform());
+const plugin = n => (CAP && CAP.Plugins && CAP.Plugins[n]) || null;
+async function registerPush(uid) {
+  const Push = plugin("PushNotifications"); if (!Push) return;
+  try {
+    let perm = await Push.checkPermissions();
+    if (perm.receive !== "granted") perm = await Push.requestPermissions();
+    if (perm.receive !== "granted") return;
+    Push.addListener("registration", async t => { try { await updateDoc(doc(db, "users", uid), { pushTokens: arrayUnion(t.value) }); } catch {} });
+    Push.addListener("pushNotificationActionPerformed", a => { const url = a && a.notification && a.notification.data && a.notification.data.url; if (url) location.hash = url; });
+    await Push.register();
+  } catch {}
+}
 
 // ---------- tiny helpers ----------
 const $ = s => document.querySelector(s);
@@ -102,6 +119,7 @@ onAuthStateChanged(auth, async u => {
   const snap = await getDoc(uref);
   if (!snap.exists()) await setDoc(uref, { name: u.displayName || first(u.email), email: u.email, venmo: "", phone: "", createdAt: Date.now() });
   subscribeAll(u);
+  if (NATIVE) registerPush(u.uid);
 });
 
 function subscribeAll(u) {
@@ -409,7 +427,8 @@ function openGroupDialog() {
 }
 function openInviteDialog(g) {
   const chosen = new Set(); // uids of known contacts to add directly
-  const hasPicker = ("contacts" in navigator && "ContactsManager" in window);
+  const nativeContacts = plugin("Contacts");
+  const hasPicker = nativeContacts || ("contacts" in navigator && "ContactsManager" in window);
   dialog(`<h3>Invite to ${esc(g.name)}</h3>
     <span class="field-label">Add from your friends</span>
     <input class="inv-search" id="invSearch" placeholder="Search by name or phone…" autocomplete="off">
@@ -444,10 +463,16 @@ function openInviteDialog(g) {
   el("invChosen").onclick = e => { const b = e.target.closest("[data-unchoose]"); if (b) { chosen.delete(b.dataset.unchoose); renderChosen(); renderResults(el("invSearch").value); } };
   if (el("invPick")) el("invPick").onclick = async () => {
     try {
-      const picked = await navigator.contacts.select(["name", "email"], { multiple: true });
-      const emails = picked.flatMap(p => p.email || []).filter(Boolean);
+      let emails = [];
+      if (nativeContacts) {
+        const r = await nativeContacts.pickContact({ projection: { name: true, emails: true, phones: true } });
+        const c = r && r.contact; if (c) emails = (c.emails || []).map(e => e.address).filter(Boolean);
+      } else {
+        const picked = await navigator.contacts.select(["name", "email"], { multiple: true });
+        emails = picked.flatMap(p => p.email || []).filter(Boolean);
+      }
       if (emails.length) { el("invEmails").value = [el("invEmails").value, ...emails].filter(Boolean).join(", "); toast(emails.length + " added from contacts"); }
-      else toast("No emails on those contacts — try inviting by phone soon.");
+      else toast("No email on that contact — invite them by email instead.");
     } catch { toast("Contact picking was cancelled."); }
   };
 }

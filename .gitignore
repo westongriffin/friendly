@@ -1,2 +1,9 @@
 friendly.html
 .DS_Store
+node_modules/
+**/node_modules/
+**/.npmcache/
+app-native/ios/App/Pods/
+app-native/ios/App/App/public/
+functions/node_modules/
+.firebase/

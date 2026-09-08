@@ -1,0 +1,17 @@
+{
+  "appId": "com.officialfriendly.app",
+  "appName": "Friendly",
+  "webDir": "public",
+  "server": {
+    "url": "https://officialfriendly.com",
+    "cleartext": false
+  },
+  "ios": {
+    "contentInset": "always"
+  },
+  "plugins": {
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    }
+  }
+}

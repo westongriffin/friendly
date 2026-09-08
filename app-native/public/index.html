@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Friendly</title>
+<style>
+  html,body{margin:0;height:100%;background:#FFFEFC;color:#2A2019;
+    font-family:-apple-system,system-ui,sans-serif;display:grid;place-items:center;text-align:center}
+  .mark{width:64px;height:64px;border-radius:18px;background:#FFC145;position:relative;margin:0 auto 14px}
+  .mark::before,.mark::after{content:"";position:absolute;top:18px;width:30px;height:30px;border-radius:50%}
+  .mark::before{left:9px;background:#FF6B57}.mark::after{right:9px;background:#fff;opacity:.9}
+</style>
+</head>
+<body>
+  <!-- Offline fallback. The app normally loads officialfriendly.com (see
+       capacitor.config.json server.url). This shows only with no connection. -->
+  <div>
+    <div class="mark"></div>
+    <h2>Friendly</h2>
+    <p>You're offline — reconnect to see your plans.</p>
+  </div>
+</body>
+</html>
