@@ -219,10 +219,21 @@ function resubscribeEvents(u) {
   S.eventSubKey = key;
   if (S._groupEventsUnsub) { S._groupEventsUnsub(); S._groupEventsUnsub = null; }
   if (!gids.length) return;
-  S._groupEventsUnsub = onSnapshot(query(collection(db, "events"), where("groupId", "in", gids)), snap => {
-    snap.docChanges().forEach(c => { if (c.type === "removed") S.events.delete(c.doc.id); else S.events.set(c.doc.id, { id: c.doc.id, ...c.doc.data() }); });
-    render();
-  });
+  const subscribe = attempt => {
+    S._groupEventsUnsub = onSnapshot(query(collection(db, "events"), where("groupId", "in", gids)), snap => {
+      snap.docChanges().forEach(c => { if (c.type === "removed") S.events.delete(c.doc.id); else S.events.set(c.doc.id, { id: c.doc.id, ...c.doc.data() }); });
+      render();
+    }, err => {
+      // Right after creating or joining a group, the local groups snapshot fires
+      // before the server has the membership write, so the rule check for this
+      // query can fail once. A dead listener would hide every group event, so
+      // retry a few times.
+      S._groupEventsUnsub = null;
+      if (attempt < 4 && S.eventSubKey === key) setTimeout(() => { if (S.eventSubKey === key && !S._groupEventsUnsub) subscribe(attempt + 1); }, 1500 * (attempt + 1));
+      else console.warn("group events listener failed:", err && err.message);
+    });
+  };
+  subscribe(0);
   S.subs.push(() => S._groupEventsUnsub && S._groupEventsUnsub());
 }
 
@@ -897,6 +908,13 @@ function wallInner(ev, title = "Party wall") {
 }
 function wireEventPage(ev) {
   const id = ev.id;
+  // Group members who joined after the event was created aren't in invitedUids
+  // yet (it's snapshotted at creation); add them quietly so they can RSVP.
+  S._autoJoined = S._autoJoined || new Set();
+  if (!(ev.invitedUids || []).includes(myUid()) && ev.groupId && S.groups.has(ev.groupId) && !S._autoJoined.has(id)) {
+    S._autoJoined.add(id);
+    updateDoc(doc(db, "events", id), { invitedUids: arrayUnion(myUid()) }).catch(e => console.warn("auto-join failed:", e.message));
+  }
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
   document.querySelectorAll("[data-rsvp]").forEach(b => b.onclick = () => setRsvp(ev, b.dataset.rsvp));
   document.querySelectorAll("[data-plus]").forEach(b => b.onclick = () => setPlus(ev, Number(b.dataset.plus)));
@@ -1111,7 +1129,7 @@ function moneyBody() {
   <div class="card">${rows.length ? rows.map(r => {
     if (r.kind === "s") return `<div class="ledger"><div class="li pay">⤴</div><div style="flex:1"><b>${esc(nameOf(r.from))} paid ${esc(nameOf(r.to))}</b><div class="muted sm">${r.note ? esc(r.note) + " · " : ""}${new Date(r.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(r.amountCents)}</span>${r.addedBy === me ? `<button class="btn ghost small" data-dels="${r.id}">✕</button>` : ""}</div>`;
     const n = (r.split || []).length || 1;
-    return `<div class="ledger"><div class="li">🧾</div><div style="flex:1"><b>${esc(r.desc)}</b><div class="muted sm">${esc(nameOf(r.paidBy))} paid · ${r.shares ? "itemized, " + n + " people" : `split ${n} way${n > 1 ? "s" : ""}`} ·${new Date(r.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(r.amountCents)}</span><button class="btn ghost small" data-xopen="${r.id}" title="Details & discussion">💬</button>${r.addedBy === me ? `<button class="btn ghost small" data-dele="${r.id}">✕</button>` : ""}</div>`;
+    return `<div class="ledger"><div class="li">🧾</div><div style="flex:1"><b>${esc(r.desc)}</b><div class="muted sm">${esc(nameOf(r.paidBy))} paid · ${r.shares ? "itemized, " + n + " people" : `split ${n} way${n > 1 ? "s" : ""}`} · ${new Date(r.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(r.amountCents)}</span><button class="btn ghost small" data-xopen="${r.id}" title="Details & discussion">💬</button>${r.addedBy === me ? `<button class="btn ghost small" data-dele="${r.id}">✕</button>` : ""}</div>`;
   }).join("") : emptyState("💸", "No shared costs yet", "Add an expense after your next hangout.")}</div>`;
 }
 function wireMoney() {

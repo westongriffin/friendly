@@ -101,7 +101,7 @@ service cloud.firestore {
       allow create: if signedIn() && request.resource.data.hostId == uid();
       allow update: if isHost()
         || (isInvited() && (onlyOwn('rsvps') || onlyOwn('plusOnes') || onlyOwn('hypes') || onlyOwn('answers')))
-        || (openLink() && selfJoin());
+        || ((openLink() || viaGroup()) && selfJoin());
       allow delete: if signedIn() && uid() == resource.data.hostId;
 
       // Party wall — anyone who can see the event can post; delete your own.
