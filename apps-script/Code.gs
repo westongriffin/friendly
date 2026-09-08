@@ -1,5 +1,5 @@
 /**
- * Friendly — Google Sheets backend (Google Apps Script).
+ * Friendly - Google Sheets backend (Google Apps Script).
  *
  * SETUP (once, ~3 minutes):
  *  1. Create a new Google Sheet (sheets.new). Name it anything, e.g. "Friendly DB".
@@ -247,7 +247,7 @@ function sendInvites(ev) {
           (ev.notes ? "Notes: " + ev.notes + "\n" : "") +
           "\nThe attached invite adds it to your calendar." +
           "\nRSVP here: " + SITE_URL + "\n\n" +
-          "— Friendly, on behalf of " + host.name,
+          "Sent by Friendly on behalf of " + host.name,
         name: host.name + " via Friendly",
         attachments: [Utilities.newBlob(ics, "text/calendar", "invite.ics")]
       };
@@ -315,7 +315,7 @@ function buildIcs(ev, host, members) {
 // Each device subscribes from the app; we store the endpoint per member.
 // A push carries no payload (Apps Script can't do the required encryption),
 // so the service worker fetches ?action=latest to get the text to show.
-// Sending requires a VAPID JWT signed with ES256 — implemented below.
+// Sending requires a VAPID JWT signed with ES256, implemented below.
 
 var VAPID_PUBLIC_KEY = "BMZ2sS0QE3ElRD78S_7PV_dqhea8wBey9W033-FRmFdQK-GdnwaW3cCDq9DM9NURsNkTVf8mfF8EGkbkEFkKpjE";
 var VAPID_SUBJECT = "mailto:weston.griffin@yahoo.com";

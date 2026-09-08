@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Friendly</title>
-<meta name="description" content="Plan hangouts, invite the group, and settle up afterwards — all in one shared app.">
+<meta name="description" content="Plan hangouts, invite the group, and settle up afterwards, all in one shared app.">
 <meta name="theme-color" content="#FAF7F1" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#171310" media="(prefers-color-scheme: dark)">
 <link rel="manifest" href="./manifest.webmanifest">
@@ -174,7 +174,7 @@ dialog::backdrop{background:rgba(20,16,10,.45)}
   <div id="setup" hidden>
     <div class="join">
       <div class="brand">Friend<span class="tilt">l</span>y</div>
-      <p class="lede">Almost there &mdash; the app just needs its Google Sheet backend connected.</p>
+      <p class="lede">Almost there: the app just needs its Google Sheet backend connected.</p>
       <div class="card">
         <ol class="setup-steps">
           <li>Create a Google Sheet and open <strong>Extensions &rarr; Apps Script</strong>.</li>
@@ -197,7 +197,7 @@ dialog::backdrop{background:rgba(20,16,10,.45)}
   <div id="join" hidden>
     <div class="join">
       <div class="brand">Friend<span class="tilt">l</span>y</div>
-      <p class="lede">Plan hangouts, invite the group, and settle up afterwards &mdash; all in one shared app.</p>
+      <p class="lede">Plan hangouts, invite the group, and settle up afterwards, all in one shared app.</p>
       <div class="card">
         <div id="pickList"></div>
         <div class="divider" id="pickDivider" hidden>or join the group</div>
@@ -205,8 +205,8 @@ dialog::backdrop{background:rgba(20,16,10,.45)}
           <div class="field"><label for="jName">Your name</label><input id="jName" required maxlength="40" placeholder="Sam Rivera" autocomplete="name"></div>
           <div class="field"><label for="jEmail">Email</label><input id="jEmail" type="email" required maxlength="80" placeholder="sam@example.com" autocomplete="email"></div>
           <div class="two">
-            <div class="field"><label for="jVenmo">Venmo (optional)</label><input id="jVenmo" maxlength="40" placeholder="@sam-rivera"></div>
-            <div class="field"><label for="jPhone">Phone (optional)</label><input id="jPhone" type="tel" maxlength="20" placeholder="+1 555 123 4567" autocomplete="tel"></div>
+            <div class="field"><label for="jVenmo">Venmo</label><input id="jVenmo" maxlength="40" placeholder="@sam-rivera"></div>
+            <div class="field"><label for="jPhone">Phone</label><input id="jPhone" type="tel" maxlength="20" placeholder="+1 555 123 4567" autocomplete="tel"></div>
           </div>
           <button class="btn primary" style="width:100%" type="submit">Create my profile</button>
         </form>
@@ -261,7 +261,7 @@ dialog::backdrop{background:rgba(20,16,10,.45)}
 
 <dialog id="settleDialog"><form class="dlg" id="settleForm" method="dialog">
   <h3>Record a payment</h3>
-  <p style="margin:-6px 0 14px;font-size:13.5px;color:var(--muted)">Use this after someone pays a friend back &mdash; Venmo, cash, whatever. It just updates the ledger.</p>
+  <p style="margin:-6px 0 14px;font-size:13.5px;color:var(--muted)">Use this after someone pays a friend back: Venmo, cash, whatever. It just updates the ledger.</p>
   <div class="two">
     <div class="field"><label for="stFrom">From</label><select id="stFrom"></select></div>
     <div class="field"><label for="stTo">To</label><select id="stTo"></select></div>
@@ -344,7 +344,7 @@ async function refresh(showErrors) {
   catch (e) {
     console.error(e);
     if (!S.loaded) { $("#connecting").hidden = true; $("#offline").hidden = false; }
-    else if (showErrors) toast("Couldn’t sync — will keep trying.");
+    else if (showErrors) toast("Couldn’t sync. Will keep trying.");
   }
 }
 async function push(payload, doneMsg) {
@@ -665,7 +665,7 @@ $("#eventForm").addEventListener("submit", () => {
     const row = { ...base, id: newId(), createdBy: S.me, createdAt: Date.now(),
                   cancelled: false, rsvps: { [S.me]: "going" } };
     S.events.push(row); render();
-    upsert("events", row, "Event created — invites are out");
+    upsert("events", row, "Event created, invites are out");
   }
 });
 window.delEvent = id => {
