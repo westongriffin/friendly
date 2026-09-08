@@ -63,24 +63,47 @@ service cloud.firestore {
           && request.resource.data[field].diff(resource.data[field]).affectedKeys().hasOnly([uid()]);
       }
 
+      function canReadEvent() {
+        let e = get(/databases/$(database)/documents/events/$(eventId)).data;
+        return signedIn() && (
+          uid() == e.hostId || uid() in e.cohostUids || uid() in e.invitedUids
+          || (e.groupId != null && uid() in groupMemberUids(e.groupId))
+        );
+      }
+
       allow read: if isHost() || isInvited() || viaGroup();
       allow create: if signedIn() && request.resource.data.hostId == uid();
       allow update: if isHost()
         || (isInvited() && (onlyOwn('rsvps') || onlyOwn('plusOnes') || onlyOwn('hypes') || onlyOwn('answers')));
       allow delete: if signedIn() && uid() == resource.data.hostId;
 
-      // ---- Party wall (comments) ----
+      // Party wall — anyone who can see the event can post; delete your own.
       match /comments/{commentId} {
-        function canReadEvent() {
-          let e = get(/databases/$(database)/documents/events/$(eventId)).data;
-          return signedIn() && (
-            uid() == e.hostId || uid() in e.cohostUids || uid() in e.invitedUids
-            || (e.groupId != null && uid() in groupMemberUids(e.groupId))
-          );
-        }
         allow read: if canReadEvent();
         allow create: if canReadEvent() && request.resource.data.authorId == uid();
         allow delete: if signedIn() && resource.data.authorId == uid();
+      }
+      // Photos — event guests add and view; remove your own.
+      match /photos/{photoId} {
+        allow read: if canReadEvent();
+        allow create: if canReadEvent() && request.resource.data.addedBy == uid();
+        allow delete: if signedIn() && resource.data.addedBy == uid();
+      }
+      // Polls — host adds; any guest can vote (updates only the votes map).
+      match /polls/{pollId} {
+        allow read: if canReadEvent();
+        allow create: if canReadEvent() && request.resource.data.authorId == uid();
+        allow update: if canReadEvent()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes']);
+        allow delete: if signedIn() && resource.data.authorId == uid();
+      }
+      // Playlist — guests add songs and toggle upvotes (votes map only).
+      match /songs/{songId} {
+        allow read: if canReadEvent();
+        allow create: if canReadEvent() && request.resource.data.addedBy == uid();
+        allow update: if canReadEvent()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes']);
+        allow delete: if signedIn() && resource.data.addedBy == uid();
       }
     }
 

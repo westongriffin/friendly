@@ -41,6 +41,31 @@ function fmtWhen(ev) {
 function ago(ts) { const s = (Date.now() - ts) / 1000; if (s < 60) return "just now"; if (s < 3600) return Math.floor(s / 60) + "m"; if (s < 86400) return Math.floor(s / 3600) + "h"; return Math.floor(s / 86400) + "d"; }
 function parseAmount(v) { const n = Number(String(v).replace(/[$,\s]/g, "")); return isFinite(n) && n > 0 && n < 1e7 ? Math.round(n * 100) : null; }
 
+// ---------- images ----------
+// Downscale + JPEG-compress any image (File/Blob/URL) to a self-contained data
+// URL that fits comfortably in a Firestore doc. Covers store at ~1000px,
+// photo-wall shots at ~900px. Keeps the app on the free plan (no Storage).
+function loadImg(src) { return new Promise((res, rej) => { const i = new Image(); i.crossOrigin = "anonymous"; i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
+function blobToURL(b) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(b); }); }
+async function compressImage(src, maxDim = 1000, quality = 0.72) {
+  const img = await loadImg(typeof src === "string" ? src : await blobToURL(src));
+  let { width: w, height: h } = img;
+  const scale = Math.min(1, maxDim / Math.max(w, h)); w = Math.round(w * scale); h = Math.round(h * scale);
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  c.getContext("2d").drawImage(img, 0, 0, w, h);
+  return c.toDataURL("image/jpeg", quality);
+}
+async function generateCover(prompt) {
+  // Pollinations is a free, no-API-key image generator (Stable Diffusion).
+  // We bake the result into a data URL so the invite is self-contained.
+  const seed = Math.floor(Math.random() * 1e6);
+  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt + ", vibrant party invitation art, bold, high quality")}?width=1024&height=640&nologo=true&seed=${seed}`;
+  const res = await fetch(url); if (!res.ok) throw new Error("Generator busy — try again");
+  const blob = await res.blob();
+  return compressImage(await blobToURL(blob), 1024, 0.74);
+}
+function pickFile(accept = "image/*") { return new Promise(res => { const i = document.createElement("input"); i.type = "file"; i.accept = accept; i.onchange = () => res(i.files[0] || null); i.click(); }); }
+
 // ---------- state ----------
 const S = {
   user: null, profile: null, ready: false,
@@ -48,7 +73,8 @@ const S = {
   expenses: new Map(), settlements: new Map(),
   contacts: new Map(),           // uid -> {name, venmo, phone}
   route: parseRoute(),
-  subs: [], eventSubKey: "", commentUnsub: null, comments: []
+  subs: [], eventSubKey: "", commentUnsub: null, comments: [],
+  evSubs: [], photos: [], polls: [], songs: []
 };
 
 function parseRoute() {
@@ -139,6 +165,7 @@ function render() {
   if (!S.profile) { root.innerHTML = `<div class="splash"><div class="logo-mark"></div><p>Setting up your profile…</p></div>`; return; }
   const r = S.route;
   if (r.name === "event") return renderEventPage(root, r.id);
+  cleanupEvent();
   root.innerHTML = shell(routeBody(r));
   wireShell();
 }
@@ -283,10 +310,10 @@ function eventCard(ev) {
   const myR = (ev.rsvps || {})[myUid()];
   const rsvpDot = myR ? `<span class="you-pill ${myR}">${{ going: "You're going", maybe: "Maybe", no: "Can't go", waitlist: "Waitlisted", pending: "Pending" }[myR] || ""}</span>` : "";
   return `
-  <a class="ev-card t-${th.id}" data-ev="${ev.id}" style="--th-accent:${th.accent};--th-ink:${th.ink};--th-on-accent:${th.onAccent}">
-    <div class="ev-card-bg"></div>
+  <a class="ev-card t-${th.id} ${ev.cover ? "has-cover" : ""}" data-ev="${ev.id}" style="--th-accent:${th.accent};--th-ink:${th.ink};--th-on-accent:${th.onAccent}">
+    ${ev.cover ? `<img class="cover-img" src="${ev.cover}" alt="" loading="lazy">` : `<div class="ev-card-bg"></div>`}
     <div class="ev-card-body">
-      <div class="ev-card-emoji">${esc(ev.emoji || "🎉")}</div>
+      ${ev.cover ? "" : `<div class="ev-card-emoji">${esc(ev.emoji || "🎉")}</div>`}
       <div class="ev-card-title" style="font-family:${th.font},system-ui">${esc(ev.title)}</div>
       <div class="ev-card-date">${MONTHS[d.getMonth()]} ${d.getDate()}${ev.time ? " · " + fmtTime(ev.time) : ""}</div>
       <div class="ev-card-foot">
@@ -381,16 +408,48 @@ function openGroupDialog() {
   document.querySelectorAll("#gEmoji button").forEach(b => b.onclick = () => { document.querySelectorAll("#gEmoji button").forEach(x => x.classList.remove("on")); b.classList.add("on"); });
 }
 function openInviteDialog(g) {
-  dialog(`<h3>Invite to ${esc(g.name)}</h3><p class="muted" style="margin-top:-6px">They'll see the invite when they sign in with this email. New folks can create an account with it.</p>
-    <label class="field"><span>Emails (comma-separated)</span><input id="invEmails" placeholder="alex@example.com, jo@example.com"></label>`,
+  const chosen = new Set(); // uids of known contacts to add directly
+  const hasPicker = ("contacts" in navigator && "ContactsManager" in window);
+  dialog(`<h3>Invite to ${esc(g.name)}</h3>
+    <span class="field-label">Add from your friends</span>
+    <input class="inv-search" id="invSearch" placeholder="Search by name or phone…" autocomplete="off">
+    <div class="inv-chosen" id="invChosen"></div>
+    <div class="inv-results" id="invResults"></div>
+    ${hasPicker ? `<button type="button" class="btn small" id="invPick" style="margin-bottom:12px">📇 Pick from phone contacts</button>` : ""}
+    <label class="field"><span>Or invite by email</span><input id="invEmails" placeholder="alex@example.com, jo@example.com"></label>
+    <p class="muted sm" style="margin-top:-4px">Emailed folks connect automatically when they sign in with that address.${!hasPicker ? " (Reading your phone's contacts isn't available in this browser — on iPhone that needs the native app.)" : ""}</p>`,
     "Send invites", async () => {
       const emails = el("invEmails").value.split(",").map(s => s.trim().toLowerCase()).filter(x => x.includes("@"));
-      if (!emails.length) return toast("Add at least one email.");
-      const existing = new Set([...(g.invitedEmails || []), ...Object.values(g.members || {}).map(m => (m.email || "").toLowerCase())]);
-      const add = emails.filter(e => !existing.has(e));
-      await updateDoc(doc(db, "groups", g.id), { invitedEmails: [...(g.invitedEmails || []), ...add] });
-      closeDialog(); toast(add.length ? add.length + " invited" : "Already invited");
+      const existingE = new Set([...(g.invitedEmails || [])]);
+      const addE = emails.filter(e => !existingE.has(e));
+      const updates = {};
+      if (addE.length) updates.invitedEmails = [...(g.invitedEmails || []), ...addE];
+      if (chosen.size) {
+        updates.memberUids = [...new Set([...(g.memberUids || []), ...chosen])];
+        for (const uid of chosen) { const info = S.contacts.get(uid) || {}; updates[`members.${uid}`] = { name: info.name || "Friend", venmo: info.venmo || "", phone: info.phone || "" }; }
+      }
+      if (!Object.keys(updates).length) return toast("Pick someone or add an email.");
+      try { await updateDoc(doc(db, "groups", g.id), updates); closeDialog(); toast("Invites sent"); } catch (e) { toast(e.message); }
     });
+  const known = [...S.contacts.entries()].filter(([u]) => u !== myUid() && !(g.memberUids || []).includes(u));
+  const renderChosen = () => el("invChosen").innerHTML = [...chosen].map(u => `<span class="inv-tag">${avatar(u, "sm")}${esc(first(nameOf(u)))}<button data-unchoose="${u}">✕</button></span>`).join("");
+  const renderResults = q => {
+    const ql = q.toLowerCase();
+    const hits = known.filter(([u, i]) => !chosen.has(u) && ((i.name || "").toLowerCase().includes(ql) || (i.phone || "").replace(/\D/g, "").includes(ql.replace(/\D/g, "")) && ql.replace(/\D/g, "")));
+    el("invResults").innerHTML = hits.slice(0, 8).map(([u, i]) => `<div class="inv-hit" data-choose="${u}">${avatar(u)}<div><b>${esc(i.name || "Friend")}</b>${i.phone ? `<div class="muted sm mono">${esc(i.phone)}</div>` : ""}</div><span class="add">Add</span></div>`).join("") || (q ? `<p class="muted sm">No matches among your friends. Invite them by email below.</p>` : "");
+  };
+  renderResults("");
+  el("invSearch").oninput = e => renderResults(e.target.value);
+  el("invResults").onclick = e => { const h = e.target.closest("[data-choose]"); if (h) { chosen.add(h.dataset.choose); renderChosen(); renderResults(el("invSearch").value); } };
+  el("invChosen").onclick = e => { const b = e.target.closest("[data-unchoose]"); if (b) { chosen.delete(b.dataset.unchoose); renderChosen(); renderResults(el("invSearch").value); } };
+  if (el("invPick")) el("invPick").onclick = async () => {
+    try {
+      const picked = await navigator.contacts.select(["name", "email"], { multiple: true });
+      const emails = picked.flatMap(p => p.email || []).filter(Boolean);
+      if (emails.length) { el("invEmails").value = [el("invEmails").value, ...emails].filter(Boolean).join(", "); toast(emails.length + " added from contacts"); }
+      else toast("No emails on those contacts — try inviting by phone soon.");
+    } catch { toast("Contact picking was cancelled."); }
+  };
 }
 async function acceptInvite(gid) {
   const g = S.pendingInvites.get(gid); if (!g) return;
@@ -415,7 +474,10 @@ async function leaveGroup(g) {
 }
 
 // ---------- COMPOSE (create event) ----------
-const compose = { theme: DEFAULT_THEME, emoji: "🎉", questions: [], invitees: new Set(), cohosts: new Set(), groupId: "" };
+const compose = { theme: DEFAULT_THEME, emoji: "🎉", cover: null, coverTab: "emoji",
+  title: "", date: "", time: "", end: "", where: "", notes: "", cap: "", approval: false,
+  questions: [], invitees: new Set(), cohosts: new Set(), groupId: "" };
+function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), cohosts: new Set(), groupId: "" }); }
 function composeBody() {
   const emojis = ["🎉", "🍕", "🌮", "🍻", "🎂", "🎬", "🎮", "🏖️", "🥾", "⚽", "🎲", "🍜", "🎃", "🎄", "🕺", "🔥"];
   const groups = [...S.groups.values()];
@@ -424,12 +486,23 @@ function composeBody() {
   <button class="link-back" data-go="#/">‹ Cancel</button>
   <div class="compose">
     <div class="compose-preview t-${th.id}" id="cPreview" style="--th-accent:${th.accent};--th-ink:${th.ink};--th-on-accent:${th.onAccent};font-family:${th.font},system-ui">
+      ${compose.cover ? `<div class="preview-cover"><img src="${compose.cover}" alt=""></div>` : ""}
       <canvas class="preview-canvas" id="cCanvas"></canvas>
-      <div class="preview-body">
-        <div class="preview-emoji" id="cPvEmoji">${esc(compose.emoji)}</div>
+      <div class="preview-body" style="${compose.cover ? "color:#fff" : ""}">
+        ${compose.cover ? "" : `<div class="preview-emoji" id="cPvEmoji">${esc(compose.emoji)}</div>`}
         <div class="preview-title" id="cPvTitle">Your event</div>
         <div class="preview-date" id="cPvDate">Pick a date</div>
       </div>
+    </div>
+
+    <div class="section-head" style="margin-top:18px"><h2>Cover</h2></div>
+    <div class="form-card card">
+      <div class="cover-tabs">
+        <button type="button" data-ctab="emoji" class="${compose.coverTab === "emoji" ? "on" : ""}">Emoji</button>
+        <button type="button" data-ctab="upload" class="${compose.coverTab === "upload" ? "on" : ""}">Upload</button>
+        <button type="button" data-ctab="ai" class="${compose.coverTab === "ai" ? "on" : ""}">✨ AI art</button>
+      </div>
+      <div class="cover-panel" id="coverPanel">${coverPanel()}</div>
     </div>
 
     <div class="section-head" style="margin-top:18px"><h2>Theme</h2></div>
@@ -438,18 +511,17 @@ function composeBody() {
     </div>
 
     <div class="form-card card">
-      <label class="field"><span>What's the plan?</span><input id="cTitle" maxlength="80" placeholder="Rooftop taco night"></label>
-      <label class="field"><span>Cover emoji</span><div class="emoji-pick" id="cEmoji">${emojis.map(e => `<button type="button" class="${e === compose.emoji ? "on" : ""}" data-e="${e}">${e}</button>`).join("")}</div></label>
+      <label class="field"><span>What's the plan?</span><input id="cTitle" maxlength="80" value="${esc(compose.title)}" placeholder="Rooftop taco night"></label>
       <div class="two">
-        <label class="field"><span>Date</span><input id="cDate" type="date" value="${todayStr()}"></label>
-        <label class="field"><span>Start</span><input id="cTime" type="time"></label>
+        <label class="field"><span>Date</span><input id="cDate" type="date" value="${compose.date || todayStr()}"></label>
+        <label class="field"><span>Start</span><input id="cTime" type="time" value="${compose.time}"></label>
       </div>
       <div class="two">
-        <label class="field"><span>End</span><input id="cEnd" type="time"></label>
-        <label class="field"><span>Max spots</span><input id="cCap" type="number" min="1" max="1000" placeholder="No limit"></label>
+        <label class="field"><span>End</span><input id="cEnd" type="time" value="${compose.end}"></label>
+        <label class="field"><span>Max spots</span><input id="cCap" type="number" min="1" max="1000" value="${compose.cap}" placeholder="No limit"></label>
       </div>
-      <label class="field"><span>Where</span><input id="cWhere" maxlength="90" placeholder="Address or vibe"></label>
-      <label class="field"><span>The details</span><textarea id="cNotes" maxlength="600" placeholder="Dress code, what to bring, parking…"></textarea></label>
+      <label class="field"><span>Where</span><input id="cWhere" maxlength="90" value="${esc(compose.where)}" placeholder="Address or vibe"></label>
+      <label class="field"><span>The details</span><textarea id="cNotes" maxlength="600" placeholder="Dress code, what to bring, parking…">${esc(compose.notes)}</textarea></label>
     </div>
 
     <div class="section-head"><h2>Who's invited</h2></div>
@@ -478,26 +550,59 @@ function composeBody() {
   </div>`;
 }
 function qRow(q) { return `<div class="q-row" data-q="${q.id}"><input value="${esc(q.q)}" data-qedit="${q.id}" maxlength="80" placeholder="Your question"><button class="btn ghost small" data-qdel="${q.id}">✕</button></div>`; }
+const COVER_EMOJIS = ["🎉", "🍕", "🌮", "🍻", "🎂", "🎬", "🎮", "🏖️", "🥾", "⚽", "🎲", "🍜", "🎃", "🎄", "🕺", "🔥"];
+function coverPanel() {
+  if (compose.cover) return `<div class="cover-preview-img"><img src="${compose.cover}" alt="cover"><button type="button" class="rm" id="coverRemove">✕</button></div>`;
+  if (compose.coverTab === "upload") return `<div class="cover-drop" id="coverDrop">📷 Tap to upload a photo</div>`;
+  if (compose.coverTab === "ai") return `<div class="ai-row"><input id="aiPrompt" placeholder="e.g. neon rooftop taco party at sunset"><button type="button" class="btn primary" id="aiGo">Generate</button></div><p class="muted sm" style="margin:8px 0 0">Describe your vibe and AI paints a one-of-a-kind cover.</p>`;
+  return `<div class="emoji-pick" id="cEmoji">${COVER_EMOJIS.map(e => `<button type="button" class="${e === compose.emoji ? "on" : ""}" data-e="${e}">${e}</button>`).join("")}</div>`;
+}
 function contactChecks(name, set) {
   const others = [...S.contacts.entries()].filter(([u]) => u !== myUid());
   if (!others.length) return `<span class="muted sm">No friends yet — invite people to a group first.</span>`;
   return others.map(([u, info]) => `<label class="cbox"><input type="checkbox" name="${name}" value="${u}" ${set.has(u) ? "checked" : ""}>${avatar(u)} ${esc(first(info.name))}</label>`).join("");
 }
+function syncCompose() {
+  compose.title = el("cTitle").value; compose.date = el("cDate").value; compose.time = el("cTime").value;
+  compose.end = el("cEnd").value; compose.where = el("cWhere").value; compose.notes = el("cNotes").value;
+  compose.cap = el("cCap").value; if (el("cApproval")) compose.approval = el("cApproval").checked;
+}
 function wireCompose() {
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
-  const stopBg = startParticles(el("cCanvas"), compose.theme); composeStop = stopBg;
+  composeStop = startParticles(el("cCanvas"), compose.theme);
   const upd = () => {
     el("cPvTitle").textContent = el("cTitle").value.trim() || "Your event";
     const dv = el("cDate").value, tv = el("cTime").value;
     el("cPvDate").textContent = dv ? evDate({ date: dv }).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }) + (tv ? " · " + fmtTime(tv) : "") : "Pick a date";
   };
-  ["cTitle", "cDate", "cTime"].forEach(id => el(id).oninput = upd); upd();
-  document.querySelectorAll("#cEmoji button").forEach(b => b.onclick = () => { compose.emoji = b.dataset.e; document.querySelectorAll("#cEmoji button").forEach(x => x.classList.remove("on")); b.classList.add("on"); el("cPvEmoji").textContent = b.dataset.e; });
-  document.querySelectorAll("[data-theme]").forEach(b => b.onclick = () => { compose.theme = b.dataset.theme; render(); });
+  ["cTitle", "cDate", "cTime", "cEnd", "cWhere", "cNotes", "cCap"].forEach(id => el(id).oninput = () => { syncCompose(); upd(); }); upd();
+  wireCover();
+  document.querySelectorAll("[data-theme]").forEach(b => b.onclick = () => { syncCompose(); compose.theme = b.dataset.theme; render(); });
   const gsel = el("cGroup"); if (gsel) gsel.onchange = () => { compose.groupId = gsel.value; el("cPickWrap").classList.toggle("hidden", !!compose.groupId); };
   el("addQ").onclick = () => { compose.questions.push({ id: newId().slice(0, 6), q: "" }); el("qList").insertAdjacentHTML("beforeend", qRow(compose.questions[compose.questions.length - 1])); wireQ(); };
   wireQ();
   el("createEventBtn").onclick = createEvent;
+}
+function refreshCoverUI() {
+  el("coverPanel").innerHTML = coverPanel();
+  const pv = $("#cPreview");
+  const oldCover = pv.querySelector(".preview-cover"); if (oldCover) oldCover.remove();
+  const body = pv.querySelector(".preview-body");
+  if (compose.cover) { pv.insertAdjacentHTML("afterbegin", `<div class="preview-cover"><img src="${compose.cover}" alt=""></div>`); body.style.color = "#fff"; const em = el("cPvEmoji"); if (em) em.remove(); }
+  else { body.style.color = ""; if (!el("cPvEmoji")) body.insertAdjacentHTML("afterbegin", `<div class="preview-emoji" id="cPvEmoji">${esc(compose.emoji)}</div>`); }
+  wireCover();
+}
+function wireCover() {
+  document.querySelectorAll("[data-ctab]").forEach(b => b.onclick = () => { compose.coverTab = b.dataset.ctab; refreshCoverUI(); });
+  document.querySelectorAll("#cEmoji button").forEach(b => b.onclick = () => { compose.emoji = b.dataset.e; document.querySelectorAll("#cEmoji button").forEach(x => x.classList.remove("on")); b.classList.add("on"); const em = el("cPvEmoji"); if (em) em.textContent = b.dataset.e; });
+  if (el("coverRemove")) el("coverRemove").onclick = () => { compose.cover = null; refreshCoverUI(); };
+  if (el("coverDrop")) el("coverDrop").onclick = async () => { const f = await pickFile(); if (!f) return; el("coverDrop").textContent = "Processing…"; try { compose.cover = await compressImage(f, 1100, 0.74); refreshCoverUI(); } catch { toast("Couldn't read that image."); el("coverDrop").textContent = "📷 Tap to upload a photo"; } };
+  if (el("aiGo")) el("aiGo").onclick = async () => {
+    const p = el("aiPrompt").value.trim(); if (!p) return toast("Describe the vibe first.");
+    el("coverPanel").innerHTML = `<div class="cover-spin"><div class="spinner"></div>Painting your cover…</div>`;
+    try { compose.cover = await generateCover(p); refreshCoverUI(); toast("Fresh cover, made for you ✨"); }
+    catch (e) { toast(e.message || "Generator busy — try again."); compose.coverTab = "ai"; refreshCoverUI(); }
+  };
 }
 let composeStop = () => {};
 function wireQ() {
@@ -515,7 +620,7 @@ async function createEvent() {
   const id = newId();
   const ev = {
     hostId: myUid(), hostName: S.profile.name, cohostUids, groupId, invitedUids,
-    title, emoji: compose.emoji, theme: compose.theme,
+    title, emoji: compose.emoji, theme: compose.theme, cover: compose.cover || "",
     date, time: el("cTime").value || "", endTime: el("cEnd").value || "",
     location: el("cWhere").value.trim(), notes: el("cNotes").value.trim(),
     capacity: Number(el("cCap").value) || 0, approval: !!el("cApproval").checked,
@@ -523,17 +628,18 @@ async function createEvent() {
     createdAt: Date.now()
   };
   try {
+    el("createEventBtn").disabled = true; el("createEventBtn").textContent = "Creating…";
     await setDoc(doc(db, "events", id), ev);
-    composeStop(); compose.questions = []; compose.invitees = new Set(); compose.cohosts = new Set(); compose.groupId = "";
+    composeStop(); resetCompose();
     go("#/e/" + id); toast("Event created — invites are live");
-  } catch (e) { toast("Couldn't create: " + e.message); }
+  } catch (e) { toast("Couldn't create: " + e.message); el("createEventBtn").disabled = false; el("createEventBtn").textContent = "Create event & send invites"; }
 }
 
 // ---------- EVENT PAGE (the themed invite) ----------
 let eventBgStop = () => {};
+function cleanupEvent() { S.evSubs.forEach(fn => fn()); S.evSubs = []; eventBgStop(); eventBgStop = () => {}; }
 function renderEventPage(root, id) {
-  if (S.commentUnsub) { S.commentUnsub(); S.commentUnsub = null; }
-  eventBgStop();
+  cleanupEvent();
   const ev = S.events.get(id);
   if (!ev) { root.innerHTML = shell(`<div class="card empty"><b>Loading event…</b><p class="muted">If this stays, you may not have access.</p><button class="btn" data-go="#/">Home</button></div>`); wireShell(); getDoc(doc(db, "events", id)).then(d => { if (d.exists()) { S.events.set(id, { id, ...d.data() }); render(); } }); return; }
   const th = themeOf(ev.theme);
@@ -543,13 +649,14 @@ function renderEventPage(root, id) {
   </div>`;
   eventBgStop = startParticles(el("evCanvas"), ev.theme);
   wireEventPage(ev);
-  // live comments
-  S.comments = [];
-  S.commentUnsub = onSnapshot(query(collection(db, "events", id, "comments")), snap => {
-    S.comments = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.createdAt - b.createdAt);
-    const box = el("wall"); if (box) box.innerHTML = wallInner(ev);
-    wireWall(ev);
-  });
+  // live subcollections (comments, photos, polls, songs)
+  S.evSubs.forEach(fn => fn()); S.evSubs = [];
+  S.comments = []; S.photos = []; S.polls = []; S.songs = [];
+  const sub = (name, fn) => S.evSubs.push(onSnapshot(collection(db, "events", id, name), snap => fn(snap.docs.map(d => ({ id: d.id, ...d.data() })))));
+  sub("comments", rows => { S.comments = rows.sort((a, b) => a.createdAt - b.createdAt); const b = el("wall"); if (b) { b.innerHTML = wallInner(ev); wireWall(ev); } });
+  sub("photos", rows => { S.photos = rows.sort((a, b) => b.createdAt - a.createdAt); const b = el("photosCard"); if (b) { b.innerHTML = photosInner(ev); wirePhotos(ev); } });
+  sub("polls", rows => { S.polls = rows.sort((a, b) => a.createdAt - b.createdAt); const b = el("pollsCard"); if (b) { b.innerHTML = pollsInner(ev); wirePolls(ev); } });
+  sub("songs", rows => { S.songs = rows.sort((a, b) => (Object.keys(b.votes || {}).length - Object.keys(a.votes || {}).length) || a.createdAt - b.createdAt); const b = el("playlistCard"); if (b) { b.innerHTML = playlistInner(ev); wirePlaylist(ev); } });
 }
 function statusGroups(ev) {
   const g = { going: [], maybe: [], no: [], waitlist: [], pending: [], none: [] };
@@ -600,8 +707,9 @@ function eventInner(ev) {
 
   return `
   <button class="ev-back" data-go="#/">‹</button>
+  ${ev.cover ? `<div class="event-cover"><img src="${ev.cover}" alt="${esc(ev.title)}"></div>` : ""}
   <div class="event-hero">
-    <div class="ev-emoji">${esc(ev.emoji || "🎉")}</div>
+    ${ev.cover ? "" : `<div class="ev-emoji">${esc(ev.emoji || "🎉")}</div>`}
     <h1 class="ev-title">${esc(ev.title)}</h1>
     <div class="ev-when">${esc(fmtWhen(ev))}</div>
     ${ev.location ? `<div class="ev-where">📍 ${esc(ev.location)}</div>` : ""}
@@ -620,6 +728,9 @@ function eventInner(ev) {
     ${manage && (ev.questions || []).length ? `<button class="btn-th ghost small" id="viewAnswers">View RSVP answers</button>` : ""}
   </div>
 
+  <div class="ev-card-glass" id="pollsCard">${pollsInner(ev)}</div>
+  <div class="ev-card-glass" id="playlistCard">${playlistInner(ev)}</div>
+  <div class="ev-card-glass" id="photosCard">${photosInner(ev)}</div>
   <div class="ev-card-glass" id="wall">${wallInner(ev)}</div>
 
   <div class="ev-actions">
@@ -663,6 +774,79 @@ function wireEventPage(ev) {
 function wireWall(ev) {
   const f = el("wallForm"); if (f) f.onsubmit = e => { e.preventDefault(); postComment(ev); };
   document.querySelectorAll("[data-delc]").forEach(b => b.onclick = () => deleteComment(ev, b.dataset.delc));
+}
+
+// ----- Polls -----
+function pollsInner(ev) {
+  const me = myUid(); const manage = canManage(ev);
+  const list = S.polls.map(p => {
+    const total = Object.keys(p.votes || {}).length || 0;
+    const mine = (p.votes || {})[me];
+    return `<div class="poll"><div class="poll-q">${esc(p.q)}</div>${(p.options || []).map((o, i) => {
+      const n = Object.values(p.votes || {}).filter(v => v === i).length;
+      const pct = total ? Math.round(n / total * 100) : 0;
+      return `<div class="poll-opt ${mine === i ? "mine" : ""}" data-vote="${p.id}|${i}"><div class="poll-bar" style="transform:scaleX(${total ? n / total : 0})"></div><div class="poll-opt-in"><span>${esc(o)}</span><span>${pct}%</span></div></div>`;
+    }).join("")}<div class="muted-th sm" style="margin-top:4px">${total} vote${total === 1 ? "" : "s"}${manage ? ` · <a data-delpoll="${p.id}">remove</a>` : ""}</div></div>`;
+  }).join("");
+  return `<div class="glass-head">Polls${manage ? ` <a class="btn-th ghost small" id="addPoll">＋ Add</a>` : `<span>${S.polls.length}</span>`}</div>${list || `<p class="muted-th">${manage ? "Add a poll to help decide — food, time, theme." : "No polls yet."}</p>`}`;
+}
+function wirePolls(ev) {
+  document.querySelectorAll("[data-vote]").forEach(b => b.onclick = () => { const [pid, i] = b.dataset.vote.split("|"); votePoll(ev, pid, +i); });
+  if (el("addPoll")) el("addPoll").onclick = () => addPollDialog(ev);
+  document.querySelectorAll("[data-delpoll]").forEach(b => b.onclick = () => deleteDoc(doc(db, "events", ev.id, "polls", b.dataset.delpoll)).catch(e => toast(e.message)));
+}
+async function votePoll(ev, pid, i) { try { await updateDoc(doc(db, "events", ev.id, "polls", pid), { [`votes.${myUid()}`]: i }); } catch (e) { toast(e.message); } }
+function addPollDialog(ev) {
+  dialog(`<h3>New poll</h3><label class="field"><span>Question</span><input id="pq" placeholder="What should we eat?"></label>
+    <label class="field"><span>Options (one per line)</span><textarea id="popts" placeholder="Tacos\nPizza\nSushi"></textarea></label>`,
+    "Add poll", async () => {
+      const q = el("pq").value.trim(); const opts = el("popts").value.split("\n").map(s => s.trim()).filter(Boolean);
+      if (!q || opts.length < 2) return toast("Add a question and at least two options.");
+      try { await addDoc(collection(db, "events", ev.id, "polls"), { q, options: opts, votes: {}, authorId: myUid(), createdAt: Date.now() }); closeDialog(); } catch (e) { toast(e.message); }
+    });
+}
+
+// ----- Playlist -----
+function playlistInner(ev) {
+  const me = myUid();
+  const list = S.songs.map(s => {
+    const votes = Object.keys(s.votes || {}).length; const voted = (s.votes || {})[me];
+    return `<div class="song"><div class="up ${voted ? "voted" : ""}"><button data-upvote="${s.id}">▲</button>${votes}</div>
+      <div class="st"><b>${esc(s.title)}</b>${s.artist ? `<span>${esc(s.artist)}</span>` : ""}</div>
+      ${s.addedBy === me ? `<button class="wall-del" data-delsong="${s.id}">✕</button>` : ""}</div>`;
+  }).join("");
+  return `<div class="glass-head">Playlist <a class="btn-th ghost small" id="addSong">＋ Add song</a></div>${list || `<p class="muted-th">Build the vibe — add songs, upvote favorites.</p>`}`;
+}
+function wirePlaylist(ev) {
+  if (el("addSong")) el("addSong").onclick = () => addSongDialog(ev);
+  document.querySelectorAll("[data-upvote]").forEach(b => b.onclick = () => toggleSongVote(ev, b.dataset.upvote));
+  document.querySelectorAll("[data-delsong]").forEach(b => b.onclick = () => deleteDoc(doc(db, "events", ev.id, "songs", b.dataset.delsong)).catch(e => toast(e.message)));
+}
+async function toggleSongVote(ev, sid) {
+  const s = S.songs.find(x => x.id === sid); if (!s) return; const has = (s.votes || {})[myUid()];
+  try { await updateDoc(doc(db, "events", ev.id, "songs", sid), { [`votes.${myUid()}`]: has ? null : true }); } catch (e) { toast(e.message); }
+}
+function addSongDialog(ev) {
+  dialog(`<h3>Add a song</h3><label class="field"><span>Song</span><input id="sgTitle" placeholder="Song title"></label>
+    <label class="field"><span>Artist (optional)</span><input id="sgArtist" placeholder="Artist"></label>`,
+    "Add", async () => {
+      const t = el("sgTitle").value.trim(); if (!t) return toast("Add a song title.");
+      try { await addDoc(collection(db, "events", ev.id, "songs"), { title: t, artist: el("sgArtist").value.trim(), votes: { [myUid()]: true }, addedBy: myUid(), createdAt: Date.now() }); closeDialog(); } catch (e) { toast(e.message); }
+    });
+}
+
+// ----- Photo wall -----
+function photosInner(ev) {
+  const tiles = S.photos.map(p => `<img src="${p.img}" data-photo="${p.id}" alt="" loading="lazy">`).join("");
+  return `<div class="glass-head">Photos <span>${S.photos.length}</span></div><div class="photo-grid"><button class="photo-add" id="addPhoto">＋</button>${tiles || ""}</div>${S.photos.length ? "" : `<p class="muted-th" style="margin-top:8px">Share pics from the night.</p>`}`;
+}
+function wirePhotos(ev) {
+  if (el("addPhoto")) el("addPhoto").onclick = async () => {
+    const f = await pickFile(); if (!f) return; toast("Uploading photo…");
+    try { const img = await compressImage(f, 900, 0.68); await addDoc(collection(db, "events", ev.id, "photos"), { img, addedBy: myUid(), createdAt: Date.now() }); }
+    catch (e) { toast("Couldn't add photo: " + e.message); }
+  };
+  document.querySelectorAll("[data-photo]").forEach(im => im.onclick = () => { const box = document.createElement("div"); box.className = "lightbox"; box.innerHTML = `<img src="${im.src}" alt="">`; box.onclick = () => box.remove(); document.body.appendChild(box); });
 }
 async function setRsvp(ev, status) {
   const me = myUid();
