@@ -182,33 +182,97 @@ function deleteRow(name, id) {
 }
 
 // ---------- invite emails ----------
+// Emails are sent through the account that owns this script (Google doesn't
+// allow sending as someone else's address), but each invite is dressed as the
+// event's organizer: their name in the From line, replies go to their email,
+// and the attached calendar invite (.ics) lists them as ORGANIZER so the
+// event shows the real host when added to a calendar.
 
 function sendInvites(ev) {
   if (!SEND_EMAIL_INVITES) return;
   try {
     var members = {};
     readTable("members").forEach(function (m) { members[m.id] = m; });
-    var host = members[ev.createdBy];
+    var host = members[ev.createdBy] || { name: "A friend", email: "" };
+    var hostFirst = host.name.split(" ")[0];
+    var hostHasEmail = !!(host.email && host.email.indexOf("@") !== -1);
     var when = ev.date + (ev.time ? " at " + ev.time : "");
+    var ics = buildIcs(ev, host, members);
     (ev.invitees || []).forEach(function (id) {
       if (id === ev.createdBy) return;
       var m = members[id];
       if (!m || !m.email || m.email.indexOf("@") === -1) return;
-      MailApp.sendEmail({
+      var opts = {
         to: m.email,
-        subject: "You're invited: " + ev.title,
+        subject: hostFirst + " invited you: " + ev.title,
         body:
           "Hi " + m.name.split(" ")[0] + ",\n\n" +
-          (host ? host.name : "A friend") + " invited you to \"" + ev.title + "\".\n\n" +
+          host.name + " invited you to \"" + ev.title + "\".\n\n" +
           "When: " + when + "\n" +
           (ev.location ? "Where: " + ev.location + "\n" : "") +
           (ev.notes ? "Notes: " + ev.notes + "\n" : "") +
+          "\nThe attached invite adds it to your calendar." +
           "\nRSVP here: " + SITE_URL + "\n\n" +
-          "— Friendly"
-      });
+          "— Friendly, on behalf of " + host.name,
+        name: host.name + " via Friendly",
+        attachments: [Utilities.newBlob(ics, "text/calendar", "invite.ics")]
+      };
+      if (hostHasEmail) opts.replyTo = host.email;
+      MailApp.sendEmail(opts);
     });
   } catch (err) {
     // Email is best-effort; never fail the event creation over it.
     console.error("Invite email failed: " + err);
   }
+}
+
+function icsEscape(s) {
+  return String(s || "").replace(/\\/g, "\\\\").replace(/([,;])/g, "\\$1").replace(/\n/g, "\\n");
+}
+
+function buildIcs(ev, host, members) {
+  var pad = function (n) { return (n < 10 ? "0" : "") + n; };
+  var parts = ev.date.split("-").map(Number);
+  var lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Friendly//" + SITE_URL.replace("https://", "") + "//EN",
+    "METHOD:REQUEST",
+    "BEGIN:VEVENT",
+    "UID:" + ev.id + "@officialfriendly.com",
+    "DTSTAMP:" + Utilities.formatDate(new Date(), "UTC", "yyyyMMdd'T'HHmmss'Z'")
+  ];
+  if (ev.time) {
+    // Floating local time: starts at the event time in each viewer's timezone.
+    var hm = ev.time.split(":").map(Number);
+    var start = new Date(parts[0], parts[1] - 1, parts[2], hm[0], hm[1]);
+    var end = new Date(start.getTime() + 2 * 3600 * 1000); // default 2h
+    var fmt = function (d) {
+      return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) +
+             "T" + pad(d.getHours()) + pad(d.getMinutes()) + "00";
+    };
+    lines.push("DTSTART:" + fmt(start), "DTEND:" + fmt(end));
+  } else {
+    var day = ev.date.replace(/-/g, "");
+    var next = new Date(parts[0], parts[1] - 1, parts[2] + 1);
+    lines.push("DTSTART;VALUE=DATE:" + day,
+               "DTEND;VALUE=DATE:" + next.getFullYear() + pad(next.getMonth() + 1) + pad(next.getDate()));
+  }
+  var hostMail = (host.email && host.email.indexOf("@") !== -1) ? host.email : "noreply@officialfriendly.com";
+  lines.push("ORGANIZER;CN=" + icsEscape(host.name) + ":mailto:" + hostMail);
+  (ev.invitees || []).forEach(function (id) {
+    var m = members[id];
+    if (m && m.email && m.email.indexOf("@") !== -1) {
+      lines.push("ATTENDEE;CN=" + icsEscape(m.name) + ";RSVP=TRUE:mailto:" + m.email);
+    }
+  });
+  lines.push(
+    "SUMMARY:" + icsEscape(ev.title),
+    ev.location ? "LOCATION:" + icsEscape(ev.location) : null,
+    ev.notes ? "DESCRIPTION:" + icsEscape(ev.notes + "\nRSVP: " + SITE_URL) : "DESCRIPTION:" + icsEscape("RSVP: " + SITE_URL),
+    "URL:" + SITE_URL,
+    "END:VEVENT",
+    "END:VCALENDAR"
+  );
+  return lines.filter(Boolean).join("\r\n");
 }
