@@ -124,7 +124,7 @@ function attachPlaces(input) {
     timer = setTimeout(async () => {
       const my = ++seq;
       try {
-        const r = await fetch("https://places.googleapis.com/v1/places:autocomplete", { method: "POST", headers: { "Content-Type": "application/json", "X-Goog-Api-Key": mapsKey }, body: JSON.stringify({ input: q }) });
+        const r = await fetch("https://places.googleapis.com/v1/places:autocomplete", { method: "POST", headers: { "Content-Type": "application/json", "X-Goog-Api-Key": mapsKey }, body: JSON.stringify({ input: q, includedRegionCodes: ["us"], languageCode: "en" }) });
         const j = await r.json(); if (my !== seq) return;
         const hits = (j.suggestions || []).map(s => s.placePrediction).filter(Boolean).slice(0, 5);
         if (!hits.length) return hide();
