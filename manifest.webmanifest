@@ -1,12 +1,12 @@
 {
   "name": "Friendly",
   "short_name": "Friendly",
-  "description": "Plan hangouts, invite the group, and settle up afterwards.",
+  "description": "Plan get-togethers your friends will actually remember.",
   "id": "friendly",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#FFF9EF",
+  "background_color": "#FFFEFC",
   "theme_color": "#FF6B57",
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
