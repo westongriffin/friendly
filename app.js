@@ -190,7 +190,10 @@ function subscribeAll(u) {
   }));
 
   add(onSnapshot(query(collection(db, "groups"), where("invitedEmails", "array-contains", (u.email || "").toLowerCase())), snap => {
-    S.pendingInvites = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }]).filter(g => !(g.memberUids || []).includes(u.uid)).map(g => [g.id, g]));
+    // Build plain docs first, then key the Map by id. (An earlier version mapped
+    // to [id, doc] pairs before filtering, so every invite lost its fields and
+    // Join looked up an undefined key: the "Join does nothing" bug.)
+    S.pendingInvites = new Map(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(g => !(g.memberUids || []).includes(u.uid)).map(g => [g.id, g]));
     render();
   }));
 
@@ -460,10 +463,8 @@ function groupPageBody(gid) {
     ${m.venmo ? `<div class="muted sm mono">${esc(m.venmo)}</div>` : ""}</div></div>`).join("")}</div>
   ${(g.invitedEmails || []).length ? `<div class="section-head" style="margin-top:18px"><h2>Invited</h2></div>
     <div class="card">${g.invitedEmails.map(e => `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">✉︎</span><div style="flex:1"><b class="mono sm">${esc(e)}</b><div class="muted sm">Hasn't joined yet</div></div>${owner ? `<button class="btn ghost small" data-uninvite="${esc(e)}">✕</button>` : ""}</div>`).join("")}</div>` : ""}
-  <div class="section-head" style="margin-top:22px"><h2>Chat</h2></div>
-  <div class="card th-plain" id="wall"><p class="muted">Loading…</p></div>
-  <div class="section-head" style="margin-top:22px"><h2>Polls</h2></div>
-  <div class="card th-plain" id="pollsCard"><p class="muted">Loading…</p></div>
+  <div class="card th-plain" id="wall" style="margin-top:22px"><p class="muted">Loading…</p></div>
+  <div class="card th-plain" id="pollsCard" style="margin-top:14px"><p class="muted">Loading…</p></div>
   <div class="btnrow" style="margin-top:20px">
     ${owner ? `<button class="btn danger-ghost" id="delGroup">Delete group</button>` : `<button class="btn danger-ghost" id="leaveGroup">Leave group</button>`}
   </div>`;
@@ -1139,8 +1140,7 @@ function expenseBody(id) {
   <div class="card">${x.items.map(it => `<div class="member-row"><div style="flex:1;min-width:0"><b>${esc(it.name)}</b><div class="muted sm">${(it.uids || []).map(u => esc(first(nameOf(u)))).join(", ") || "unassigned"}</div></div><span class="amt sm">${fmt$(it.cents)}</span></div>`).join("")}
     ${x.tax ? `<div class="member-row"><div style="flex:1"><b>Tax</b><div class="muted sm">split in proportion</div></div><span class="amt sm">${fmt$(x.tax)}</span></div>` : ""}
     ${x.tip ? `<div class="member-row"><div style="flex:1"><b>Tip</b><div class="muted sm">split in proportion</div></div><span class="amt sm">${fmt$(x.tip)}</span></div>` : ""}</div>` : ""}
-  <div class="section-head" style="margin-top:22px"><h2>Discussion</h2></div>
-  <div class="card th-plain" id="wall"><p class="muted">Loading…</p></div>`;
+  <div class="card th-plain" id="wall" style="margin-top:22px"><p class="muted">Loading…</p></div>`;
 }
 function wireExpensePage() {
   const x = S.expenses.get(S.route.id); if (!x) return;

@@ -1,7 +1,7 @@
 // Friendly service worker: cache the app shell so the installed PWA opens
 // instantly. Firebase (Firestore/Auth) traffic and fonts always hit the
 // network. Bump CACHE to invalidate old shells on deploy.
-const CACHE = "friendly-fb-v12";
+const CACHE = "friendly-fb-v13";
 const SHELL = [
   "./", "./index.html", "./styles.css", "./app.js", "./themes.js",
   "./firebase-config.js", "./manifest.webmanifest",
@@ -19,13 +19,14 @@ self.addEventListener("fetch", e => {
   const url = new URL(e.request.url);
   // Only cache our own same-origin GETs; never intercept Firebase/font traffic.
   if (e.request.method !== "GET" || url.origin !== location.origin) return;
+  // Network-first: the app needs Firebase anyway, so always take the latest
+  // shell when online; the cache is only an offline fallback. (Cache-first
+  // could pin a stale shell for a long time.)
   e.respondWith(
-    caches.match(e.request, { ignoreSearch: e.request.mode === "navigate" }).then(cached => {
-      const net = fetch(e.request).then(res => {
-        if (res.ok) caches.open(CACHE).then(c => c.put(e.request, res.clone()));
-        return res;
-      }).catch(() => cached || caches.match("./index.html"));
-      return cached || net;
-    })
+    fetch(e.request).then(res => {
+      if (res.ok) caches.open(CACHE).then(c => c.put(e.request, res.clone()));
+      return res;
+    }).catch(() => caches.match(e.request, { ignoreSearch: e.request.mode === "navigate" })
+      .then(cached => cached || caches.match("./index.html")))
   );
 });
