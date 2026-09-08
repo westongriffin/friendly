@@ -23,31 +23,48 @@ const db = getFirestore();
 const PROJECT = "friendly-6992a", LOCATION = "us-central1", IMAGEN_MODEL = "imagen-3.0-generate-002";
 const gauth = new GoogleAuth({ scopes: "https://www.googleapis.com/auth/cloud-platform" });
 
+const FLAIR = ", vibrant party invitation art, bold, celebratory, high quality";
+
+// Preferred generator: Google Vertex Imagen (runs as our own service account).
 async function imagenGenerate(prompt) {
   const token = (await (await gauth.getClient()).getAccessToken()).token;
   const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${LOCATION}/publishers/google/models/${IMAGEN_MODEL}:predict`;
   const body = {
-    instances: [{ prompt: prompt + ", vibrant party invitation art, bold, celebratory, high quality" }],
+    instances: [{ prompt: prompt + FLAIR }],
     parameters: { sampleCount: 1, aspectRatio: "16:9", outputOptions: { mimeType: "image/jpeg", compressionQuality: 82 }, safetySetting: "block_medium_and_above" }
   };
   const r = await fetch(url, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!r.ok) throw new Error("imagen " + r.status + ": " + (await r.text()).slice(0, 200));
+  if (!r.ok) throw new Error("imagen " + r.status + ": " + (await r.text()).slice(0, 160));
   const j = await r.json();
   const b64 = j.predictions && j.predictions[0] && j.predictions[0].bytesBase64Encoded;
   if (!b64) throw new Error("no image in response");
   return "data:image/jpeg;base64," + b64;
 }
 
+// Fallback generator: free, no key. Keeps covers working even where the org
+// blocks Vertex publisher-model access.
+async function pollinationsGenerate(prompt) {
+  const seed = Math.floor(Math.random() * 1e6);
+  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt + FLAIR)}?width=1024&height=640&nologo=true&seed=${seed}`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error("pollinations " + r.status);
+  const buf = Buffer.from(await r.arrayBuffer());
+  return "data:image/jpeg;base64," + buf.toString("base64");
+}
+
 exports.onCoverRequest = onDocumentCreated({ document: "coverRequests/{id}", region: "us-central1", timeoutSeconds: 120, memory: "512MiB" }, async e => {
   const d = e.data && e.data.data(); if (!d || !d.prompt) return;
   const ref = e.data.ref;
-  try {
-    const image = await imagenGenerate(String(d.prompt).slice(0, 400));
-    await ref.update({ status: "done", image });
-  } catch (err) {
-    logger.error("cover generation failed: " + err.message);
-    await ref.update({ status: "error", error: "generation failed" });
+  const prompt = String(d.prompt).slice(0, 400);
+  let image = null, source = null;
+  try { image = await imagenGenerate(prompt); source = "imagen"; }
+  catch (err) {
+    logger.warn("imagen unavailable, using fallback: " + err.message);
+    try { image = await pollinationsGenerate(prompt); source = "pollinations"; }
+    catch (err2) { logger.error("cover generation failed: " + err2.message); }
   }
+  if (image) await ref.update({ status: "done", source, image });
+  else await ref.update({ status: "error", error: "generation failed" });
 });
 
 const firstName = n => (n || "Someone").split(" ")[0];
