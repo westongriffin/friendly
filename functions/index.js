@@ -1,4 +1,4 @@
-// Friendly Cloud Functions — push notifications, day-of reminders, and an
+// Friendly Cloud Functions: push notifications, day-of reminders, and an
 // optional SMS path. Deploy with:  firebase deploy --only functions
 // (Requires the Blaze plan, which is enabled.)
 //
@@ -65,7 +65,7 @@ async function geminiGenerate(prompt) {
       const img = parts.find(p => p.inlineData && p.inlineData.data);
       if (!img) throw new Error(model + ": no image in response");
       return { image: await toCoverJpeg(Buffer.from(img.inlineData.data, "base64")), model };
-    } catch (e) { lastErr = e; logger.warn(e.message + " — trying next model"); }
+    } catch (e) { lastErr = e; logger.warn(e.message + ", trying next model"); }
   }
   throw lastErr;
 }
@@ -84,7 +84,7 @@ async function pollinationsGenerate(prompt) {
       const buf = Buffer.from(await r.arrayBuffer());
       if (buf.length < 5000) throw new Error("pollinations/" + model + " returned no image");
       return "data:image/jpeg;base64," + buf.toString("base64");
-    } catch (e) { lastErr = e; logger.warn(e.message + " — trying next model"); }
+    } catch (e) { lastErr = e; logger.warn(e.message + ", trying next model"); }
   }
   throw lastErr;
 }

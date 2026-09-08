@@ -1,12 +1,12 @@
-# Friendly — App Store Connect listing (draft, paste-ready)
+# Friendly App Store Connect listing (draft, paste-ready)
 
 Everything App Store Connect asks for, in the order it asks. Items marked
 **[you]** need your account or a decision.
 
 ## App record (App Store Connect → My Apps → +)
 - **Platform:** iOS
-- **Name:** `Friendly` **[you]** — names must be unique on the App Store and
-  "Friendly" alone may be taken. Fallbacks, in order: `Friendly — Plans & Splits`,
+- **Name:** `Friendly` **[you]**: names must be unique on the App Store and
+  "Friendly" alone may be taken. Fallbacks, in order: `Friendly: Plans & Splits`,
   `Friendly: Hangouts & Bills`, `Official Friendly`.
 - **Primary language:** English (U.S.)
 - **Bundle ID:** `com.officialfriendly.app` (appears after Xcode's first
@@ -18,15 +18,15 @@ Everything App Store Connect asks for, in the order it asks. Items marked
 - **Subtitle (30):** `Your friend group's home base`
 - **Promotional text (170):**
   `One app for your friend group: plan hangouts, send invites, RSVP, vote, share
-  photos, and settle up — without the group-chat chaos.`
+  photos, and settle up, without the group-chat chaos.`
 - **Description:**
 
 ```
-Friendly is your friend group's home base — the one app you use together to
+Friendly is your friend group's home base, the one app you use together to
 plan everything and settle up afterwards.
 
 MAKE IT AN EVENT
-Give every get-together a look — 14 animated themes from confetti to cosmic —
+Give every get-together a look: 14 animated themes from confetti to cosmic,
 plus a cover you upload or have AI paint for you. Set the date, place, capacity,
 and a few questions for guests.
 
@@ -44,7 +44,7 @@ SETTLE UP, NO SPREADSHEET
 Log what people paid, split it fairly, and see who owes whom at a glance.
 Settle with Venmo or Apple Cash in a tap.
 
-Friendly is free, private by design, and built for real friend groups — not
+Friendly is free, private by design, and built for real friend groups, not
 followers.
 ```
 
@@ -56,7 +56,7 @@ followers.
 - **Version:** `1.0`
 
 ## Screenshots
-Required: **6.9" iPhone** (1320×2868) — 3 to 10 images. I'll capture these from
+Required: **6.9" iPhone** (1320×2868), 3 to 10 images. I'll capture these from
 the iPhone 17 Pro Max simulator once you're signed in and have a group + a
 themed event to show. Optional: 6.5" set (App Store scales the 6.9" ones).
 No iPad set needed: the app is iPhone-only for v1.
@@ -80,7 +80,7 @@ Data collected, all **linked to the user**, all used for **App Functionality** o
   address book itself is never uploaded.
 - **User Content:** photos, comments/messages (party wall), polls, playlist
 - **Identifiers:** user ID, device push token
-- **Financial Info:** none is collected — expense amounts you type are stored,
+- **Financial Info:** none is collected; expense amounts you type are stored,
   but no payment method; Venmo/Apple Cash open in their own apps.
 - **Usage / Diagnostics:** none
 
@@ -88,7 +88,7 @@ Privacy manifest: the build already includes the SPM plugins' privacy manifests;
 Xcode will flag any missing "required reason" API on upload.
 
 ## App Review information **[you]**
-- **Sign-in required:** Yes — create a demo account in the app for reviewers
+- **Sign-in required:** Yes. Create a demo account in the app for reviewers
   (e.g. sign up `reviewer@officialfriendly.com` with a password you set), put a
   couple of events in it, and enter that email/password here. Reviewers can't
   test invite-only content otherwise.
@@ -105,7 +105,7 @@ Xcode will flag any missing "required reason" API on upload.
 1. **User-generated content (Guideline 1.2).** Friendly has comments and photos.
    Even though everything is invite-only, App Review commonly asks for a way to
    **report** content and **block/remove** a user. Hosts can already remove
-   guests; I recommend adding "Report" on comments/photos before submitting —
+   guests; I recommend adding "Report" on comments/photos before submitting;
    it's a small change and avoids a rejection round-trip. Say the word.
 2. **Sign-in with Apple (Guideline 4.8).** This applies only if the app offers
    third-party sign-in (Google/Facebook). Friendly uses email/password only, so
@@ -115,7 +115,7 @@ Xcode will flag any missing "required reason" API on upload.
 ## Push notifications (for delivery to real devices) **[you]**
 1. developer.apple.com → Certificates, IDs & Profiles → **Keys** → **+** → name
    it `Friendly APNs`, check **Apple Push Notifications service (APNs)** →
-   Continue → Register → **Download** the `.p8` (one-time download — keep it)
+   Continue → Register → **Download** the `.p8` (one-time download, keep it)
    and note the **Key ID** and your **Team ID** (top-right of that page).
 2. Firebase console → Project settings → **Cloud Messaging** → under the iOS
    app, **APNs Authentication Key → Upload**: the `.p8`, Key ID, Team ID.

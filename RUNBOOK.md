@@ -1,9 +1,9 @@
-# Friendly — deploy runbook
+# Friendly, deploy runbook
 
 The web app auto-deploys to https://officialfriendly.com from `main` (GitHub
 Pages). Two things run on your accounts and need a few manual steps.
 
-## A. Cloud Functions (push notifications, reminders) — needs Blaze (enabled)
+## A. Cloud Functions (push notifications, reminders), needs Blaze (enabled)
 
 From this repo root, in your own terminal:
 
@@ -16,7 +16,7 @@ firebase deploy --only functions
 
 This deploys:
 - **push on new events, comments, and RSVPs** (to devices that registered a token),
-- **day-of reminders** at 9am (`America/Chicago` — change in `functions/index.js`).
+- **day-of reminders** at 9am (`America/Chicago`, change in `functions/index.js`).
 
 Push needs the native app (below) registered for APNs. For web-only push later,
 we'd add a Firebase Cloud Messaging web key.
@@ -29,7 +29,7 @@ firebase deploy --only functions
 (Twilio account + a phone number, ~$1/mo + ~1¢/text. The SMS hook is stubbed in
 `functions/index.js` to activate when these are set.)
 
-## B. Native iOS app (App Store) — needs a Mac with full Xcode
+## B. Native iOS app (App Store), needs a Mac with full Xcode
 
 The Capacitor project lives in `app-native/`. It wraps officialfriendly.com and
 adds native **Contacts** (real phone-contact invites) and **Push**.

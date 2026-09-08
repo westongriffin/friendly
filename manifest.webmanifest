@@ -1,7 +1,7 @@
 {
   "name": "Friendly",
   "short_name": "Friendly",
-  "description": "Your friend group's home base — plans, invites, photos, and settling up.",
+  "description": "Your friend group's home base for plans, invites, photos, and settling up.",
   "id": "friendly",
   "start_url": "./",
   "scope": "./",

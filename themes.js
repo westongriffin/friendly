@@ -1,4 +1,4 @@
-// Friendly — event themes. Each theme is an expressive identity for an event
+// Friendly: event themes. Each theme is an expressive identity for an event
 // page: a display font, a palette, an animated background (CSS class `t-<id>`
 // defined in styles.css) and an optional canvas particle system.
 //
@@ -83,7 +83,7 @@ export const DEFAULT_THEME = "confetti";
 export function themeOf(id) { return THEME_BY_ID[id] || THEME_BY_ID[DEFAULT_THEME]; }
 
 // Apply a theme's palette + font to an element (the event surface) and set the
-// background class. Does not start particles — call startParticles separately.
+// background class. Does not start particles; call startParticles separately.
 export function applyTheme(el, id) {
   const t = themeOf(id);
   THEMES.forEach(x => el.classList.remove("t-" + x.id));

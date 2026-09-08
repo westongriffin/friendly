@@ -1,4 +1,4 @@
-// Friendly — app (Firebase Auth + Firestore). Real accounts, groups with
+// Friendly: app (Firebase Auth + Firestore). Real accounts, groups with
 // server-enforced privacy, expressive themed events, RSVP + guest management,
 // and shared money. Hosted static on GitHub Pages; no build step.
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
@@ -83,7 +83,7 @@ async function generateCover(prompt) {
   } catch (e) { console.warn("Imagen unavailable, using fallback:", e && e.message); }
   const seed = Math.floor(Math.random() * 1e6);
   const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt + ", vibrant celebratory illustration, bold colors, high quality, no text, no words, no numbers, no dates")}?width=1024&height=640&nologo=true&model=flux&seed=${seed}`;
-  const res = await fetch(url); if (!res.ok) throw new Error("Generator busy — try again");
+  const res = await fetch(url); if (!res.ok) throw new Error("Generator busy, try again");
   return compressImage(await blobToURL(await res.blob()), 1024, 0.74);
 }
 // Write coverRequests/{id}, wait for the function to fill in image/status.
@@ -254,7 +254,7 @@ function renderAuth(root) {
     <canvas id="authbg" class="auth-bg"></canvas>
     <div class="auth-card card">
       <div class="brand xl">Friend<span class="tilt">l</span>y</div>
-      <p class="auth-lede">Your friend group's home base — plans, invites, photos, and settling up.</p>
+      <p class="auth-lede">Your friend group's home base for plans, invites, photos, and settling up.</p>
       <div class="seg">
         <button id="segIn" class="${authMode === "in" ? "on" : ""}">Sign in</button>
         <button id="segUp" class="${authMode === "up" ? "on" : ""}">Create account</button>
@@ -299,7 +299,7 @@ function renderAuth(root) {
 }
 function authError(err) {
   const c = (err && err.code) || "";
-  if (c.includes("email-already-in-use")) return "That email already has an account — sign in instead.";
+  if (c.includes("email-already-in-use")) return "That email already has an account. Sign in instead.";
   if (c.includes("invalid-credential") || c.includes("wrong-password") || c.includes("user-not-found")) return "Email or password is incorrect.";
   if (c.includes("weak-password")) return "Password needs at least 6 characters.";
   if (c.includes("invalid-email")) return "That doesn't look like a valid email.";
@@ -389,7 +389,7 @@ function homeBody() {
   return `
   <div class="section-head"><h2>Upcoming</h2><button class="btn primary small" data-go="#/new">＋ New event</button></div>
   ${filterBar}
-  <div class="ev-grid">${upcoming.length ? upcoming.map(eventCard).join("") : emptyState("🗓️", "No plans yet", "Create your first event — pick a theme and invite the crew.")}</div>
+  <div class="ev-grid">${upcoming.length ? upcoming.map(eventCard).join("") : emptyState("🗓️", "No plans yet", "Create your first event: pick a theme and invite the crew.")}</div>
   ${past.length ? `<div class="section-head" style="margin-top:26px"><h2>Past</h2></div><div class="ev-grid dim">${past.map(eventCard).join("")}</div>` : ""}`;
 }
 function emptyState(emoji, title, sub) { return `<div class="card empty"><div class="big">${emoji}</div><b>${esc(title)}</b><p class="muted">${esc(sub)}</p></div>`; }
@@ -480,7 +480,7 @@ function wireGroupPage() {
   S.comments = []; S.polls = [];
   const sub = (name, fn) => S.evSubs.push(onSnapshot(subCol(pseudo, name), snap => fn(snap.docs.map(d => ({ id: d.id, ...d.data() }))), e => toast(e.message)));
   sub("comments", rows => { S.comments = rows.sort((a, b) => a.createdAt - b.createdAt); const b = el("wall"); if (b) { b.innerHTML = wallInner(pseudo, "Group chat"); wireWall(pseudo); } });
-  sub("polls", rows => { S.polls = rows.sort((a, b) => a.createdAt - b.createdAt); const b = el("pollsCard"); if (b) { b.innerHTML = pollsInner(pseudo, "Poll the group — dates, places, ideas."); wirePolls(pseudo); } });
+  sub("polls", rows => { S.polls = rows.sort((a, b) => a.createdAt - b.createdAt); const b = el("pollsCard"); if (b) { b.innerHTML = pollsInner(pseudo, "Poll the group: dates, places, ideas."); wirePolls(pseudo); } });
 }
 
 // group create / invite / membership
@@ -505,7 +505,7 @@ function openGroupDialog() {
         members: { [myUid()]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "" } },
         invitedEmails: emails, createdAt: Date.now()
       });
-      closeDialog(); go("#/g/" + id); toast("Group created" + (emails.length ? " — invites sent" : ""));
+      closeDialog(); go("#/g/" + id); toast("Group created" + (emails.length ? ", invites sent" : ""));
     });
   document.querySelectorAll("#gEmoji button").forEach(b => b.onclick = () => { document.querySelectorAll("#gEmoji button").forEach(x => x.classList.remove("on")); b.classList.add("on"); });
 }
@@ -521,9 +521,9 @@ function openInviteDialog(g) {
     <div class="inv-results" id="invResults"></div>
     ${hasPicker ? `<button type="button" class="btn small" id="invPick" style="margin-bottom:12px">📇 Pick from phone contacts</button>` : ""}
     <label class="field"><span>Or invite by email</span><input id="invEmails" placeholder="alex@example.com, jo@example.com"></label>
-    <p class="muted sm" style="margin-top:-4px">Emailed folks connect automatically when they sign in with that address.${!hasPicker ? " (Reading your phone's contacts isn't available in this browser — on iPhone that needs the native app.)" : ""}</p>
+    <p class="muted sm" style="margin-top:-4px">Emailed folks connect automatically when they sign in with that address.${!hasPicker ? " (Reading your phone's contacts isn't available in this browser; on iPhone that needs the native app.)" : ""}</p>
     <button type="button" class="btn small" id="invText">💬 Text someone an invite</button>
-    <p class="muted sm" style="margin-top:6px">Opens Messages with an invite written for you — it comes from your own number.</p>`,
+    <p class="muted sm" style="margin-top:6px">Opens Messages with an invite written for you. It comes from your own number.</p>`,
     "Send invites", async () => {
       const emails = el("invEmails").value.split(",").map(s => s.trim().toLowerCase()).filter(x => x.includes("@"));
       const existingE = new Set([...(g.invitedEmails || [])]);
@@ -563,8 +563,8 @@ function openInviteDialog(g) {
         const picked = await navigator.contacts.select(["name", "email"], { multiple: true });
         emails = picked.flatMap(p => p.email || []).filter(Boolean);
       }
-      if (emails.length) { el("invEmails").value = [el("invEmails").value, ...emails].filter(Boolean).join(", "); toast(emails.length + " added from contacts" + (phones.length ? " — they'll get a text too" : "")); }
-      else if (phones.length) toast("No email on that contact — they'll get a text with the invite instead.");
+      if (emails.length) { el("invEmails").value = [el("invEmails").value, ...emails].filter(Boolean).join(", "); toast(emails.length + " added from contacts" + (phones.length ? ", they'll get a text too" : "")); }
+      else if (phones.length) toast("No email on that contact, so they'll get a text with the invite instead.");
       else toast("No email or number on that contact.");
     } catch { toast("Contact picking was cancelled."); }
   };
@@ -591,7 +591,7 @@ async function acceptInvite(gid, btn) {
     toast(msg);
   }
 }
-function inviteText(g) { return `Hey! I set up "${g.name}" on Friendly — it's where our group plans hangouts, RSVPs, and splits costs. Grab it at https://officialfriendly.com, sign up with your email, and send me that email so I can add you 🎉`; }
+function inviteText(g) { return `Hey! I set up "${g.name}" on Friendly. It's where our group plans hangouts, RSVPs, and splits costs. Grab it at https://officialfriendly.com, sign up with your email, and send me that email so I can add you 🎉`; }
 async function uninvite(g, email) { try { await updateDoc(doc(db, "groups", g.id), { invitedEmails: (g.invitedEmails || []).filter(e => e !== email) }); } catch (e) { toast(e.message); } }
 async function deleteGroup(g) { if (!confirm(`Delete “${g.name}”? Its events stay, but the group is removed.`)) return; try { await deleteDoc(doc(db, "groups", g.id)); go("#/groups"); toast("Group deleted"); } catch (e) { toast(e.message); } }
 async function leaveGroup(g) {
@@ -689,7 +689,7 @@ function coverPanel() {
 }
 function contactChecks(name, set) {
   const others = [...S.contacts.entries()].filter(([u]) => u !== myUid());
-  if (!others.length) return `<span class="muted sm">No friends yet — invite people to a group first.</span>`;
+  if (!others.length) return `<span class="muted sm">No friends yet. Invite people to a group first.</span>`;
   return others.map(([u, info]) => `<label class="cbox"><input type="checkbox" name="${name}" value="${u}" ${set.has(u) ? "checked" : ""}>${avatar(u)} ${esc(first(info.name))}</label>`).join("");
 }
 function syncCompose() {
@@ -732,7 +732,7 @@ function wireCover() {
     const p = el("aiPrompt").value.trim(); if (!p) return toast("Describe the vibe first.");
     el("coverPanel").innerHTML = `<div class="cover-spin"><div class="spinner"></div>Painting your cover…</div>`;
     try { compose.cover = await generateCover(p); refreshCoverUI(); toast("Fresh cover, made for you ✨"); }
-    catch (e) { toast(e.message || "Generator busy — try again."); compose.coverTab = "ai"; refreshCoverUI(); }
+    catch (e) { toast(e.message || "Generator busy, try again."); compose.coverTab = "ai"; refreshCoverUI(); }
   };
 }
 let composeStop = () => {};
@@ -762,7 +762,7 @@ async function createEvent() {
     el("createEventBtn").disabled = true; el("createEventBtn").textContent = "Creating…";
     await setDoc(doc(db, "events", id), ev);
     composeStop(); resetCompose();
-    go("#/e/" + id); toast("Event created — invites are live");
+    go("#/e/" + id); toast("Event created, invites are live");
   } catch (e) { toast("Couldn't create: " + e.message); el("createEventBtn").disabled = false; el("createEventBtn").textContent = "Create event & send invites"; }
 }
 
@@ -822,7 +822,7 @@ function eventInner(ev) {
     ${myR === "going" || myR === "waitlist" ? `<div class="plus"><span>Bringing</span>
       <button data-plus="-1" ${myPlus <= 0 ? "disabled" : ""}>−</button><b>+${myPlus}</b><button data-plus="1">＋</button></div>` : ""}
     ${myR === "pending" ? `<p class="pending-note">⏳ Waiting for the host to approve you.</p>` : ""}
-    ${full && myR !== "going" ? `<p class="full-note">This event is full — RSVP to join the waitlist.</p>` : ""}
+    ${full && myR !== "going" ? `<p class="full-note">This event is full. RSVP to join the waitlist.</p>` : ""}
     ${questionsBlock(ev, me, myR)}` : `<p class="not-invited">You're viewing this event but aren't on the guest list.</p>`;
 
   const guestList = ["going", "maybe", "waitlist", "pending", "no", "none"].map(k => {
@@ -908,7 +908,7 @@ function wireWall(ev) {
 }
 
 // ----- Polls -----
-function pollsInner(ev, hint = "Add a poll to help decide — food, time, theme.") {
+function pollsInner(ev, hint = "Add a poll to help decide: food, time, theme.") {
   const me = myUid(); const manage = canManage(ev);
   const list = S.polls.map(p => {
     const total = Object.keys(p.votes || {}).length || 0;
@@ -956,7 +956,7 @@ function playlistInner(ev) {
       <div class="st"><b>${esc(s.title)}</b>${s.artist ? `<span>${esc(s.artist)}</span>` : ""}</div>
       ${s.addedBy === me ? `<button class="wall-del" data-delsong="${s.id}">✕</button>` : ""}</div>`;
   }).join("");
-  return `<div class="glass-head">Playlist <a class="btn-th ghost small" id="addSong">＋ Add song</a></div>${list || `<p class="muted-th">Build the vibe — add songs, upvote favorites.</p>`}`;
+  return `<div class="glass-head">Playlist <a class="btn-th ghost small" id="addSong">＋ Add song</a></div>${list || `<p class="muted-th">Build the vibe: add songs, upvote favorites.</p>`}`;
 }
 function wirePlaylist(ev) {
   if (el("addSong")) el("addSong").onclick = () => addSongDialog(ev);
@@ -1010,7 +1010,7 @@ async function saveAnswers(ev) {
   try { await updateDoc(doc(db, "events", ev.id), { [`answers.${me}`]: a }); toast("Answers saved"); } catch (e) { toast(e.message); }
 }
 function showAnswers(ev) {
-  const rows = (ev.invitedUids || []).filter(u => (ev.answers || {})[u]).map(u => `<div class="ans-block"><b>${esc(nameOf(u))}</b>${ev.questions.map(q => `<div class="ans"><span>${esc(q.q)}</span> ${esc((ev.answers[u] || {})[q.id] || "—")}</div>`).join("")}</div>`).join("");
+  const rows = (ev.invitedUids || []).filter(u => (ev.answers || {})[u]).map(u => `<div class="ans-block"><b>${esc(nameOf(u))}</b>${ev.questions.map(q => `<div class="ans"><span>${esc(q.q)}</span> ${esc((ev.answers[u] || {})[q.id] || "(no answer)")}</div>`).join("")}</div>`).join("");
   dialog(`<h3>RSVP answers</h3>${rows || `<p class="muted">No answers yet.</p>`}`, null, null);
 }
 async function postComment(ev) {
@@ -1138,7 +1138,7 @@ function openExpense(eventId, restrict) {
     <label class="field"><span>Paid by</span><select id="xPayer">${payerOptions(people)}</select></label></div>
     <span class="field-label">Split between</span><div class="check-grid" id="xSplit">${people.map(([u, i]) => `<label class="cbox"><input type="checkbox" name="spl" value="${u}" ${!restrict || restrict.includes(u) ? "checked" : ""}>${esc(first(i.name))}</label>`).join("")}</div>
     <button type="button" class="btn small" id="xScan" style="margin-top:12px">📷 Scan a receipt to itemize</button>
-    <p class="muted sm" style="margin-top:6px">Snap the receipt, assign each line to whoever had it — tax and tip split in proportion.</p>`,
+    <p class="muted sm" style="margin-top:6px">Snap the receipt, assign each line to whoever had it. Tax and tip split in proportion.</p>`,
     "Add expense", async () => {
       const amount = parseAmount(el("xAmt").value); if (!amount) return toast("Enter a valid amount.");
       const split = [...document.querySelectorAll('input[name=spl]:checked')].map(i => i.value); if (!split.length) return toast("Pick who splits it.");
