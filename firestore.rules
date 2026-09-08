@@ -1,0 +1,108 @@
+rules_version = '2';
+// Friendly — Firestore security rules.
+// Real per-group privacy is enforced HERE, on the server. A signed-in stranger
+// can never read a group, event, or expense they aren't part of.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function uid() { return request.auth.uid; }
+    function email() { return request.auth.token.email; }
+
+    function groupMemberUids(gid) {
+      return get(/databases/$(database)/documents/groups/$(gid)).data.memberUids;
+    }
+
+    // ---- Users: each profile is private to its owner ----
+    match /users/{userId} {
+      allow read, write: if signedIn() && userId == uid();
+    }
+
+    // ---- Groups ----
+    // Doc shape: { name, emoji, ownerId, memberUids[], invitedEmails[],
+    //              members: { <uid>: {name, venmo, phone} }, createdAt }
+    match /groups/{groupId} {
+      allow read: if signedIn()
+        && (uid() in resource.data.memberUids || email() in resource.data.invitedEmails);
+
+      allow create: if signedIn()
+        && request.resource.data.ownerId == uid()
+        && uid() in request.resource.data.memberUids;
+
+      // Owner manages the group; an invited user may accept (adds only self to
+      // memberUids, keeping everyone already a member); a member may update the
+      // denormalized data (e.g. their own display fields) or leave.
+      allow update: if signedIn() && (
+        uid() == resource.data.ownerId
+        || uid() in resource.data.memberUids
+        || (email() in resource.data.invitedEmails
+            && request.resource.data.memberUids.hasAll(resource.data.memberUids)
+            && uid() in request.resource.data.memberUids)
+      );
+
+      allow delete: if signedIn() && uid() == resource.data.ownerId;
+    }
+
+    // ---- Events ----
+    // Doc shape: { hostId, cohostUids[], groupId|null, invitedUids[], title,
+    //   emoji, date, time, endTime, location, notes, capacity,
+    //   rsvps{}, plusOnes{}, hypes{}, createdAt }
+    match /events/{eventId} {
+      function isHost() {
+        return signedIn()
+          && (uid() == resource.data.hostId || uid() in resource.data.cohostUids);
+      }
+      function isInvited() { return signedIn() && uid() in resource.data.invitedUids; }
+      function viaGroup() {
+        return signedIn() && resource.data.groupId != null
+          && uid() in groupMemberUids(resource.data.groupId);
+      }
+      // An invited (non-host) guest may only edit their own key in a map field.
+      function onlyOwn(field) {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly([field])
+          && request.resource.data[field].diff(resource.data[field]).affectedKeys().hasOnly([uid()]);
+      }
+
+      allow read: if isHost() || isInvited() || viaGroup();
+      allow create: if signedIn() && request.resource.data.hostId == uid();
+      allow update: if isHost()
+        || (isInvited() && (onlyOwn('rsvps') || onlyOwn('plusOnes') || onlyOwn('hypes')));
+      allow delete: if signedIn() && uid() == resource.data.hostId;
+
+      // ---- Party wall (comments) ----
+      match /comments/{commentId} {
+        function canReadEvent() {
+          let e = get(/databases/$(database)/documents/events/$(eventId)).data;
+          return signedIn() && (
+            uid() == e.hostId || uid() in e.cohostUids || uid() in e.invitedUids
+            || (e.groupId != null && uid() in groupMemberUids(e.groupId))
+          );
+        }
+        allow read: if canReadEvent();
+        allow create: if canReadEvent() && request.resource.data.authorId == uid();
+        allow delete: if signedIn() && resource.data.authorId == uid();
+      }
+    }
+
+    // ---- Expenses ----
+    // Doc shape: { desc, amountCents, paidBy, split[], involved[], eventId,
+    //              groupId|null, addedBy, createdAt }.  involved = paidBy + split.
+    match /expenses/{expenseId} {
+      allow read: if signedIn() && uid() in resource.data.involved;
+      allow create: if signedIn()
+        && request.resource.data.addedBy == uid()
+        && uid() in request.resource.data.involved;
+      allow update, delete: if signedIn() && uid() == resource.data.addedBy;
+    }
+
+    // ---- Settlements ----
+    // Doc shape: { from, to, amountCents, involved:[from,to], note, addedBy, createdAt }
+    match /settlements/{settlementId} {
+      allow read: if signedIn() && uid() in resource.data.involved;
+      allow create: if signedIn()
+        && request.resource.data.addedBy == uid()
+        && uid() in request.resource.data.involved;
+      allow update, delete: if signedIn() && uid() == resource.data.addedBy;
+    }
+  }
+}
