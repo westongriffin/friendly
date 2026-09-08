@@ -64,6 +64,17 @@ Until DNS is set up, the site also works at
   Going / Maybe / Can't. New events email the invitees.
 - **Money**: add expenses split evenly among chosen friends, see who owes
   whom, and record reimbursements ("Record payment") to zero things out.
+- **Paying each other**: profiles can hold a Venmo username and a phone
+  number. Settle-up rows then get one-tap buttons — Venmo opens prefilled
+  with recipient/amount/note (or a Request for money owed to you), and the
+  Apple Cash button opens Messages to that friend (Apple Cash is attached
+  there; Apple offers no deeper integration). Money never moves through the
+  app itself — pay in Venmo/Messages, then tap Record payment.
+- **Push notifications**: enable per device from the Friends tab — invites,
+  new expenses, payments, and RSVPs. On iPhone this requires iOS 16.4+ and
+  the app installed to the home screen first (Apple's rule for web push).
+  The backend signs Web Push (VAPID/ES256) itself; the private key lives in
+  the Apps Script's Script Properties (`VAPID_PRIVATE_KEY`), not in this repo.
 - The app polls the sheet every 20 seconds, so everyone converges on the
   same state; a service worker caches the shell so the installed app opens
   instantly.

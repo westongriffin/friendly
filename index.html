@@ -104,7 +104,9 @@ h2.sec{font-family:var(--display);font-weight:700;font-size:19px;margin:0;text-w
 .tile{padding:14px 16px}
 .tile .amt{font-family:var(--mono);font-weight:600;font-size:24px;margin-top:2px;font-variant-numeric:tabular-nums}
 .tile.owe .amt{color:var(--bad)} .tile.owed .amt{color:var(--good)}
-.suggest{display:flex;align-items:center;gap:10px;padding:11px 14px}
+.suggest{display:flex;align-items:center;gap:10px;padding:11px 14px;flex-wrap:wrap}
+.btn.venmo{background:#008CFF;color:#fff}
+.btn.apple{background:var(--ink);color:var(--bg)}
 .suggest .who{flex:1;min-width:0;font-size:14px}
 .suggest .amt{font-family:var(--mono);font-weight:600}
 .ledger-row{display:flex;align-items:center;gap:12px;padding:11px 14px}
@@ -202,6 +204,10 @@ dialog::backdrop{background:rgba(20,16,10,.45)}
         <form id="joinForm">
           <div class="field"><label for="jName">Your name</label><input id="jName" required maxlength="40" placeholder="Sam Rivera" autocomplete="name"></div>
           <div class="field"><label for="jEmail">Email</label><input id="jEmail" type="email" required maxlength="80" placeholder="sam@example.com" autocomplete="email"></div>
+          <div class="two">
+            <div class="field"><label for="jVenmo">Venmo (optional)</label><input id="jVenmo" maxlength="40" placeholder="@sam-rivera"></div>
+            <div class="field"><label for="jPhone">Phone (optional)</label><input id="jPhone" type="tel" maxlength="20" placeholder="+1 555 123 4567" autocomplete="tel"></div>
+          </div>
           <button class="btn primary" style="width:100%" type="submit">Create my profile</button>
         </form>
       </div>
@@ -272,6 +278,11 @@ dialog::backdrop{background:rgba(20,16,10,.45)}
   <h3>Your profile</h3>
   <div class="field"><label for="pfName">Name</label><input id="pfName" required maxlength="40"></div>
   <div class="field"><label for="pfEmail">Email</label><input id="pfEmail" type="email" required maxlength="80"></div>
+  <div class="two">
+    <div class="field"><label for="pfVenmo">Venmo username</label><input id="pfVenmo" maxlength="40" placeholder="@sam-rivera"></div>
+    <div class="field"><label for="pfPhone">Phone (Apple Cash)</label><input id="pfPhone" type="tel" maxlength="20" placeholder="+1 555 123 4567"></div>
+  </div>
+  <p style="margin:-4px 0 12px;font-size:12.5px;color:var(--muted)">Friends use these to pay you: Venmo opens prefilled, Apple&nbsp;Cash goes through Messages.</p>
   <div class="dlg-actions">
     <button type="button" class="btn ghost" id="switchProfile">Switch profile</button>
     <span style="flex:1"></span>
@@ -505,11 +516,22 @@ function renderMoney() {
       <div class="card tile owed"><span class="label">Owed to you</span><div class="amt">${fmt$(owedMe)}</div></div>
     </div>
     ${mine.length ? `<div class="section-head"><h2 class="sec">Settle up</h2></div><div class="stack">
-      ${mine.map(p => `<div class="card suggest">${avatarHtml(p.from)}
+      ${mine.map(p => {
+        const other = S.members.get(p.from === me ? p.to : p.from) || {};
+        let payBtns = "";
+        if (p.from === me) {
+          if (other.venmo) payBtns += `<button class="btn small venmo" onclick="payVenmo('${p.to}',${p.amount})">Venmo</button>`;
+          if (other.phone) payBtns += `<button class="btn small apple" onclick="payAppleCash('${p.to}',${p.amount})">&#63743; Cash</button>`;
+        } else if (other.venmo) {
+          payBtns = `<button class="btn small venmo" onclick="requestVenmo('${p.from}',${p.amount})">Request</button>`;
+        }
+        return `<div class="card suggest">${avatarHtml(p.from)}
         <div class="who"><strong>${p.from === me ? "You owe " + esc(nameOf(p.to)) : esc(nameOf(p.from)) + " owes you"}</strong></div>
-        <div class="amt">${fmt$(p.amount)}</div>
-        <button class="btn small" onclick="openSettle('${p.from}','${p.to}',${p.amount})">Record payment</button></div>`).join("")}
-    </div>` : ""}
+        <div class="amt">${fmt$(p.amount)}</div>${payBtns}
+        <button class="btn small" onclick="openSettle('${p.from}','${p.to}',${p.amount})">Record payment</button></div>`;
+      }).join("")}
+    </div>
+    <p style="margin:8px 2px 0;font-size:12.5px;color:var(--muted)">Pay in Venmo or Messages, then tap Record payment so the ledger updates.${!(S.members.get(me)||{}).venmo && !(S.members.get(me)||{}).phone ? " Add your Venmo and phone in your profile so friends can pay you in one tap." : ""}</p>` : ""}
     <div class="section-head"><h2 class="sec">Ledger</h2><div style="display:flex;gap:8px">
       <button class="btn small" onclick="openSettle()">Record payment</button>
       <button class="btn primary small" onclick="openExpense()">+ Expense</button></div></div>
@@ -532,10 +554,70 @@ function renderFriends() {
         else bal = `<div class="friend-bal" style="color:var(--muted)">settled up</div>`;
       } else bal = `<button class="btn small" onclick="openProfile()">Edit</button>`;
       return `<div class="friend">${avatarHtml(m.id, "lg")}
-        <div class="friend-main"><div class="n">${esc(m.name)}${m.id === me ? " (you)" : ""}</div><div class="e">${esc(m.email || "")}</div></div>${bal}</div>`;
+        <div class="friend-main"><div class="n">${esc(m.name)}${m.id === me ? " (you)" : ""}</div><div class="e">${esc(m.email || "")}${m.venmo ? " · " + esc(m.venmo.startsWith("@") ? m.venmo : "@" + m.venmo) : ""}</div></div>${bal}</div>`;
     }).join("")}</div>
+    ${pushUi()}
     <div class="invite-note"><strong>Adding friends:</strong> send them this site&rsquo;s link. They create a profile, then install it from the browser menu (&ldquo;Add to Home Screen&rdquo; on a phone, &ldquo;Install app&rdquo; on desktop).</div>`;
 }
+
+// ---------- payments (handoff to Venmo / Messages; money never moves in-app) ----------
+window.payVenmo = (toId, cents) => {
+  const m = S.members.get(toId); if (!m || !m.venmo) return;
+  const u = encodeURIComponent(m.venmo.replace(/^@/, ""));
+  window.open(`https://venmo.com/${u}?txn=pay&amount=${(cents/100).toFixed(2)}&note=${encodeURIComponent("Settling up via Friendly 🤝")}`, "_blank");
+  toast("After you send it in Venmo, tap Record payment here.");
+};
+window.requestVenmo = (fromId, cents) => {
+  const m = S.members.get(fromId); if (!m || !m.venmo) return;
+  const u = encodeURIComponent(m.venmo.replace(/^@/, ""));
+  window.open(`https://venmo.com/${u}?txn=charge&amount=${(cents/100).toFixed(2)}&note=${encodeURIComponent("Friendly settle-up 🤝")}`, "_blank");
+  toast("Request opened in Venmo. Record the payment once they pay.");
+};
+window.payAppleCash = (toId, cents) => {
+  const m = S.members.get(toId); if (!m || !m.phone) return;
+  const sep = /iPhone|iPad|Macintosh/.test(navigator.userAgent) ? "&" : "?";
+  const msg = `Sending you $${(cents/100).toFixed(2)} in Apple Cash for our Friendly tab 🤝`;
+  location.href = "sms:" + m.phone.replace(/[^+\d]/g, "") + sep + "body=" + encodeURIComponent(msg);
+  toast("Attach Apple Cash in Messages, then Record payment here.");
+};
+
+// ---------- push notifications ----------
+const VAPID_PUBLIC_KEY = "BMZ2sS0QE3ElRD78S_7PV_dqhea8wBey9W033-FRmFdQK-GdnwaW3cCDq9DM9NURsNkTVf8mfF8EGkbkEFkKpjE";
+const pushFlag = {
+  get on() { try { return localStorage.getItem("friendly.push") === "1"; } catch { return false; } },
+  set on(v) { try { v ? localStorage.setItem("friendly.push", "1") : localStorage.removeItem("friendly.push"); } catch {} }
+};
+function b64uToU8(s) {
+  const pad = "=".repeat((4 - s.length % 4) % 4);
+  const raw = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, c => c.charCodeAt(0));
+}
+function pushUi() {
+  const supported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  const isIphone = /iPhone|iPad/.test(navigator.userAgent);
+  const installed = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+  if (!supported) {
+    return `<div class="invite-note"><strong>Notifications:</strong> ${isIphone && !installed
+      ? "first install Friendly (Share → Add to Home Screen), then enable notifications inside the installed app."
+      : "not supported in this browser."}</div>`;
+  }
+  const on = Notification.permission === "granted" && pushFlag.on;
+  return `<div class="invite-note" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <span style="flex:1;min-width:200px"><strong>Notifications:</strong> ${on ? "on for this device" : "get pinged for invites, expenses, and payments"}</span>
+    ${on ? "" : `<button class="btn primary small" onclick="enablePush()">Enable</button>`}</div>`;
+}
+window.enablePush = async () => {
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") { toast("Notifications are blocked for this app in your browser settings."); return; }
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uToU8(VAPID_PUBLIC_KEY) });
+    await apiCall({ action: "subscribe", memberId: S.me, endpoint: sub.endpoint });
+    pushFlag.on = true;
+    toast("Notifications are on for this device 🎉");
+    render();
+  } catch (e) { console.error(e); toast("Couldn’t enable notifications: " + e.message); }
+};
 
 // ---------- actions ----------
 window.pickMe = id => { S.me = id; store.k = id; render(); };
@@ -645,18 +727,21 @@ window.delSettle = id => {
 window.openProfile = () => {
   const m = S.members.get(S.me); if (!m) return;
   $("#pfName").value = m.name; $("#pfEmail").value = m.email || "";
+  $("#pfVenmo").value = m.venmo || ""; $("#pfPhone").value = m.phone || "";
   $("#profileDialog").showModal();
 };
 $("#profileForm").addEventListener("submit", () => {
   const m = S.members.get(S.me);
-  upsert("members", { ...m, name: $("#pfName").value.trim(), email: $("#pfEmail").value.trim() }, "Profile saved");
+  upsert("members", { ...m, name: $("#pfName").value.trim(), email: $("#pfEmail").value.trim(),
+    venmo: $("#pfVenmo").value.trim(), phone: $("#pfPhone").value.trim() }, "Profile saved");
 });
 $("#switchProfile").addEventListener("click", () => { $("#profileDialog").close(); S.me = null; store.k = null; render(); });
 
 $("#meChip").addEventListener("click", () => openProfile());
 $("#joinForm").addEventListener("submit", e => {
   e.preventDefault();
-  const row = { id: newId(), name: $("#jName").value.trim(), email: $("#jEmail").value.trim(), createdAt: Date.now() };
+  const row = { id: newId(), name: $("#jName").value.trim(), email: $("#jEmail").value.trim(),
+    venmo: $("#jVenmo").value.trim(), phone: $("#jPhone").value.trim(), createdAt: Date.now() };
   S.members.set(row.id, row); S.me = row.id; store.k = row.id; render();
   upsert("members", row, "Welcome to the group!");
 });

@@ -1,7 +1,8 @@
-// Friendly service worker: cache the app shell so the installed app opens
-// instantly (and offline, with the last-synced data screen). API calls to
-// Google Apps Script always go to the network.
-const CACHE = "friendly-v1";
+// Friendly service worker: caches the app shell so the installed app opens
+// instantly, and shows push notifications. API calls always hit the network.
+importScripts("./config.js");
+const API = ((self.FRIENDLY_CONFIG || {}).scriptUrl || "").trim();
+const CACHE = "friendly-v2";
 const SHELL = [
   "./",
   "./index.html",
@@ -37,5 +38,36 @@ self.addEventListener("fetch", e => {
       }).catch(() => cached);
       return cached || fetched;
     })
+  );
+});
+
+// Pushes arrive without a payload (the backend can't encrypt one), so ask the
+// API what just happened and show that. iOS requires every push to show a
+// notification, so always fall back to a generic line.
+self.addEventListener("push", e => {
+  e.waitUntil((async () => {
+    let body = "Something new in your group";
+    try {
+      if (API) {
+        const r = await fetch(API + "?action=latest", { cache: "no-store" });
+        const j = await r.json();
+        if (j.ok && j.msg) body = j.msg;
+      }
+    } catch (err) { /* keep the generic line */ }
+    await self.registration.showNotification("Friendly", {
+      body,
+      icon: "./icons/icon-192.png",
+      badge: "./icons/icon-192.png",
+      tag: "friendly-activity",
+      data: { url: "./" }
+    });
+  })());
+});
+
+self.addEventListener("notificationclick", e => {
+  e.notification.close();
+  e.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(ws =>
+      ws.length ? ws[0].focus() : self.clients.openWindow("./"))
   );
 });
