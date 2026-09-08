@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Friendly</title>
 <meta name="description" content="Plan hangouts, invite the group, and settle up afterwards, all in one shared app.">
-<meta name="theme-color" content="#FAF7F1" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#171310" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#FFF9EF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#211418" media="(prefers-color-scheme: dark)">
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" href="./icons/icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
@@ -16,27 +16,30 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@500;600&display=swap">
 <style>
 :root{
-  --bg:#FAF7F1; --surface:#FFFFFF; --surface2:#F3EEE5; --ink:#28221A;
-  --muted:#7A7060; --line:#E6DFD2; --accent:#DE9A22; --accent-strong:#C9881A;
-  --on-accent:#241A05; --good:#2F7D5A; --good-bg:#E4F1E9; --bad:#B4432F;
-  --bad-bg:#F7E7E2; --shadow:0 1px 3px rgba(40,34,26,.08),0 4px 16px rgba(40,34,26,.06);
+  --bg:#FFF9EF; --surface:#FFFFFF; --surface2:#FFF0DA; --ink:#3A241C;
+  --muted:#96755F; --line:#F4E0C6; --accent:#FF6B57; --accent-strong:#F2543F;
+  --on-accent:#FFFFFF; --sun:#FFC145; --on-sun:#3F2B06;
+  --good:#2E9E6B; --good-bg:#E2F5EB; --bad:#D23B5A;
+  --bad-bg:#FBE4E9; --shadow:0 1px 3px rgba(74,42,20,.08),0 4px 16px rgba(74,42,20,.07);
   --display:"Bricolage Grotesque","Avenir Next",system-ui,sans-serif;
   --body:"Instrument Sans",system-ui,-apple-system,sans-serif;
   --mono:"Spline Sans Mono",ui-monospace,SFMono-Regular,monospace;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
-    --bg:#171310; --surface:#201B16; --surface2:#2A241D; --ink:#EFE8DC;
-    --muted:#A39886; --line:#3A3228; --accent:#F0B04A; --accent-strong:#F5BE66;
-    --on-accent:#251A04; --good:#6CC29A; --good-bg:#1E332A; --bad:#E58974;
-    --bad-bg:#3A241F; --shadow:0 1px 3px rgba(0,0,0,.4),0 4px 16px rgba(0,0,0,.3);
+    --bg:#211418; --surface:#2C1D23; --surface2:#3A272F; --ink:#FBEDE4;
+    --muted:#C2A093; --line:#4C333C; --accent:#FF8571; --accent-strong:#FF9C8B;
+    --on-accent:#3D130B; --sun:#FFC960; --on-sun:#3F2B06;
+    --good:#5FCB96; --good-bg:#22382E; --bad:#F27E96;
+    --bad-bg:#43242C; --shadow:0 1px 3px rgba(0,0,0,.4),0 4px 16px rgba(0,0,0,.3);
   }
 }
 :root[data-theme="dark"]{
-  --bg:#171310; --surface:#201B16; --surface2:#2A241D; --ink:#EFE8DC;
-  --muted:#A39886; --line:#3A3228; --accent:#F0B04A; --accent-strong:#F5BE66;
-  --on-accent:#251A04; --good:#6CC29A; --good-bg:#1E332A; --bad:#E58974;
-  --bad-bg:#3A241F; --shadow:0 1px 3px rgba(0,0,0,.4),0 4px 16px rgba(0,0,0,.3);
+  --bg:#211418; --surface:#2C1D23; --surface2:#3A272F; --ink:#FBEDE4;
+  --muted:#C2A093; --line:#4C333C; --accent:#FF8571; --accent-strong:#FF9C8B;
+  --on-accent:#3D130B; --sun:#FFC960; --on-sun:#3F2B06;
+  --good:#5FCB96; --good-bg:#22382E; --bad:#F27E96;
+  --bad-bg:#43242C; --shadow:0 1px 3px rgba(0,0,0,.4),0 4px 16px rgba(0,0,0,.3);
 }
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5;margin:0;min-height:100vh}
@@ -51,6 +54,7 @@ code{font-family:var(--mono);font-size:.92em;background:var(--surface2);padding:
 header.top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:calc(18px + env(safe-area-inset-top)) 0 14px}
 .brand{font-family:var(--display);font-weight:700;font-size:26px;letter-spacing:-.02em}
 .brand .tilt{display:inline-block;color:var(--accent);transform:rotate(-8deg)}
+.brand::after{content:"";display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--sun);margin-left:5px;transform:translateY(-12px)}
 .me-chip{display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:5px 12px 5px 6px;box-shadow:var(--shadow)}
 .me-chip:hover{border-color:var(--accent)}
 .avatar{width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#fff;flex:none}
@@ -79,7 +83,7 @@ h2.sec{font-family:var(--display);font-weight:700;font-size:19px;margin:0;text-w
 /* events */
 .event{display:flex;gap:14px;padding:14px}
 .dateleaf{flex:none;width:52px;border:1px solid var(--line);border-radius:10px;overflow:hidden;text-align:center;align-self:flex-start;background:var(--surface)}
-.dateleaf .m{display:block;background:var(--accent);color:var(--on-accent);font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:2px 0}
+.dateleaf .m{display:block;background:var(--sun);color:var(--on-sun);font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:2px 0}
 .dateleaf .d{display:block;font-family:var(--mono);font-weight:600;font-size:20px;padding:3px 0 4px}
 .event-body{flex:1;min-width:0}
 .event-title{font-family:var(--display);font-weight:700;font-size:17px;margin:0 0 1px;overflow-wrap:anywhere}
@@ -129,6 +133,36 @@ h2.sec{font-family:var(--display);font-weight:700;font-size:19px;margin:0;text-w
 .friend-bal{font-size:12.5px;text-align:right}
 .friend-bal .amt{display:block;font-family:var(--mono);font-weight:600;font-size:14px}
 .invite-note{padding:14px 16px;font-size:13.5px;color:var(--muted);background:var(--surface2);border-radius:12px;margin-top:14px}
+
+/* event detail */
+.emoji-row{display:flex;flex-wrap:wrap;gap:5px}
+.emoji-row button{width:38px;height:38px;font-size:20px;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:0}
+.emoji-row button[aria-pressed="true"]{border-color:var(--accent);background:var(--surface2);box-shadow:0 0 0 1px var(--accent)}
+.detail-head{display:flex;gap:12px;align-items:flex-start}
+.detail-emoji{font-size:40px;line-height:1.1}
+.detail-title{font-family:var(--display);font-weight:700;font-size:22px;margin:0;text-wrap:balance;overflow-wrap:anywhere}
+.detail-meta{font-size:13.5px;color:var(--muted);margin-top:2px}
+.hype-row{display:flex;gap:6px;margin:14px 0 0;flex-wrap:wrap}
+.hype{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;font-size:14px;display:inline-flex;gap:5px;align-items:center}
+.hype .n{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.hype[aria-pressed="true"]{border-color:var(--accent);background:var(--surface2)}
+.guest-group{margin-top:12px}
+.guest-group .label{margin-bottom:5px;display:block}
+.plusone-badge{font-family:var(--mono);font-size:10.5px;background:var(--sun);color:var(--on-sun);border-radius:999px;padding:0 6px;font-weight:600}
+.stepper{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.stepper button{border:0;background:var(--surface2);width:28px;height:28px;font-weight:700}
+.stepper .v{min-width:70px;text-align:center;font-size:13px;font-weight:600}
+.comments{margin-top:6px;display:flex;flex-direction:column;gap:10px}
+.comment{display:flex;gap:9px;align-items:flex-start}
+.comment .avatar{width:22px;height:22px;font-size:10px;margin-top:2px}
+.comment .b{flex:1;min-width:0}
+.comment .who{font-size:12px;color:var(--muted)}
+.comment .txt{font-size:14px;overflow-wrap:anywhere}
+.comment-form{display:flex;gap:8px;margin-top:12px}
+.comment-form input{flex:1;border:1px solid var(--line);border-radius:999px;background:var(--bg);padding:8px 14px;min-width:0}
+.detail-actions{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+.full-note{color:var(--bad);font-weight:600}
+.sec-line{border:0;border-top:1px solid var(--line);margin:16px 0 12px}
 
 /* dialogs & forms */
 dialog{border:0;border-radius:16px;background:var(--surface);color:var(--ink);box-shadow:0 12px 48px rgba(0,0,0,.25);padding:0;width:min(440px,calc(100vw - 32px))}
@@ -233,13 +267,19 @@ dialog::backdrop{background:rgba(20,16,10,.45)}
 <dialog id="eventDialog"><form class="dlg" id="eventForm" method="dialog">
   <h3 id="eventDlgTitle">New event</h3>
   <div class="field"><label for="evTitle">What&rsquo;s the plan?</label><input id="evTitle" required maxlength="80" placeholder="Taco night at Wes&rsquo;s"></div>
+  <div class="field"><label>Cover emoji</label><div class="emoji-row" id="evEmoji"></div></div>
   <div class="two">
     <div class="field"><label for="evDate">Date</label><input id="evDate" type="date" required></div>
-    <div class="field"><label for="evTime">Time</label><input id="evTime" type="time"></div>
+    <div class="field"><label for="evTime">Starts</label><input id="evTime" type="time"></div>
+  </div>
+  <div class="two">
+    <div class="field"><label for="evEnd">Ends</label><input id="evEnd" type="time"></div>
+    <div class="field"><label for="evCapacity">Max spots</label><input id="evCapacity" type="number" min="1" max="500" placeholder="No limit"></div>
   </div>
   <div class="field"><label for="evWhere">Where</label><input id="evWhere" maxlength="80" placeholder="Optional"></div>
   <div class="field"><label for="evNotes">Notes</label><textarea id="evNotes" maxlength="500" placeholder="Bring a side, parking is on the street&hellip;"></textarea></div>
   <div class="field"><label>Invite</label><div class="check-grid" id="evInvitees"></div></div>
+  <div class="field"><label>Co-hosts (can edit the event)</label><div class="check-grid" id="evCohosts"></div></div>
   <div class="dlg-actions">
     <button type="button" class="btn" data-close>Cancel</button>
     <button class="btn primary" id="eventSubmit">Create event</button>
@@ -275,6 +315,8 @@ dialog::backdrop{background:rgba(20,16,10,.45)}
     <button class="btn primary">Record it</button>
   </div>
 </form></dialog>
+
+<dialog id="detailDialog"><div class="dlg" id="detailBody"></div></dialog>
 
 <dialog id="pinDialog"><form class="dlg" id="pinForm">
   <h3 id="pinTitle">Enter PIN</h3>
@@ -327,8 +369,10 @@ const store = {
 const API = ((window.FRIENDLY_CONFIG || {}).scriptUrl || "").trim();
 const POLL_MS = 20000;
 let inFlight = 0;
-const S = { me: store.k, tab: "events", showPast: false, loaded: false,
-            members: new Map(), events: [], expenses: [], settlements: [] };
+const S = { me: store.k, tab: "events", showPast: false, loaded: false, openEvent: null,
+            members: new Map(), events: [], expenses: [], settlements: [], comments: [] };
+const EMOJIS = ["🎉","🍕","🌮","🍻","🎂","🎬","🎮","🏖️","🥾","⚽","🎲","🍜"];
+const HYPES = ["🔥","❤️","😂","🎉","👀"];
 
 function toast(msg) {
   const t = $("#toast"); t.textContent = msg; t.classList.add("show");
@@ -351,8 +395,10 @@ function applyData(data) {
   S.events = data.events || [];
   S.expenses = data.expenses || [];
   S.settlements = data.settlements || [];
+  S.comments = data.comments || [];
   S.loaded = true;
   render();
+  if (S.openEvent && $("#detailDialog").open) renderDetail(S.openEvent);
 }
 async function refresh(showErrors) {
   if (!API || inFlight) return;
@@ -449,37 +495,156 @@ function renderJoin() {
 }
 
 function eventCost(evId) { return S.expenses.filter(x => x.eventId === evId).reduce((t,x) => t + x.amountCents, 0); }
+function canEdit(ev) { return ev.createdBy === S.me || (ev.cohosts || []).includes(S.me); }
+function goingCount(ev) {
+  return (ev.invitees || []).reduce((t, id) =>
+    (ev.rsvps || {})[id] === "going" ? t + 1 + (((ev.plusOnes || {})[id]) || 0) : t, 0);
+}
+function isFull(ev) { return ev.capacity > 0 && goingCount(ev) >= ev.capacity; }
 
 function eventCard(ev) {
   const me = S.me;
   const d = evDateObj(ev);
   const invited = (ev.invitees || []).includes(me);
   const host = nameOf(ev.createdBy);
-  const guests = (ev.invitees || []).map(id => {
+  const guests = (ev.invitees || []).slice(0, 8).map(id => {
     const st = (ev.rsvps || {})[id] || "none";
     return `<span class="guest" title="${esc(nameOf(id))} · ${st === "none" ? "no reply" : st}">${avatarHtml(id)}${esc(nameOf(id).split(" ")[0])}<span class="dot ${st}"></span></span>`;
-  }).join("");
+  }).join("") + ((ev.invitees || []).length > 8 ? `<span class="guest">+${ev.invitees.length - 8} more</span>` : "");
   const myRsvp = (ev.rsvps || {})[me];
   const cost = eventCost(ev.id);
-  return `<div class="card event">
+  const going = goingCount(ev);
+  const full = isFull(ev);
+  const nComments = S.comments.filter(c => c.eventId === ev.id).length;
+  const spots = ev.capacity > 0 ? `${going}/${ev.capacity} spots` : (going ? `${going} going` : "");
+  return `<div class="card event" onclick="openDetail('${ev.id}')" style="cursor:pointer">
     <div class="dateleaf"><span class="m">${MONTHS[d.getMonth()]}</span><span class="d">${d.getDate()}</span></div>
     <div class="event-body">
-      <h3 class="event-title">${esc(ev.title)}</h3>
-      <div class="event-meta"><span class="mono">${esc(fmtEvDate(ev))}</span>${ev.location ? " · " + esc(ev.location) : ""} · hosted by ${esc(host)}</div>
-      ${ev.notes ? `<div class="event-meta" style="margin-top:4px">${esc(ev.notes)}</div>` : ""}
+      <h3 class="event-title">${esc(ev.emoji || "🎉")} ${esc(ev.title)}</h3>
+      <div class="event-meta"><span class="mono">${esc(fmtEvDate(ev))}</span>${ev.location ? " · " + esc(ev.location) : ""} · by ${esc(host.split(" ")[0])}${spots ? ` · ${full ? `<span class="full-note">${spots} · full</span>` : spots}` : ""}${nComments ? ` · 💬 ${nComments}` : ""}</div>
       <div class="guests">${guests}</div>
       ${invited ? `<div class="rsvp-row"><span class="label">You:</span>
-        <button class="chip going" aria-pressed="${myRsvp === "going"}" onclick="rsvp('${ev.id}','going')">Going</button>
-        <button class="chip maybe" aria-pressed="${myRsvp === "maybe"}" onclick="rsvp('${ev.id}','maybe')">Maybe</button>
-        <button class="chip no" aria-pressed="${myRsvp === "no"}" onclick="rsvp('${ev.id}','no')">Can&rsquo;t</button></div>` : ""}
-      <div class="event-cost">${cost ? `<span class="amt">${fmt$(cost)}</span> in shared expenses · ` : ""}<button class="btn ghost small" onclick="openExpense('${ev.id}')">+ Add expense</button></div>
+        <button class="chip going" aria-pressed="${myRsvp === "going"}" ${full && myRsvp !== "going" ? "disabled" : ""} onclick="event.stopPropagation();rsvp('${ev.id}','going')">Going</button>
+        <button class="chip maybe" aria-pressed="${myRsvp === "maybe"}" onclick="event.stopPropagation();rsvp('${ev.id}','maybe')">Maybe</button>
+        <button class="chip no" aria-pressed="${myRsvp === "no"}" onclick="event.stopPropagation();rsvp('${ev.id}','no')">Can&rsquo;t</button></div>` : ""}
+      <div class="event-cost">${cost ? `<span class="amt">${fmt$(cost)}</span> in shared expenses · ` : ""}<span style="color:var(--accent);font-weight:600;font-size:13px">Open ›</span></div>
     </div>
-    ${ev.createdBy === me ? `<div class="event-actions">
-      <button class="btn ghost small" onclick="openEvent('${ev.id}')" title="Edit">Edit</button>
-      <button class="btn ghost small danger" onclick="delEvent('${ev.id}')" title="Delete">✕</button>
+    ${canEdit(ev) ? `<div class="event-actions">
+      <button class="btn ghost small" onclick="event.stopPropagation();openEvent('${ev.id}')" title="Edit">Edit</button>
+      <button class="btn ghost small danger" onclick="event.stopPropagation();delEvent('${ev.id}')" title="Delete">✕</button>
     </div>` : ""}
   </div>`;
 }
+
+// ---------- event detail (Partiful-style page) ----------
+window.openDetail = id => {
+  S.openEvent = id;
+  renderDetail(id);
+  $("#detailDialog").showModal();
+  try { history.replaceState(null, "", "#event=" + id); } catch {}
+};
+$("#detailDialog").addEventListener("close", () => {
+  S.openEvent = null;
+  try { history.replaceState(null, "", location.pathname); } catch {}
+});
+function renderDetail(id) {
+  const ev = S.events.find(e => e.id === id);
+  if (!ev) { $("#detailDialog").close(); return; }
+  const me = S.me;
+  const invited = (ev.invitees || []).includes(me);
+  const myRsvp = (ev.rsvps || {})[me];
+  const myPlus = ((ev.plusOnes || {})[me]) || 0;
+  const full = isFull(ev);
+  const going = goingCount(ev);
+  const hosts = [ev.createdBy, ...(ev.cohosts || [])].filter((v, i, a) => a.indexOf(v) === i);
+  const when = fmtEvDate(ev) + (ev.endTime ? "–" + (h => { const [H,M] = h.split(":").map(Number); const t = new Date(); t.setHours(H, M); return t.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }); })(ev.endTime) : "");
+  const groups = { going: [], maybe: [], no: [], none: [] };
+  (ev.invitees || []).forEach(gid => groups[(ev.rsvps || {})[gid] || "none"].push(gid));
+  const guestGroup = (title, ids, cls) => !ids.length ? "" :
+    `<div class="guest-group"><span class="label">${title} (${ids.length})</span><div class="guests">
+     ${ids.map(gid => `<span class="guest">${avatarHtml(gid)}${esc(nameOf(gid).split(" ")[0])}${cls === "going" && (ev.plusOnes || {})[gid] ? `<span class="plusone-badge">+${ev.plusOnes[gid]}</span>` : ""}</span>`).join("")}</div></div>`;
+  const hypeBar = HYPES.map(h => {
+    const n = Object.values(ev.hypes || {}).filter(v => v === h).length;
+    const mine = (ev.hypes || {})[me] === h;
+    return `<button class="hype" aria-pressed="${mine}" onclick="toggleHype('${ev.id}','${h}')">${h}${n ? `<span class="n">${n}</span>` : ""}</button>`;
+  }).join("");
+  const comments = S.comments.filter(c => c.eventId === ev.id).sort((a,b) => a.createdAt - b.createdAt);
+  $("#detailBody").innerHTML = `
+    <div class="detail-head">
+      <div class="detail-emoji">${esc(ev.emoji || "🎉")}</div>
+      <div style="flex:1;min-width:0">
+        <h3 class="detail-title">${esc(ev.title)}</h3>
+        <div class="detail-meta"><span class="mono">${esc(when)}</span>${ev.location ? " · " + esc(ev.location) : ""}</div>
+        <div class="detail-meta">Hosted by ${hosts.map(h => esc(nameOf(h).split(" ")[0])).join(" & ")}${ev.capacity > 0 ? ` · ${going}/${ev.capacity} spots${full ? ` · <span class="full-note">full</span>` : ""}` : ""}</div>
+      </div>
+      <button class="btn ghost" data-close style="flex:none">✕</button>
+    </div>
+    ${ev.notes ? `<p style="margin:10px 0 0;font-size:14px">${esc(ev.notes)}</p>` : ""}
+    <div class="hype-row">${hypeBar}</div>
+    ${invited ? `<div class="rsvp-row" style="margin-top:14px"><span class="label">You:</span>
+      <button class="chip going" aria-pressed="${myRsvp === "going"}" ${full && myRsvp !== "going" ? "disabled" : ""} onclick="rsvp('${ev.id}','going')">Going</button>
+      <button class="chip maybe" aria-pressed="${myRsvp === "maybe"}" onclick="rsvp('${ev.id}','maybe')">Maybe</button>
+      <button class="chip no" aria-pressed="${myRsvp === "no"}" onclick="rsvp('${ev.id}','no')">Can&rsquo;t</button>
+      ${myRsvp === "going" ? `<span class="stepper"><button onclick="setPlusOne('${ev.id}',${myPlus - 1})" ${myPlus <= 0 ? "disabled" : ""}>−</button><span class="v">bringing +${myPlus}</span><button onclick="setPlusOne('${ev.id}',${myPlus + 1})" ${ev.capacity > 0 && going >= ev.capacity ? "disabled" : ""}>+</button></span>` : ""}
+    </div>` : `<p class="detail-meta" style="margin-top:12px">You&rsquo;re not on the invite list${canEdit(ev) ? "" : " (ask the host to add you)"}.</p>`}
+    ${guestGroup("Going", groups.going, "going")}${guestGroup("Maybe", groups.maybe)}${guestGroup("Can’t make it", groups.no)}${guestGroup("No reply yet", groups.none)}
+    <hr class="sec-line">
+    <span class="label">Party wall</span>
+    <div class="comments">${comments.length ? comments.map(c => `
+      <div class="comment">${avatarHtml(c.memberId)}<div class="b">
+        <div class="who">${esc(nameOf(c.memberId).split(" ")[0])} · ${esc(fmtWhen(c.createdAt))}</div>
+        <div class="txt">${esc(c.text)}</div></div>
+        ${c.memberId === me ? `<button class="btn ghost small danger" onclick="delComment('${c.id}')">✕</button>` : ""}</div>`).join("")
+      : `<div class="detail-meta">Nothing yet. Say hi 👋</div>`}</div>
+    <form class="comment-form" onsubmit="return postComment(event,'${ev.id}')">
+      <input id="commentInput" maxlength="300" placeholder="Post to the party wall…" autocomplete="off">
+      <button class="btn primary small">Post</button>
+    </form>
+    <div class="detail-actions">
+      <button class="btn small" onclick="openExpense('${ev.id}')">+ Add expense</button>
+      <button class="btn small" onclick="copyEventLink('${ev.id}')">Copy invite link</button>
+      ${canEdit(ev) ? `<button class="btn small" onclick="$('#detailDialog').close();openEvent('${ev.id}')">Edit event</button>` : ""}
+    </div>`;
+  $("#detailBody").querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", () => $("#detailDialog").close()));
+}
+window.toggleHype = (evId, emoji) => {
+  const ev = S.events.find(e => e.id === evId); if (!ev) return;
+  const cur = (ev.hypes || {})[S.me];
+  const next = cur === emoji ? null : emoji;
+  ev.hypes = { ...(ev.hypes || {}) };
+  if (next) ev.hypes[S.me] = next; else delete ev.hypes[S.me];
+  renderDetail(evId); render();
+  push({ action: "hype", table: "events", eventId: evId, memberId: S.me, emoji: next });
+};
+window.setPlusOne = (evId, count) => {
+  count = Math.max(0, count);
+  const ev = S.events.find(e => e.id === evId); if (!ev) return;
+  ev.plusOnes = { ...(ev.plusOnes || {}) };
+  if (count > 0) ev.plusOnes[S.me] = count; else delete ev.plusOnes[S.me];
+  renderDetail(evId); render();
+  push({ action: "plusone", table: "events", eventId: evId, memberId: S.me, count });
+};
+window.postComment = (e, evId) => {
+  e.preventDefault();
+  const input = $("#commentInput");
+  const text = input.value.trim();
+  if (!text) return false;
+  const row = { id: newId(), eventId: evId, memberId: S.me, text, createdAt: Date.now() };
+  S.comments.push(row); input.value = "";
+  renderDetail(evId);
+  upsert("comments", row);
+  return false;
+};
+window.delComment = id => {
+  S.comments = S.comments.filter(c => c.id !== id);
+  if (S.openEvent) renderDetail(S.openEvent);
+  push({ action: "delete", table: "comments", id });
+};
+window.copyEventLink = async evId => {
+  const url = location.origin + location.pathname + "#event=" + evId;
+  try { await navigator.clipboard.writeText(url); toast("Invite link copied. Anyone in the group can open it."); }
+  catch { prompt("Copy this link:", url); }
+};
 
 function renderEvents() {
   const t = todayStr();
@@ -692,23 +857,38 @@ function fillMemberSelect(sel, selectedId) {
 }
 
 let editingEventId = null;
+let pickedEmoji = EMOJIS[0];
+function renderEmojiRow() {
+  $("#evEmoji").innerHTML = EMOJIS.map(e =>
+    `<button type="button" aria-pressed="${e === pickedEmoji}" onclick="pickEmoji('${e}')">${e}</button>`).join("");
+}
+window.pickEmoji = e => { pickedEmoji = e; renderEmojiRow(); };
 window.openEvent = id => {
   editingEventId = id || null;
   const ev = id ? S.events.find(e => e.id === id) : null;
   $("#eventDlgTitle").textContent = ev ? "Edit event" : "New event";
   $("#eventSubmit").textContent = ev ? "Save changes" : "Create event";
   $("#evTitle").value = ev ? ev.title : "";
+  pickedEmoji = (ev && ev.emoji) || EMOJIS[0];
+  renderEmojiRow();
   $("#evDate").value = ev ? ev.date : todayStr();
   $("#evTime").value = ev ? (ev.time || "") : "";
+  $("#evEnd").value = ev ? (ev.endTime || "") : "";
+  $("#evCapacity").value = ev && ev.capacity > 0 ? ev.capacity : "";
   $("#evWhere").value = ev ? (ev.location || "") : "";
   $("#evNotes").value = ev ? (ev.notes || "") : "";
   fillChecks($("#evInvitees"), ev ? (ev.invitees || []) : [...S.members.keys()], "inv");
+  fillChecks($("#evCohosts"), ev ? (ev.cohosts || []) : [], "coh");
   $("#eventDialog").showModal();
 };
 $("#eventForm").addEventListener("submit", () => {
   const invitees = [...document.querySelectorAll('input[name=inv]:checked')].map(i => i.value);
+  const cohosts = [...document.querySelectorAll('input[name=coh]:checked')].map(i => i.value)
+    .filter(id => id !== (editingEventId ? (S.events.find(e => e.id === editingEventId) || {}).createdBy : S.me));
   const base = {
     title: $("#evTitle").value.trim(), date: $("#evDate").value, time: $("#evTime").value || "",
+    endTime: $("#evEnd").value || "", capacity: Number($("#evCapacity").value) || 0,
+    emoji: pickedEmoji, cohosts,
     location: $("#evWhere").value.trim(), notes: $("#evNotes").value.trim(), invitees
   };
   if (editingEventId) {
@@ -717,7 +897,7 @@ $("#eventForm").addEventListener("submit", () => {
   } else {
     if (!invitees.includes(S.me)) invitees.unshift(S.me);
     const row = { ...base, id: newId(), createdBy: S.me, createdAt: Date.now(),
-                  cancelled: false, rsvps: { [S.me]: "going" } };
+                  cancelled: false, rsvps: { [S.me]: "going" }, plusOnes: {}, hypes: {} };
     S.events.push(row); render();
     upsert("events", row, "Event created, invites are out");
   }
@@ -817,6 +997,15 @@ document.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click
 document.querySelectorAll("nav.tabs [role=tab]").forEach(b => b.addEventListener("click", () => { S.tab = b.dataset.tab; render(); }));
 
 // ---------- boot ----------
+// Deep link: #event=<id> opens that event once data + identity are ready.
+function tryOpenHashEvent() {
+  const m2 = location.hash.match(/^#event=([A-Za-z0-9-]+)$/);
+  if (!m2 || !S.loaded || !S.me || !S.members.get(S.me)) return;
+  if (S.events.some(e => e.id === m2[1]) && !$("#detailDialog").open) openDetail(m2[1]);
+}
+const origRender = render;
+render = function () { origRender(); tryOpenHashEvent(); };
+
 if (!API) {
   $("#connecting").hidden = true;
   $("#setup").hidden = false;

@@ -27,8 +27,10 @@ var TABLES = {
   },
   events: {
     cols: ["id", "title", "date", "time", "location", "notes", "createdBy",
-           "invitees", "rsvps", "cancelled", "createdAt"],
-    json: ["invitees", "rsvps"], num: ["createdAt"]
+           "invitees", "rsvps", "cancelled", "createdAt",
+           "emoji", "endTime", "capacity", "cohosts", "plusOnes", "hypes"],
+    json: ["invitees", "rsvps", "cohosts", "plusOnes", "hypes"],
+    num: ["createdAt", "capacity"]
   },
   expenses: {
     cols: ["id", "desc", "amountCents", "paidBy", "split", "eventId",
@@ -38,6 +40,10 @@ var TABLES = {
   settlements: {
     cols: ["id", "from", "to", "amountCents", "note", "addedBy", "createdAt"],
     json: [], num: ["amountCents", "createdAt"]
+  },
+  comments: {
+    cols: ["id", "eventId", "memberId", "text", "createdAt"],
+    json: [], num: ["createdAt"]
   },
   pushsubs: {
     cols: ["id", "memberId", "endpoint", "createdAt"],
@@ -76,11 +82,16 @@ function doPost(e) {
       if (isNew && req.table === "events") notify = function () { notifyEvent(req.row); };
       if (isNew && req.table === "expenses") notify = function () { notifyExpense(req.row); };
       if (isNew && req.table === "settlements") notify = function () { notifySettlement(req.row); };
+      if (isNew && req.table === "comments") notify = function () { notifyComment(req.row); };
     } else if (req.action === "delete") {
       deleteRow(req.table, req.id);
     } else if (req.action === "rsvp") {
-      rsvpMerge(req.eventId, req.memberId, req.status);
+      mergeEventMap(req.eventId, "rsvps", req.memberId, req.status);
       notify = function () { notifyRsvp(req.eventId, req.memberId, req.status); };
+    } else if (req.action === "hype") {
+      mergeEventMap(req.eventId, "hypes", req.memberId, req.emoji || null);
+    } else if (req.action === "plusone") {
+      mergeEventMap(req.eventId, "plusOnes", req.memberId, req.count > 0 ? req.count : null);
     } else {
       throw new Error("Unknown action: " + req.action);
     }
@@ -196,18 +207,20 @@ function upsertRow(name, row) {
   return isNew;
 }
 
-// Merge one member's RSVP into the event row instead of rewriting the whole
-// row, so two friends answering at the same time can't clobber each other.
-function rsvpMerge(eventId, memberId, status) {
+// Merge one member's entry into a JSON-map column of the event row instead
+// of rewriting the whole row, so two friends acting at once can't clobber
+// each other. Used for RSVPs, hype reactions, and +1 counts.
+function mergeEventMap(eventId, colName, key, value) {
   var idx = findRowIndex("events", eventId);
   if (idx === -1) throw new Error("Event not found");
   var sh = SpreadsheetApp.getActive().getSheetByName("events");
-  var col = TABLES.events.cols.indexOf("rsvps") + 1;
-  var rsvps;
-  try { rsvps = JSON.parse(sh.getRange(idx, col).getValue()) || {}; }
-  catch (e) { rsvps = {}; }
-  rsvps[memberId] = status;
-  sh.getRange(idx, col).setValue(JSON.stringify(rsvps));
+  var col = TABLES.events.cols.indexOf(colName) + 1;
+  var map;
+  try { map = JSON.parse(sh.getRange(idx, col).getValue()) || {}; }
+  catch (e) { map = {}; }
+  if (value === null || value === undefined || value === "") delete map[key];
+  else map[key] = value;
+  sh.getRange(idx, col).setValue(JSON.stringify(map));
 }
 
 function deleteRow(name, id) {
@@ -378,6 +391,54 @@ function notifyRsvp(eventId, memberId, status) {
   var mm = membersById();
   var word = status === "going" ? "is going to" : status === "maybe" ? "might come to" : "can't make";
   pushToMembers([creator], firstName(mm, memberId) + " " + word + " " + title);
+}
+
+function notifyComment(c) {
+  var idx = findRowIndex("events", c.eventId);
+  if (idx === -1) return;
+  var t = TABLES.events;
+  var v = SpreadsheetApp.getActive().getSheetByName("events").getRange(idx, 1, 1, t.cols.length).getValues()[0];
+  var title = String(v[t.cols.indexOf("title")]);
+  var invitees;
+  try { invitees = JSON.parse(v[t.cols.indexOf("invitees")]) || []; }
+  catch (e) { invitees = []; }
+  var mm = membersById();
+  pushToMembers(
+    invitees.filter(function (id) { return id !== c.memberId; }),
+    firstName(mm, c.memberId) + " on " + title + ": " + String(c.text).slice(0, 80));
+}
+
+// ---------- day-of reminders ----------
+// Run setupReminders() once from the editor to install a daily 9am trigger.
+function setupReminders() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === "sendDailyReminders") ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger("sendDailyReminders").timeBased().atHour(9).everyDays(1).create();
+}
+
+function sendDailyReminders() {
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+  var mm = membersById();
+  readTable("events").forEach(function (ev) {
+    if (ev.date !== today) return;
+    var line = "Today: " + ev.title + (ev.time ? " at " + ev.time : "") +
+               (ev.location ? " (" + ev.location + ")" : "");
+    var ids = (ev.invitees || []).filter(function (id) {
+      var st = (ev.rsvps || {})[id];
+      return st === "going" || st === "maybe";
+    });
+    pushToMembers(ids, line);
+    ids.forEach(function (id) {
+      var m = mm[id];
+      if (m && m.email && m.email.indexOf("@") !== -1) {
+        try {
+          MailApp.sendEmail({ to: m.email, subject: line, name: "Friendly",
+            body: line + "\n\nSee who's going: " + SITE_URL });
+        } catch (e) { /* best effort */ }
+      }
+    });
+  });
 }
 
 function pushToMembers(memberIds, msg) {
