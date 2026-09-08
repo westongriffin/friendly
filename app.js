@@ -213,6 +213,9 @@ function subscribeAll(u) {
     render();
   }));
 }
+// Tear down every listener before signing out; otherwise the SDK re-sends
+// them without auth and logs a burst of permission-denied errors.
+function stopListening() { S.subs.forEach(fn => fn()); S.subs = []; cleanupEvent(); }
 // Remember the guest names an event carries, for guests outside my groups.
 function noteNames(ev) { S.nameHints = S.nameHints || new Map(); for (const [uid, n] of Object.entries(ev.names || {})) if (n) S.nameHints.set(uid, n); }
 
@@ -813,7 +816,7 @@ function renderEventPage(root, id) {
   // live subcollections (comments, photos, polls, songs)
   S.evSubs.forEach(fn => fn()); S.evSubs = [];
   S.comments = []; S.photos = []; S.polls = []; S.songs = [];
-  const sub = (name, fn) => S.evSubs.push(onSnapshot(collection(db, "events", id, name), snap => fn(snap.docs.map(d => ({ id: d.id, ...d.data() })))));
+  const sub = (name, fn) => S.evSubs.push(onSnapshot(collection(db, "events", id, name), snap => fn(snap.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.warn("listener event/" + name + ":", err.code || err.message)));
   sub("comments", rows => { S.comments = rows.sort((a, b) => a.createdAt - b.createdAt); const b = el("wall"); if (b) { b.innerHTML = wallInner(ev); wireWall(ev); } });
   sub("photos", rows => { S.photos = rows.sort((a, b) => b.createdAt - a.createdAt); const b = el("photosCard"); if (b) { b.innerHTML = photosInner(ev); wirePhotos(ev); } });
   sub("polls", rows => { S.polls = rows.sort((a, b) => a.createdAt - b.createdAt); const b = el("pollsCard"); if (b) { b.innerHTML = pollsInner(ev); wirePolls(ev); } });
@@ -1329,7 +1332,7 @@ function wireProfile() {
       toast("Profile saved");
     } catch (e) { toast(e.message); }
   };
-  el("signOut").onclick = () => signOut(auth);
+  el("signOut").onclick = () => { stopListening(); signOut(auth); };
   // App Store requires in-app account deletion (guideline 5.1.1). Re-auth first:
   // Firebase refuses to delete a user without a recent sign-in.
   el("deleteAccount").onclick = () => dialog(`
@@ -1352,6 +1355,7 @@ async function deleteAccount() {
       await updateDoc(doc(db, "groups", g.id), up).catch(() => {});
     }
     await deleteDoc(doc(db, "users", u.uid));
+    stopListening();
     await deleteUser(u);
     closeDialog(); toast("Your account has been deleted.");
   } catch (e) { toast(e.code === "auth/invalid-credential" || e.code === "auth/wrong-password" ? "That password didn't match." : e.message); }
