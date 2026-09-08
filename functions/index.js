@@ -248,6 +248,9 @@ function addPeriod(date, repeat) {
 }
 
 const firstName = n => (n || "Someone").split(" ")[0];
+const commentPreview = c => c.img && !c.text ? "📷 Photo" : String(c.text || "").slice(0, 120);
+// People named with @ get their own line in the feed / a push of their own.
+const mentionNotify = (c, url, where) => (c.mentions && c.mentions.length) ? notify(c.mentions.filter(u => u !== c.authorId), firstName(c.authorName) + " mentioned you" + (where ? " in " + where : ""), commentPreview(c), url, { type: "mention", actorId: c.authorId }) : Promise.resolve();
 
 
 
@@ -325,8 +328,9 @@ exports.onComment = onDocumentCreated({ document: "events/{id}/comments/{cid}", 
   const c = e.data && e.data.data(); if (!c) return;
   const ev = (await db.doc("events/" + e.params.id).get()).data(); if (!ev) return;
   await notify((ev.invitedUids || []).filter(u => u !== c.authorId),
-    firstName(c.authorName) + " on " + ev.title, String(c.text).slice(0, 120),
-    "/#/e/" + e.params.id);
+    firstName(c.authorName) + " on " + ev.title, commentPreview(c),
+    "/#/e/" + e.params.id, { type: "comment", actorId: c.authorId });
+  await mentionNotify(c, "/#/e/" + e.params.id, ev.title);
 });
 
 // Group chat message -> tell the other members.
@@ -334,8 +338,9 @@ exports.onGroupComment = onDocumentCreated({ document: "groups/{gid}/comments/{c
   const c = e.data && e.data.data(); if (!c) return;
   const g = (await db.doc("groups/" + e.params.gid).get()).data(); if (!g) return;
   await notify((g.memberUids || []).filter(u => u !== c.authorId),
-    firstName(c.authorName) + " in " + g.name, String(c.text).slice(0, 120),
-    "/#/g/" + e.params.gid);
+    firstName(c.authorName) + " in " + g.name, commentPreview(c),
+    "/#/g/" + e.params.gid, { type: "comment", actorId: c.authorId });
+  await mentionNotify(c, "/#/g/" + e.params.gid, g.name);
 });
 
 // Expense discussion -> tell the people involved.
@@ -343,8 +348,9 @@ exports.onExpenseComment = onDocumentCreated({ document: "expenses/{xid}/comment
   const c = e.data && e.data.data(); if (!c) return;
   const x = (await db.doc("expenses/" + e.params.xid).get()).data(); if (!x) return;
   await notify((x.involved || []).filter(u => u !== c.authorId),
-    firstName(c.authorName) + " on " + (x.desc || "an expense"), String(c.text).slice(0, 120),
-    "/#/x/" + e.params.xid);
+    firstName(c.authorName) + " on " + (x.desc || "an expense"), commentPreview(c),
+    "/#/x/" + e.params.xid, { type: "comment", actorId: c.authorId });
+  await mentionNotify(c, "/#/x/" + e.params.xid, x.desc || "an expense");
 });
 
 // Content reported -> tell the moderators (we promise a 24-hour review).

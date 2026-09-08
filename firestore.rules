@@ -72,6 +72,7 @@ service cloud.firestore {
       // Group chat — members post; delete your own.
       match /comments/{commentId} {
         allow read: if isMember();
+        allow update: if isMember() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']);
         allow create: if isMember() && request.resource.data.authorId == uid();
         allow delete: if isAdmin() || (signedIn() && resource.data.authorId == uid());
       }
@@ -132,9 +133,10 @@ service cloud.firestore {
         || ((openLink() || viaGroup()) && selfJoin());
       allow delete: if signedIn() && uid() == resource.data.hostId;
 
-      // Party wall — anyone who can see the event can post; delete your own.
+      // Party wall — anyone who can see the event can post; react; delete your own.
       match /comments/{commentId} {
         allow read: if canReadEvent();
+        allow update: if canReadEvent() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']);
         allow create: if canReadEvent() && request.resource.data.authorId == uid();
         allow delete: if isAdmin() || (signedIn() && resource.data.authorId == uid());
       }
@@ -178,6 +180,7 @@ service cloud.firestore {
           return signedIn() && uid() in get(/databases/$(database)/documents/expenses/$(expenseId)).data.involved;
         }
         allow read: if involved();
+        allow update: if involved() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']);
         allow create: if involved() && request.resource.data.authorId == uid();
         allow delete: if isAdmin() || (signedIn() && resource.data.authorId == uid());
       }

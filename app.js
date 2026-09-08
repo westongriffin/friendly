@@ -8,7 +8,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection,
-  query, where, onSnapshot, addDoc, arrayUnion, arrayRemove, deleteField, orderBy, limit
+  query, where, onSnapshot, addDoc, arrayUnion, arrayRemove, deleteField, orderBy, limit, getDocs
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import { firebaseConfig, mapsKey, adminUids, vapidPublicKey } from "./firebase-config.js";
 import { THEMES, themeOf, applyTheme, startParticles, DEFAULT_THEME } from "./themes.js";
@@ -188,6 +188,7 @@ function parseRoute() {
   if (p[0] === "g") return { name: "group", id: p[1] };
   if (p[0] === "x") return { name: "expense", id: p[1] };
   if (p[0] === "activity") return { name: "activity" };
+  if (p[0] === "photos") return { name: "photos" };
   if (p[0] === "new") return { name: "new" };
   if (p[0] === "money") return { name: "money" };
   if (p[0] === "groups") return { name: "groups" };
@@ -284,7 +285,7 @@ function resubscribeEvents(u) {
 
 function rebuildContacts() {
   const m = new Map();
-  if (S.user && S.profile) m.set(S.user.uid, { name: S.profile.name, venmo: S.profile.venmo, phone: S.profile.phone });
+  if (S.user && S.profile) m.set(S.user.uid, { name: S.profile.name, venmo: S.profile.venmo, phone: S.profile.phone, photo: S.profile.photo || "" });
   for (const g of S.groups.values())
     for (const [uid, info] of Object.entries(g.members || {})) if (!m.has(uid)) m.set(uid, info);
   S.contacts = m;
@@ -293,7 +294,7 @@ function rebuildContacts() {
 // are only known by the names the event carries (see noteNames).
 const nameHint = uid => (S.nameHints && S.nameHints.get(uid)) || "";
 const nameOf = uid => (S.contacts.get(uid) || {}).name || nameHint(uid) || "Someone";
-function avatar(uid, cls = "") { const name = (S.contacts.get(uid) || {}).name || nameHint(uid); return `<span class="avatar ${cls}" style="background:${colorFor(uid)}">${esc(initials(name || "?"))}</span>`; }
+function avatar(uid, cls = "") { const info = S.contacts.get(uid) || {}; const name = info.name || nameHint(uid); if (info.photo) return `<span class="avatar ${cls} has-img"><img src="${info.photo}" alt=""></span>`; return `<span class="avatar ${cls}" style="background:${colorFor(uid)}">${esc(initials(name || "?"))}</span>`; }
 
 // ---------- render root ----------
 function render() {
@@ -412,6 +413,7 @@ function wireShell() {
   if (S.route.name === "money") wireMoney();
   if (S.route.name === "expense") wireExpensePage();
   if (S.route.name === "activity") wireActivity();
+  if (S.route.name === "photos") wirePhotosPage();
   if (S.route.name !== "activity") S._actOpenSeen = null;
   if (S.route.name === "profile") wireProfile();
 }
@@ -423,6 +425,7 @@ function routeBody(r) {
   if (r.name === "money") return moneyBody();
   if (r.name === "expense") return expenseBody(r.id);
   if (r.name === "activity") return activityBody();
+  if (r.name === "photos") return photosPageBody();
   if (r.name === "profile") return profileBody();
   return homeBody();
 }
@@ -505,7 +508,7 @@ function groupRow(g) {
   const n = (g.memberUids || []).length;
   return `<a class="card group-row" data-group="${g.id}">
     <span class="ge lg" style="background:${g.color || "#FFE0B2"}">${esc(g.emoji || "🎉")}</span>
-    <div style="flex:1;min-width:0"><b>${esc(g.name)}</b><div class="muted sm">${n} member${n === 1 ? "" : "s"}${g.ownerId === myUid() ? " · you host" : ""}</div></div>
+    <div style="flex:1;min-width:0"><b>${esc(g.name)}${newCountFor("#/g/" + g.id) ? `<span class="new-count">${newCountFor("#/g/" + g.id)} new</span>` : ""}</b><div class="muted sm">${n} member${n === 1 ? "" : "s"}${g.ownerId === myUid() ? " · you host" : ""}</div></div>
     <span class="chev">›</span></a>`;
 }
 function wireGroups() {
@@ -982,43 +985,60 @@ function questionsBlock(ev, me, myR) {
     ${ev.questions.map(q => `<label class="qa"><span>${esc(q.q)}</span><input data-answer="${q.id}" value="${esc(mine[q.id] || "")}" placeholder="Your answer"></label>`).join("")}
     <button class="btn-th ghost small" id="saveAnswers">Save answers</button></div>`;
 }
-function wallInner(ev, title = "Party wall") {
-  const cs = S.comments.filter(visibleContent);
-  return `<div class="glass-head">${esc(title)} <span>${cs.length}</span></div>
-    <div class="wall-list">${cs.length ? cs.map(c => `<div class="wall-msg">${avatar(c.authorId, "sm")}<div><div class="wall-who">${esc(first(c.authorName || nameOf(c.authorId)))} <i>${ago(c.createdAt)}</i></div><div class="wall-text">${esc(c.text)}</div></div>${c.authorId === myUid() || isAdmin() ? `<button class="wall-del" data-delc="${c.id}" title="Delete">✕</button>` : `<button class="wall-del" data-report="comment|${c.id}" title="Report">⚑</button>`}</div>`).join("") : `<p class="muted-th">Be the first to say something 👋</p>`}</div>
-    <form class="wall-form" id="wallForm"><input id="wallInput" maxlength="300" placeholder="Post to the wall…" autocomplete="off"><button class="btn-th accent small">Post</button></form>`;
+// Reactions are keyed by short names (Firestore field paths can't hold emoji).
+const REACTS = { heart: "❤️", laugh: "😂", fire: "🔥", up: "👍", wow: "😮" };
+function renderText(text, mentions) {
+  let h = esc(text);
+  (mentions || []).forEach(u => { const n = first(nameOf(u)); if (n && n !== "Someone") h = h.split("@" + esc(n)).join(`<b class="mention">@${esc(n)}</b>`); });
+  return h;
 }
-function wireEventPage(ev) {
-  const id = ev.id;
-  // Group members who joined after the event was created aren't in invitedUids
-  // yet (it's snapshotted at creation); add them quietly so they can RSVP.
-  S._autoJoined = S._autoJoined || new Set();
-  if (!(ev.invitedUids || []).includes(myUid()) && ev.groupId && S.groups.has(ev.groupId) && !S._autoJoined.has(id)) {
-    S._autoJoined.add(id);
-    updateDoc(doc(db, "events", id), { invitedUids: arrayUnion(myUid()), [`names.${myUid()}`]: S.profile.name }).catch(e => console.warn("auto-join failed:", e.message));
-  }
-  document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
-  document.querySelectorAll("[data-rsvp]").forEach(b => b.onclick = () => setRsvp(ev, b.dataset.rsvp));
-  document.querySelectorAll("[data-plus]").forEach(b => b.onclick = () => setPlus(ev, Number(b.dataset.plus)));
-  document.querySelectorAll("[data-hype]").forEach(b => b.onclick = () => setHype(ev, b.dataset.hype));
-  document.querySelectorAll("[data-approve]").forEach(b => b.onclick = () => hostSetRsvp(ev, b.dataset.approve, "going"));
-  document.querySelectorAll("[data-promote]").forEach(b => b.onclick = () => hostSetRsvp(ev, b.dataset.promote, "going"));
-  if (el("saveAnswers")) el("saveAnswers").onclick = () => saveAnswers(ev);
-  if (el("viewAnswers")) el("viewAnswers").onclick = () => showAnswers(ev);
-  if (el("nudgeBtn")) el("nudgeBtn").onclick = () => nudge(ev, el("nudgeBtn"));
-  const share = $("[data-share]"); if (share) share.onclick = () => shareEvent(ev);
-  const txt = $("[data-text]"); if (txt) txt.onclick = () => textEventInvite(ev);
-  const join = $("[data-join]"); if (join) join.onclick = () => joinViaLink(ev, join);
-  const cal = $("[data-cal]"); if (cal) cal.onclick = () => downloadIcs(ev);
-  const exp = $("[data-expense]"); if (exp) exp.onclick = () => openExpense(ev.id, ev.invitedUids);
-  const edit = $("[data-edit]"); if (edit) edit.onclick = () => editEvent(ev);
-  const del = $("[data-del]"); if (del) del.onclick = () => delEvent(ev);
-  wireWall(ev);
+// Who can be @mentioned here: the event's guests, the group's members, or the expense's people.
+function wallParticipants(ev) {
+  const ids = ev._col && ev._col[0] === "groups" ? ((S.groups.get(ev.id) || {}).memberUids || [])
+    : ev._col && ev._col[0] === "expenses" ? ((S.expenses.get(ev.id) || {}).involved || []) : (ev.invitedUids || []);
+  return ids.filter(u => u !== myUid()).map(u => ({ uid: u, name: first(nameOf(u)) })).filter(p => p.name !== "Someone");
+}
+function lightbox(src) { const box = document.createElement("div"); box.className = "lightbox"; box.innerHTML = `<img src="${src}" alt="">`; box.onclick = () => box.remove(); document.body.appendChild(box); }
+function wallInner(ev, title = "Party wall") {
+  const cs = S.comments.filter(visibleContent); const me = myUid();
+  const msg = c => {
+    const rx = Object.entries(c.reactions || {}).filter(([k, us]) => REACTS[k] && us && us.length);
+    return `<div class="wall-msg">${avatar(c.authorId, "sm")}<div style="flex:1;min-width:0"><div class="wall-who">${esc(first(c.authorName || nameOf(c.authorId)))} <i>${ago(c.createdAt)}</i></div>
+      ${c.img ? `<img class="wall-img" src="${c.img}" alt="">` : ""}${c.text ? `<div class="wall-text">${renderText(c.text, c.mentions)}</div>` : ""}
+      <div class="react-row">${rx.map(([k, us]) => `<button type="button" class="react ${us.includes(me) ? "on" : ""}" data-react="${c.id}|${k}">${REACTS[k]} ${us.length}</button>`).join("")}<button type="button" class="react add" data-reactpick="${c.id}" title="React">＋</button></div></div>
+      ${c.authorId === me || isAdmin() ? `<button class="wall-del" data-delc="${c.id}" title="Delete">✕</button>` : `<button class="wall-del" data-report="comment|${c.id}" title="Report">⚑</button>`}</div>`;
+  };
+  return `<div class="glass-head">${esc(title)} <span>${cs.length}</span></div>
+    <div class="wall-list">${cs.length ? cs.map(msg).join("") : `<p class="muted-th">Be the first to say something 👋</p>`}</div>
+    <div class="mention-list" id="mentionList" hidden></div>
+    <form class="wall-form" id="wallForm"><button type="button" class="btn-th small" id="wallPhoto" title="Add a photo">📷</button><input id="wallInput" maxlength="300" placeholder="Say something… @ to mention" autocomplete="off"><button class="btn-th accent small">Post</button></form>`;
 }
 function wireWall(ev) {
   const f = el("wallForm"); if (f) f.onsubmit = e => { e.preventDefault(); postComment(ev); };
   document.querySelectorAll("[data-delc]").forEach(b => b.onclick = () => deleteComment(ev, b.dataset.delc));
   document.querySelectorAll("[data-report]").forEach(b => b.onclick = () => { const [kind, id] = b.dataset.report.split("|"); reportContent(ev, kind, id); });
+  document.querySelectorAll("[data-react]").forEach(b => b.onclick = () => { const [cid, k] = b.dataset.react.split("|"); toggleReaction(ev, cid, k); });
+  document.querySelectorAll("[data-reactpick]").forEach(b => b.onclick = () => {
+    const cid = b.dataset.reactpick; b.outerHTML = Object.keys(REACTS).map(k => `<button type="button" class="react" data-react="${cid}|${k}">${REACTS[k]}</button>`).join("");
+    document.querySelectorAll("[data-react]").forEach(x => x.onclick = () => { const [c2, k2] = x.dataset.react.split("|"); toggleReaction(ev, c2, k2); });
+  });
+  document.querySelectorAll(".wall-img").forEach(im => im.onclick = () => lightbox(im.src));
+  const ph = el("wallPhoto"); if (ph) ph.onclick = async () => {
+    const file = await pickFile(); if (!file) return; toast("Adding photo…");
+    try { const img = await compressImage(file, 700, 0.62); await addDoc(subCol(ev, "comments"), { authorId: myUid(), authorName: S.profile.name, text: "", img, createdAt: Date.now() }); }
+    catch (e) { toast("Couldn't add photo: " + e.message); }
+  };
+  const inp = el("wallInput"), ml = el("mentionList");
+  if (inp && ml) inp.oninput = () => {
+    const m = /@(\w*)$/.exec(inp.value); if (!m) { ml.hidden = true; return; }
+    const hits = wallParticipants(ev).filter(p => p.name.toLowerCase().startsWith(m[1].toLowerCase())).slice(0, 6);
+    ml.innerHTML = hits.map(p => `<button type="button" data-mention="${esc(p.name)}">@${esc(p.name)}</button>`).join(""); ml.hidden = !hits.length;
+    ml.querySelectorAll("[data-mention]").forEach(b => b.onclick = () => { inp.value = inp.value.replace(/@\w*$/, "@" + b.dataset.mention + " "); ml.hidden = true; inp.focus(); });
+  };
+}
+async function toggleReaction(ev, cid, k) {
+  const c = S.comments.find(x => x.id === cid); const has = c && (c.reactions || {})[k] && c.reactions[k].includes(myUid());
+  try { await updateDoc(doc(subCol(ev, "comments"), cid), { [`reactions.${k}`]: has ? arrayRemove(myUid()) : arrayUnion(myUid()) }); } catch (e) { toast(e.message); }
 }
 
 // ----- Polls -----
@@ -1113,7 +1133,7 @@ function wirePhotos(ev) {
     try { const img = await compressImage(f, 900, 0.68); await addDoc(collection(db, "events", ev.id, "photos"), { img, addedBy: myUid(), createdAt: Date.now() }); }
     catch (e) { toast("Couldn't add photo: " + e.message); }
   };
-  document.querySelectorAll("[data-photo]").forEach(im => im.onclick = () => { const box = document.createElement("div"); box.className = "lightbox"; box.innerHTML = `<img src="${im.src}" alt="">`; box.onclick = () => box.remove(); document.body.appendChild(box); });
+  document.querySelectorAll("[data-photo]").forEach(im => im.onclick = () => lightbox(im.src));
   document.querySelectorAll("[data-delphoto]").forEach(b => b.onclick = () => { if (confirm("Remove this photo?")) deleteDoc(doc(subCol(ev, "photos"), b.dataset.delphoto)).catch(e => toast(e.message)); });
   document.querySelectorAll("#photosCard [data-report]").forEach(b => b.onclick = () => { const [kind, id] = b.dataset.report.split("|"); reportContent(ev, kind, id); });
 }
@@ -1143,8 +1163,9 @@ function showAnswers(ev) {
 }
 async function postComment(ev) {
   const input = el("wallInput"); const text = input.value.trim(); if (!text) return;
-  input.value = "";
-  try { await addDoc(subCol(ev, "comments"), { authorId: myUid(), authorName: S.profile.name, text, createdAt: Date.now() }); }
+  input.value = ""; const ml = el("mentionList"); if (ml) ml.hidden = true;
+  const mentions = wallParticipants(ev).filter(p => new RegExp("@" + p.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i").test(text)).map(p => p.uid);
+  try { await addDoc(subCol(ev, "comments"), { authorId: myUid(), authorName: S.profile.name, text, mentions, createdAt: Date.now() }); }
   catch (e) { toast("Couldn't post: " + e.message); }
 }
 // ----- Reporting & blocking (App Store guideline 1.2 for user content) -----
@@ -1417,7 +1438,7 @@ function profileBody() {
   const p = S.profile;
   return `
   <button class="link-back" data-go="#/">‹ Back</button>
-  <div class="profile-hero">${avatar(myUid(), "xxl")}<div><h1>${esc(p.name)}</h1><div class="muted mono">${esc(p.email || "")}</div></div></div>
+  <div class="profile-hero"><button type="button" class="avatar-edit" id="photoBtn" title="Change photo">${avatar(myUid(), "xxl")}<span class="cam">📷</span></button><div><h1>${esc(p.name)}</h1><div class="muted mono">${esc(p.email || "")}</div></div></div>
   <div class="form-card card">
     <label class="field"><span>Name</span><input id="pName" value="${esc(p.name)}" maxlength="40"></label>
     <div class="two"><label class="field"><span>Venmo</span><input id="pVenmo" value="${esc(p.venmo || "")}" placeholder="@sam-rivera"></label>
@@ -1425,6 +1446,7 @@ function profileBody() {
     <p class="muted sm">Your Venmo and phone are shared only with people in your groups, so they can pay you back.</p>
     <button class="btn primary" id="saveProfile">Save profile</button>
   </div>
+  <button class="btn" id="memoriesBtn" style="margin-top:14px">📸 Memories: photos from all your events</button>
   <div class="section-head" style="margin-top:22px"><h2>Notifications</h2></div>
   <div class="card member-row"><span class="li">🔔</span><div style="flex:1;min-width:0"><b>${({ on: "On for this device", off: "Off", denied: "Blocked in your browser settings", unsupported: "Not available in this browser", native: "Managed in iPhone Settings" })[pushState()]}</b><div class="muted sm">${IOS && !STANDALONE && pushState() === "off" ? "Add Friendly to your Home Screen first (Share → Add to Home Screen)." : "Invites, comments, RSVPs, and day-of reminders."}</div></div>${pushState() === "off" ? `<button class="btn small primary" id="pushToggle">Turn on</button>` : pushState() === "on" ? `<button class="btn small" id="pushToggle">Turn off</button>` : ""}</div>
   <button class="btn danger-ghost" id="signOut" style="margin-top:20px">Sign out</button>
@@ -1459,12 +1481,22 @@ function wireProfile() {
     try {
       await updateDoc(doc(db, "users", myUid()), { name, venmo, phone });
       // propagate name/contact into each group's denormalized members map
-      for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}`]: { name, venmo, phone } }).catch(() => {});
+      for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}`]: { name, venmo, phone, photo: S.profile.photo || "" } }).catch(() => {});
       toast("Profile saved");
     } catch (e) { toast(e.message); }
   };
   el("signOut").onclick = () => { stopListening(); signOut(auth); };
   const pt = el("pushToggle"); if (pt) pt.onclick = () => pushState() === "on" ? disableWebPush() : enableWebPush();
+  el("photoBtn").onclick = async () => {
+    const f = await pickFile(); if (!f) return; toast("Updating photo…");
+    try {
+      const photo = await compressImage(f, 160, 0.72);
+      await updateDoc(doc(db, "users", myUid()), { photo });
+      for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}.photo`]: photo }).catch(() => {});
+      toast("Photo updated");
+    } catch (e) { toast(e.message); }
+  };
+  if (el("memoriesBtn")) el("memoriesBtn").onclick = () => go("#/photos");
   wireReports();
   // App Store requires in-app account deletion (guideline 5.1.1). Re-auth first:
   // Firebase refuses to delete a user without a recent sign-in.
@@ -1497,8 +1529,9 @@ async function deleteAccount() {
 // ---------- ACTIVITY ----------
 const seenAt = () => (S.profile && S.profile.activitySeenAt) || 0;
 const unreadCount = () => (S.activity || []).filter(a => a.createdAt > seenAt()).length;
+const newCountFor = urlTail => (S.activity || []).filter(a => a.createdAt > seenAt() && String(a.url || "").endsWith(urlTail)).length;
 const isNewEvent = ev => (S.activity || []).some(a => a.createdAt > seenAt() && String(a.url || "").endsWith("#/e/" + ev.id));
-const actIcon = a => /invited you/.test(a.title) ? "🎟️" : /^Today:/.test(a.title) ? "⏰" : /reported/i.test(a.title) ? "⚑" : /is going|might come|can't make|joined the waitlist|requested/.test(a.title) ? "✅" : "💬";
+const actIcon = a => /waiting on your RSVP/.test(a.title) ? "📣" : /mentioned you/.test(a.title) ? "＠" : /to a meeting/.test(a.title) ? "📅" : /You're in!/.test(a.title) ? "🎟️" : /still owe/.test(a.title) ? "💸" : /invited you/.test(a.title) ? "🎟️" : /^Today:/.test(a.title) ? "⏰" : /reported/i.test(a.title) ? "⚑" : /is going|might come|can't make|joined the waitlist|requested/.test(a.title) ? "✅" : "💬";
 function notifCard() {
   if (NATIVE || localStorage.getItem("friendlyPushDismissed")) return "";
   const st = pushState(); if (st !== "off") return "";
@@ -1594,6 +1627,33 @@ async function renderPreview(root, id) {
       <p class="muted sm" style="margin:8px 0 0">${p.going} going${p.capacity ? " / " + p.capacity : ""} · Sign in or create a free account below to RSVP.</p></div>`;
   }
   renderAuth(el("authRoot"));
+}
+
+// ---------- MEMORIES (photo archive across my events) ----------
+S.memories = S.memories || new Map();   // eventId -> photos[]
+async function loadMemories() {
+  const evs = [...S.events.values()].sort((a, b) => b.date.localeCompare(a.date));
+  await Promise.all(evs.filter(ev => !S.memories.has(ev.id)).map(async ev => {
+    try { const snap = await getDocs(collection(db, "events", ev.id, "photos")); S.memories.set(ev.id, snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(visibleContent)); }
+    catch { S.memories.set(ev.id, []); }
+  }));
+}
+const yearAgoEvents = () => { const t = new Date(); t.setFullYear(t.getFullYear() - 1); const c = t.getTime(); return [...S.events.values()].filter(ev => Math.abs(evDate(ev).getTime() - c) < 8 * 86400e3); };
+function photosPageBody() {
+  const evs = [...S.events.values()].filter(ev => (S.memories.get(ev.id) || []).length).sort((a, b) => b.date.localeCompare(a.date));
+  const ago1 = yearAgoEvents().filter(ev => (S.memories.get(ev.id) || []).length);
+  const section = (ev, label) => `<div class="section-head" style="margin-top:18px"><h2>${label ? label + " · " : ""}${esc(ev.emoji || "")} ${esc(ev.title)}</h2><a class="muted sm" data-go="#/e/${ev.id}">${esc(fmtWhen(ev))} ›</a></div>
+    <div class="photo-grid mem-grid">${(S.memories.get(ev.id) || []).map(p => `<img src="${p.img}" data-mem="${p.id}" alt="" loading="lazy">`).join("")}</div>`;
+  return `<button class="link-back" data-go="#/profile">‹ Profile</button>
+  <div class="section-head"><h2>Memories</h2><span class="muted sm">${evs.reduce((t, ev) => t + S.memories.get(ev.id).length, 0)} photos</span></div>
+  ${S._memLoading ? `<p class="muted">Gathering photos…</p>` : ""}
+  ${ago1.map(ev => section(ev, "🕰️ One year ago")).join("")}
+  ${evs.length ? evs.map(ev => section(ev)).join("") : (S._memLoading ? "" : emptyState("📸", "No photos yet", "Photos added to your events' photo walls show up here, newest first."))}`;
+}
+function wirePhotosPage() {
+  document.querySelectorAll("[data-mem]").forEach(im => im.onclick = () => lightbox(im.src));
+  if (S._memLoading) return;
+  S._memLoading = true; loadMemories().then(() => { S._memLoading = false; if (S.route.name === "photos") render(); });
 }
 
 // ---------- dialog helper ----------
