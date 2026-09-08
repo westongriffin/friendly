@@ -667,6 +667,9 @@ function composeBody() {
         <div class="check-grid" id="cCohosts">${contactChecks("coh", compose.cohosts)}</div>
         <label class="switch"><input type="checkbox" id="cApproval"><span>Approve guests before they're in</span></label>
       </details>
+      <label class="switch" style="margin-top:12px"><input type="checkbox" id="cOpenLink" ${compose.openLink === false ? "" : "checked"}><span>Anyone with the link can join (so you can text people who aren't on Friendly yet)</span></label>
+      <button type="button" class="btn small" id="cTextInvite" style="margin-top:10px">💬 Create &amp; text friends the invite</button>
+      <p class="muted sm" style="margin:6px 0 0">Creates the event, then opens Messages with the invite and link already written, sent from your own number.</p>
     </div>
 
     <div class="section-head"><h2>RSVP questions <span class="muted sm">optional</span></h2></div>
@@ -696,6 +699,7 @@ function syncCompose() {
   compose.title = el("cTitle").value; compose.date = el("cDate").value; compose.time = el("cTime").value;
   compose.end = el("cEnd").value; compose.where = el("cWhere").value; compose.notes = el("cNotes").value;
   compose.cap = el("cCap").value; if (el("cApproval")) compose.approval = el("cApproval").checked;
+  if (el("cOpenLink")) compose.openLink = el("cOpenLink").checked;
 }
 function wireCompose() {
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
@@ -712,7 +716,8 @@ function wireCompose() {
   const gsel = el("cGroup"); if (gsel) gsel.onchange = () => { compose.groupId = gsel.value; el("cPickWrap").classList.toggle("hidden", !!compose.groupId); };
   el("addQ").onclick = () => { compose.questions.push({ id: newId().slice(0, 6), q: "" }); el("qList").insertAdjacentHTML("beforeend", qRow(compose.questions[compose.questions.length - 1])); wireQ(); };
   wireQ();
-  el("createEventBtn").onclick = createEvent;
+  el("createEventBtn").onclick = () => createEvent(false);
+  el("cTextInvite").onclick = () => createEvent(true);
 }
 function refreshCoverUI() {
   el("coverPanel").innerHTML = coverPanel();
@@ -740,7 +745,7 @@ function wireQ() {
   document.querySelectorAll("[data-qdel]").forEach(b => b.onclick = () => { compose.questions = compose.questions.filter(q => q.id !== b.dataset.qdel); $(`.q-row[data-q="${b.dataset.qdel}"]`)?.remove(); });
   document.querySelectorAll("[data-qedit]").forEach(i => i.oninput = () => { const q = compose.questions.find(q => q.id === i.dataset.qedit); if (q) q.q = i.value; });
 }
-async function createEvent() {
+async function createEvent(thenText) {
   const title = el("cTitle").value.trim(); if (!title) return toast("Add a title.");
   const date = el("cDate").value; if (!date) return toast("Pick a date.");
   let invitedUids, groupId = compose.groupId || null;
@@ -756,6 +761,7 @@ async function createEvent() {
     location: el("cWhere").value.trim(), notes: el("cNotes").value.trim(),
     capacity: Number(el("cCap").value) || 0, approval: !!el("cApproval").checked,
     questions, rsvps: { [myUid()]: "going" }, plusOnes: {}, hypes: {}, answers: {},
+    openLink: el("cOpenLink") ? el("cOpenLink").checked : true,
     createdAt: Date.now()
   };
   try {
@@ -763,6 +769,8 @@ async function createEvent() {
     await setDoc(doc(db, "events", id), ev);
     composeStop(); resetCompose();
     go("#/e/" + id); toast("Event created, invites are live");
+    // "Create & text": hand off to Messages once the event page is up.
+    if (thenText) setTimeout(() => textEventInvite({ id, ...ev }), 400);
   } catch (e) { toast("Couldn't create: " + e.message); el("createEventBtn").disabled = false; el("createEventBtn").textContent = "Create event & send invites"; }
 }
 
@@ -823,7 +831,7 @@ function eventInner(ev) {
       <button data-plus="-1" ${myPlus <= 0 ? "disabled" : ""}>−</button><b>+${myPlus}</b><button data-plus="1">＋</button></div>` : ""}
     ${myR === "pending" ? `<p class="pending-note">⏳ Waiting for the host to approve you.</p>` : ""}
     ${full && myR !== "going" ? `<p class="full-note">This event is full. RSVP to join the waitlist.</p>` : ""}
-    ${questionsBlock(ev, me, myR)}` : `<p class="not-invited">You're viewing this event but aren't on the guest list.</p>`;
+    ${questionsBlock(ev, me, myR)}` : ev.openLink ? `<p class="not-invited">You're invited! Join the guest list to RSVP.</p><div class="rsvp"><button class="rb going" data-join>Join this event</button></div>` : `<p class="not-invited">You're viewing this event but aren't on the guest list.</p>`;
 
   const guestList = ["going", "maybe", "waitlist", "pending", "no", "none"].map(k => {
     if (!g[k].length) return "";
@@ -866,6 +874,7 @@ function eventInner(ev) {
 
   <div class="ev-actions">
     <button class="btn-th" data-share>Share invite</button>
+    ${manage ? `<button class="btn-th" data-text>Text invite</button>` : ""}
     <button class="btn-th" data-cal>Add to calendar</button>
     <button class="btn-th" data-expense>${cost ? fmt$(cost) + " · " : ""}Expenses</button>
     ${manage ? `<button class="btn-th" data-edit>Edit</button><button class="btn-th danger" data-del>Delete</button>` : ""}
@@ -896,6 +905,8 @@ function wireEventPage(ev) {
   if (el("saveAnswers")) el("saveAnswers").onclick = () => saveAnswers(ev);
   if (el("viewAnswers")) el("viewAnswers").onclick = () => showAnswers(ev);
   const share = $("[data-share]"); if (share) share.onclick = () => shareEvent(ev);
+  const txt = $("[data-text]"); if (txt) txt.onclick = () => textEventInvite(ev);
+  const join = $("[data-join]"); if (join) join.onclick = () => joinViaLink(ev, join);
   const cal = $("[data-cal]"); if (cal) cal.onclick = () => downloadIcs(ev);
   const exp = $("[data-expense]"); if (exp) exp.onclick = () => openExpense(ev.id, ev.invitedUids);
   const edit = $("[data-edit]"); if (edit) edit.onclick = () => editEvent(ev);
@@ -1020,6 +1031,19 @@ async function postComment(ev) {
   catch (e) { toast("Couldn't post: " + e.message); }
 }
 async function deleteComment(ev, cid) { try { await deleteDoc(doc(subCol(ev, "comments"), cid)); } catch (e) { toast(e.message); } }
+const eventUrl = ev => "https://officialfriendly.com/#/e/" + ev.id;
+// Text the invite from the organizer's own phone; the link lets people who
+// aren't on Friendly yet sign up and join (when "anyone with the link" is on).
+function textEventInvite(ev) {
+  const when = fmtWhen(ev) + (ev.location ? " at " + ev.location : "");
+  const body = `You're invited! ${ev.emoji || "🎉"} ${ev.title}, ${when}. RSVP here: ${eventUrl(ev)}` + (ev.openLink ? "" : " (sign up with the email I invited)");
+  location.href = smsLink([], body);
+}
+async function joinViaLink(ev, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = "Joining…"; }
+  try { await updateDoc(doc(db, "events", ev.id), { invitedUids: arrayUnion(myUid()) }); toast("You're on the list! RSVP below."); }
+  catch (e) { if (btn) { btn.disabled = false; btn.textContent = "Join this event"; } toast("Couldn't join: " + e.message); }
+}
 function shareEvent(ev) {
   const url = location.origin + location.pathname + "#/e/" + ev.id;
   if (navigator.share) navigator.share({ title: ev.title, text: "You're invited: " + ev.title, url }).catch(() => {});

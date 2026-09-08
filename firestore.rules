@@ -88,10 +88,20 @@ service cloud.firestore {
         );
       }
 
-      allow read: if isHost() || isInvited() || viaGroup();
+      // "Anyone with the link can join": the event id is the unguessable secret.
+      function openLink() { return signedIn() && 'openLink' in resource.data && resource.data.openLink == true; }
+      function selfJoin() {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['invitedUids'])
+          && request.resource.data.invitedUids.hasAll(resource.data.invitedUids)
+          && request.resource.data.invitedUids.size() == resource.data.invitedUids.size() + 1
+          && uid() in request.resource.data.invitedUids;
+      }
+
+      allow read: if isHost() || isInvited() || viaGroup() || openLink();
       allow create: if signedIn() && request.resource.data.hostId == uid();
       allow update: if isHost()
-        || (isInvited() && (onlyOwn('rsvps') || onlyOwn('plusOnes') || onlyOwn('hypes') || onlyOwn('answers')));
+        || (isInvited() && (onlyOwn('rsvps') || onlyOwn('plusOnes') || onlyOwn('hypes') || onlyOwn('answers')))
+        || (openLink() && selfJoin());
       allow delete: if signedIn() && uid() == resource.data.hostId;
 
       // Party wall — anyone who can see the event can post; delete your own.
