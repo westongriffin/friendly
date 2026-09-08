@@ -413,6 +413,9 @@ function pushToMembers(memberIds, msg) {
 // Apps Script has no native ECDSA; V8's BigInt + Utilities' SHA-256/HMAC
 // make a compact, deterministic (no weak randomness) implementation possible.
 
+var B0 = BigInt(0), B1 = BigInt(1), B2 = BigInt(2), B3 = BigInt(3),
+    B8 = BigInt(8), B255 = BigInt(255);
+
 var P256 = {
   p: BigInt("0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff"),
   n: BigInt("0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551"),
@@ -420,10 +423,10 @@ var P256 = {
   gy: BigInt("0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5")
 };
 
-function bmod(a, m) { var r = a % m; return r < 0n ? r + m : r; }
+function bmod(a, m) { var r = a % m; return r < B0 ? r + m : r; }
 function modInv(a, m) {
-  var lm = 1n, hm = 0n, low = bmod(a, m), high = m;
-  while (low > 1n) {
+  var lm = B1, hm = B0, low = bmod(a, m), high = m;
+  while (low > B1) {
     var q = high / low;
     var nm = hm - lm * q, nw = high - low * q;
     hm = lm; high = low; lm = nm; low = nw;
@@ -435,8 +438,8 @@ function ptAdd(P, Q) {
   if (!P) return Q;
   if (!Q) return P;
   if (P[0] === Q[0]) {
-    if (bmod(P[1] + Q[1], p) === 0n) return null;
-    s = bmod((3n * P[0] * P[0] - 3n) * modInv(bmod(2n * P[1], p), p), p);
+    if (bmod(P[1] + Q[1], p) === B0) return null;
+    s = bmod((B3 * P[0] * P[0] - B3) * modInv(bmod(B2 * P[1], p), p), p);
   } else {
     s = bmod((Q[1] - P[1]) * modInv(bmod(Q[0] - P[0], p), p), p);
   }
@@ -445,10 +448,10 @@ function ptAdd(P, Q) {
 }
 function ptMul(k, P) {
   var R = null, A = P;
-  while (k > 0n) {
-    if (k & 1n) R = ptAdd(R, A);
+  while (k > B0) {
+    if (k & B1) R = ptAdd(R, A);
     A = ptAdd(A, A);
-    k >>= 1n;
+    k >>= B1;
   }
   return R;
 }
@@ -462,16 +465,16 @@ function bytesToB64u(bytes) {
   return Utilities.base64Encode(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 function bytesToBig(bytes) {
-  var v = 0n;
+  var v = B0;
   for (var i = 0; i < bytes.length; i++) {
-    v = (v << 8n) | BigInt(bytes[i] < 0 ? bytes[i] + 256 : bytes[i]);
+    v = (v << B8) | BigInt(bytes[i] < 0 ? bytes[i] + 256 : bytes[i]);
   }
   return v;
 }
 function bigTo32(v) {
   var out = [];
   for (var i = 31; i >= 0; i--) {
-    var b = Number((v >> BigInt(8 * i)) & 0xffn);
+    var b = Number((v >> BigInt(8 * i)) & B255);
     out.push(b > 127 ? b - 256 : b);
   }
   return out;
@@ -492,7 +495,7 @@ function deterministicK(d, hBytes) {
   for (var tries = 0; tries < 100; tries++) {
     V = hmac256(K, V);
     var k = bytesToBig(V);
-    if (k >= 1n && k < P256.n) return k;
+    if (k >= B1 && k < P256.n) return k;
     K = hmac256(K, V.concat([0]));
     V = hmac256(K, V);
   }
@@ -507,7 +510,7 @@ function es256Sign(signingInput) {
   var R = ptMul(k, [P256.gx, P256.gy]);
   var r = bmod(R[0], P256.n);
   var s = bmod(modInv(k, P256.n) * (e + r * d), P256.n);
-  if (r === 0n || s === 0n) throw new Error("degenerate signature");
+  if (r === B0 || s === B0) throw new Error("degenerate signature");
   return bytesToB64u(bigTo32(r).concat(bigTo32(s)));
 }
 
