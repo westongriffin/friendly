@@ -11,34 +11,61 @@ const { initializeApp } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const { GoogleAuth } = require("google-auth-library");
+const sharp = require("sharp");
 const logger = require("firebase-functions/logger");
 
 initializeApp();
 const db = getFirestore();
 
-// ---- AI cover art via Vertex Imagen (runs in your own project) ----
-// Firestore-triggered so it works on domain-restricted orgs (no public HTTP
-// invocation needed). The app creates coverRequests/{id}; we generate and write
-// the image back onto that doc; the app reads it and deletes the request.
-const PROJECT = "friendly-6992a", LOCATION = "us-central1", IMAGEN_MODEL = "imagen-3.0-generate-002";
+// ---- AI cover art via Vertex (Gemini image models, in your own project) ----
+// Firestore-triggered: no public HTTP endpoint needed. The app creates
+// coverRequests/{id}; we generate and write the image back onto that doc; the
+// app reads it and deletes the request.
+// Vertex retires model IDs roughly yearly. If these start returning 404
+// "not found or your project does not have access", list the current catalog:
+//   GET https://us-central1-aiplatform.googleapis.com/v1beta1/publishers/google/models
+const PROJECT = "friendly-6992a", LOCATION = "us-central1";
+// Tried in order. Gemini 3.x image models are served from the global endpoint
+// only (regional returns 404); 2.5 is regional. Flash tier matches the budget
+// the app was built around; put { model: "gemini-3-pro-image", location: "global" }
+// first for top quality at roughly 3× the cost.
+const IMAGE_MODELS = [
+  { model: "gemini-3.1-flash-image", location: "global" },
+  { model: "gemini-2.5-flash-image", location: LOCATION }
+];
+const vertexHost = loc => (loc === "global" ? "" : loc + "-") + "aiplatform.googleapis.com";
 const gauth = new GoogleAuth({ scopes: "https://www.googleapis.com/auth/cloud-platform" });
 
 const FLAIR = ", vibrant party invitation art, bold, celebratory, high quality";
 
-// Preferred generator: Google Vertex Imagen (runs as our own service account).
-async function imagenGenerate(prompt) {
+// Firestore docs cap at 1MB and these models return multi-MB PNGs, so
+// normalize to a ~1024px JPEG data URL (~100-200KB).
+async function toCoverJpeg(buf) {
+  const out = await sharp(buf).resize({ width: 1024, withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer();
+  return "data:image/jpeg;base64," + out.toString("base64");
+}
+
+// Preferred generator: a Gemini image model on Vertex (as our own service account).
+async function geminiGenerate(prompt) {
   const token = (await (await gauth.getClient()).getAccessToken()).token;
-  const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${LOCATION}/publishers/google/models/${IMAGEN_MODEL}:predict`;
-  const body = {
-    instances: [{ prompt: prompt + FLAIR }],
-    parameters: { sampleCount: 1, aspectRatio: "16:9", outputOptions: { mimeType: "image/jpeg", compressionQuality: 82 }, safetySetting: "block_medium_and_above" }
-  };
-  const r = await fetch(url, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!r.ok) throw new Error("imagen " + r.status + ": " + (await r.text()).slice(0, 160));
-  const j = await r.json();
-  const b64 = j.predictions && j.predictions[0] && j.predictions[0].bytesBase64Encoded;
-  if (!b64) throw new Error("no image in response");
-  return "data:image/jpeg;base64," + b64;
+  let lastErr;
+  for (const { model, location } of IMAGE_MODELS) {
+    const url = `https://${vertexHost(location)}/v1/projects/${PROJECT}/locations/${location}/publishers/google/models/${model}:generateContent`;
+    const body = {
+      contents: [{ role: "user", parts: [{ text: prompt + FLAIR }] }],
+      generationConfig: { responseModalities: ["TEXT", "IMAGE"], imageConfig: { aspectRatio: "16:9" } }
+    };
+    try {
+      const r = await fetch(url, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error(model + " " + r.status + ": " + (await r.text()).slice(0, 160));
+      const j = await r.json();
+      const parts = (((j.candidates || [])[0] || {}).content || {}).parts || [];
+      const img = parts.find(p => p.inlineData && p.inlineData.data);
+      if (!img) throw new Error(model + ": no image in response");
+      return { image: await toCoverJpeg(Buffer.from(img.inlineData.data, "base64")), model };
+    } catch (e) { lastErr = e; logger.warn(e.message + " — trying next model"); }
+  }
+  throw lastErr;
 }
 
 // Fallback generator: free, no key. Keeps covers working even where the org
@@ -65,9 +92,9 @@ exports.onCoverRequest = onDocumentCreated({ document: "coverRequests/{id}", reg
   const ref = e.data.ref;
   const prompt = String(d.prompt).slice(0, 400);
   let image = null, source = null;
-  try { image = await imagenGenerate(prompt); source = "imagen"; }
+  try { const g = await geminiGenerate(prompt); image = g.image; source = g.model; }
   catch (err) {
-    logger.warn("imagen unavailable, using fallback: " + err.message);
+    logger.warn("vertex unavailable, using fallback: " + err.message);
     try { image = await pollinationsGenerate(prompt); source = "pollinations"; }
     catch (err2) { logger.error("cover generation failed: " + err2.message); }
   }

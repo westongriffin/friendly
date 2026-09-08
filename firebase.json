@@ -4,6 +4,7 @@
   },
   "functions": {
     "source": "functions",
-    "runtime": "nodejs22"
+    "runtime": "nodejs22",
+    "ignore": ["node_modules", ".npmcache", ".git", "firebase-debug.log", "firebase-debug.*.log", "*.local"]
   }
 }

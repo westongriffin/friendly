@@ -73,10 +73,10 @@ async function compressImage(src, maxDim = 1000, quality = 0.72) {
   return c.toDataURL("image/jpeg", quality);
 }
 async function generateCover(prompt) {
-  // Primary: Google Vertex Imagen, driven through a Firestore trigger. We write
-  // a request doc; the Cloud Function generates the image and writes it back.
-  // This avoids public HTTP invocation (which our org policy blocks) and needs
-  // no key in the app. Falls back to a free generator if it doesn't land.
+  // Primary: a Gemini image model on Vertex, driven through a Firestore trigger.
+  // We write a request doc; the Cloud Function generates the image and writes
+  // it back. Keeps the function off the public internet and needs no key in
+  // the app. Falls back to a free generator if it doesn't land.
   try {
     const image = await imagenViaFirestore(prompt);
     if (image) return compressImage(image, 1024, 0.8);
