@@ -69,6 +69,13 @@ img{max-width:100%}
 .fab:hover{background:var(--accent-strong)}
 
 .section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:18px 0 12px}
+/* activity bell + feed + notification prompt */
+.topbar-right{display:flex;align-items:center;gap:8px}
+.bell{position:relative;width:40px;height:40px;border-radius:50%;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);font-size:18px;display:grid;place-items:center}
+.badge{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;border-radius:9px;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:grid;place-items:center;padding:0 5px}
+.act-row{display:flex;align-items:center;gap:12px;padding:12px 15px;border-top:1px solid var(--line)} .act-row:first-child{border-top:0} .act-row.new{background:var(--surface2)}
+.notif-card{display:flex;align-items:center;gap:12px;padding:13px 15px;margin-bottom:14px;flex-wrap:wrap}
+.ev-card{position:relative} .new-pill{position:absolute;top:10px;left:10px;background:var(--sun);color:var(--on-sun);font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;z-index:2}
 .section-head h2{font-size:19px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
 .stack{display:flex;flex-direction:column;gap:10px}

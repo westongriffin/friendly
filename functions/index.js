@@ -7,6 +7,9 @@
 // credentials:  firebase functions:config:set twilio.sid=... twilio.token=... twilio.from=+1...
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onRequest } = require("firebase-functions/v2/https");
+const { defineSecret } = require("firebase-functions/params");
+const webpush = require("web-push");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
@@ -16,6 +19,12 @@ const logger = require("firebase-functions/logger");
 
 initializeApp();
 const db = getFirestore();
+
+// Web push (installed PWA / browsers). Public key also lives in firebase-config.js;
+// the private key is a Functions secret (firebase functions:secrets:set VAPID_PRIVATE_KEY).
+const VAPID_PUBLIC = "BAG0yqJjd5-thc9sQ3g9oG95zpXkbsUTLn2uJ0_nzx2n9IZ4cSgrQ5pLhTuVVexRrnUBNSOYLJDmyDs-paqWTN8";
+const VAPID_PRIVATE = defineSecret("VAPID_PRIVATE_KEY");
+const PUSH = { secrets: [VAPID_PRIVATE] };   // spread into every function that calls notify()
 
 // ---- AI cover art via Vertex (Gemini image models, in your own project) ----
 // Firestore-triggered: no public HTTP endpoint needed. The app creates
@@ -144,29 +153,43 @@ exports.onReceiptRequest = onDocumentCreated({ document: "receiptRequests/{id}",
 
 const firstName = n => (n || "Someone").split(" ")[0];
 
-// Collect FCM tokens for a set of user ids, send a notification, and prune any
-// tokens the platform reports as dead.
-async function notify(uids, title, body, url = "/") {
+// Probe: can this project serve a public HTTP endpoint? (Needed later for
+// calendar feeds and rich link previews.)
+exports.ping = onRequest({ region: "us-central1", invoker: "public" }, (req, res) => { res.set("Cache-Control", "no-store"); res.status(200).send("ok"); });
+
+// Every device for a set of users (native FCM tokens + web push subscriptions):
+// send, prune anything dead, and log the item to the Activity feed so it shows
+// in-app even for people who keep notifications off.
+async function notify(uids, title, body, url = "/", extra = {}) {
   const ids = [...new Set(uids)].filter(Boolean);
   if (!ids.length) return;
+  await db.collection("activity").add({ uids: ids, title, body, url, type: extra.type || "", actorId: extra.actorId || "", createdAt: Date.now() })
+    .catch(err => logger.warn("activity: " + err.message));
   const snaps = await db.getAll(...ids.map(id => db.doc("users/" + id)));
-  const tokenOwner = {};                 // token -> uid (to prune later)
-  const tokens = [];
-  snaps.forEach(s => { (s.get("pushTokens") || []).forEach(t => { tokens.push(t); tokenOwner[t] = s.id; }); });
-  if (!tokens.length) return;
-  const res = await getMessaging().sendEachForMulticast({
-    tokens, notification: { title, body },
-    data: { url }, apns: { payload: { aps: { sound: "default" } } }
+  const tokenOwner = {}, tokens = [], subs = [];
+  snaps.forEach(s => {
+    (s.get("pushTokens") || []).forEach(t => { tokens.push(t); tokenOwner[t] = s.id; });
+    (s.get("webPush") || []).forEach(sub => subs.push({ sub, uid: s.id }));
   });
-  const dead = [];
-  res.responses.forEach((r, i) => {
-    if (!r.success) { const c = r.error && r.error.code; if (c === "messaging/registration-token-not-registered" || c === "messaging/invalid-argument") dead.push(tokens[i]); }
-  });
-  // remove dead tokens
-  const byUser = {};
-  dead.forEach(t => { (byUser[tokenOwner[t]] = byUser[tokenOwner[t]] || []).push(t); });
-  const { FieldValue } = require("firebase-admin/firestore");
-  await Promise.all(Object.entries(byUser).map(([uid, ts]) => db.doc("users/" + uid).update({ pushTokens: FieldValue.arrayRemove(...ts) }).catch(() => {})));
+  const jobs = [];
+  if (tokens.length) jobs.push(getMessaging().sendEachForMulticast({
+    tokens, notification: { title, body }, data: { url }, apns: { payload: { aps: { sound: "default" } } }
+  }).then(async res => {
+    const dead = [];
+    res.responses.forEach((r, i) => { if (!r.success) { const c = r.error && r.error.code; if (c === "messaging/registration-token-not-registered" || c === "messaging/invalid-argument") dead.push(tokens[i]); } });
+    const byUser = {}; dead.forEach(t => { (byUser[tokenOwner[t]] = byUser[tokenOwner[t]] || []).push(t); });
+    await Promise.all(Object.entries(byUser).map(([uid, ts]) => db.doc("users/" + uid).update({ pushTokens: FieldValue.arrayRemove(...ts) }).catch(() => {})));
+  }).catch(err => logger.warn("fcm: " + err.message)));
+  if (subs.length && VAPID_PRIVATE.value()) {
+    webpush.setVapidDetails("mailto:wes@wes-griffin.com", VAPID_PUBLIC, VAPID_PRIVATE.value());
+    const payload = JSON.stringify({ title, body, url });
+    jobs.push(...subs.map(({ sub, uid }) => webpush.sendNotification(sub, payload).catch(err => {
+      // 404/410 = the browser dropped the subscription; forget it.
+      if (err.statusCode === 404 || err.statusCode === 410) return db.doc("users/" + uid).update({ webPush: FieldValue.arrayRemove(sub) }).catch(() => {});
+      logger.warn("webpush " + err.statusCode + ": " + String(err.message).slice(0, 120));
+    })));
+  }
+  await Promise.all(jobs);
 }
 
 async function names(uids) {
@@ -175,7 +198,7 @@ async function names(uids) {
 }
 
 // New event -> tell the guests.
-exports.onEventCreated = onDocumentCreated("events/{id}", async e => {
+exports.onEventCreated = onDocumentCreated({ document: "events/{id}", ...PUSH }, async e => {
   const ev = e.data && e.data.data(); if (!ev) return;
   const nm = await names([ev.hostId]);
   await notify((ev.invitedUids || []).filter(u => u !== ev.hostId),
@@ -184,7 +207,7 @@ exports.onEventCreated = onDocumentCreated("events/{id}", async e => {
 });
 
 // New party-wall comment -> tell the other guests.
-exports.onComment = onDocumentCreated("events/{id}/comments/{cid}", async e => {
+exports.onComment = onDocumentCreated({ document: "events/{id}/comments/{cid}", ...PUSH }, async e => {
   const c = e.data && e.data.data(); if (!c) return;
   const ev = (await db.doc("events/" + e.params.id).get()).data(); if (!ev) return;
   await notify((ev.invitedUids || []).filter(u => u !== c.authorId),
@@ -193,7 +216,7 @@ exports.onComment = onDocumentCreated("events/{id}/comments/{cid}", async e => {
 });
 
 // Group chat message -> tell the other members.
-exports.onGroupComment = onDocumentCreated("groups/{gid}/comments/{cid}", async e => {
+exports.onGroupComment = onDocumentCreated({ document: "groups/{gid}/comments/{cid}", ...PUSH }, async e => {
   const c = e.data && e.data.data(); if (!c) return;
   const g = (await db.doc("groups/" + e.params.gid).get()).data(); if (!g) return;
   await notify((g.memberUids || []).filter(u => u !== c.authorId),
@@ -202,7 +225,7 @@ exports.onGroupComment = onDocumentCreated("groups/{gid}/comments/{cid}", async 
 });
 
 // Expense discussion -> tell the people involved.
-exports.onExpenseComment = onDocumentCreated("expenses/{xid}/comments/{cid}", async e => {
+exports.onExpenseComment = onDocumentCreated({ document: "expenses/{xid}/comments/{cid}", ...PUSH }, async e => {
   const c = e.data && e.data.data(); if (!c) return;
   const x = (await db.doc("expenses/" + e.params.xid).get()).data(); if (!x) return;
   await notify((x.involved || []).filter(u => u !== c.authorId),
@@ -213,13 +236,13 @@ exports.onExpenseComment = onDocumentCreated("expenses/{xid}/comments/{cid}", as
 // Content reported -> tell the moderators (we promise a 24-hour review).
 // Keep in sync with adminUids in firebase-config.js and isAdmin() in the rules.
 const ADMIN_UIDS = ["zzJY7MHFnyN2kAqq13hv79rZTVF2", "TUngQGsAKTRtHBpVEpZwFFHE0sP2"];
-exports.onReport = onDocumentCreated("reports/{id}", async e => {
+exports.onReport = onDocumentCreated({ document: "reports/{id}", ...PUSH }, async e => {
   const r = e.data && e.data.data(); if (!r) return;
   await notify(ADMIN_UIDS, "Content reported: " + (r.reason || "review needed"), String(r.snippet || r.kind || "").slice(0, 120), "/#/profile");
 });
 
 // RSVP change -> tell the host who's coming.
-exports.onRsvp = onDocumentUpdated("events/{id}", async e => {
+exports.onRsvp = onDocumentUpdated({ document: "events/{id}", ...PUSH }, async e => {
   const before = e.data.before.data(), after = e.data.after.data();
   const b = before.rsvps || {}, a = after.rsvps || {};
   const changed = Object.keys(a).find(u => a[u] !== b[u] && u !== after.hostId);
@@ -230,7 +253,7 @@ exports.onRsvp = onDocumentUpdated("events/{id}", async e => {
 });
 
 // Day-of reminders at 9am (project timezone).
-exports.dailyReminders = onSchedule({ schedule: "0 9 * * *", timeZone: "America/Chicago" }, async () => {
+exports.dailyReminders = onSchedule({ schedule: "0 9 * * *", timeZone: "America/Chicago", ...PUSH }, async () => {
   const d = new Date();
   const today = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
   const snap = await db.collection("events").where("date", "==", today).get();

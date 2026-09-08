@@ -20,3 +20,6 @@ export const mapsKey = "AIzaSyDGf2O_wK32SP2K6-4tSJRFPBrrnOe7IB8";
 // Accounts that moderate reported content (see the Reports list on the profile
 // page). Must match ADMIN_UIDS in functions/index.js and isAdmin() in firestore.rules.
 export const adminUids = ["zzJY7MHFnyN2kAqq13hv79rZTVF2", "TUngQGsAKTRtHBpVEpZwFFHE0sP2"];
+
+// Web push (VAPID) public key. The matching private key is a Cloud Functions secret.
+export const vapidPublicKey = "BAG0yqJjd5-thc9sQ3g9oG95zpXkbsUTLn2uJ0_nzx2n9IZ4cSgrQ5pLhTuVVexRrnUBNSOYLJDmyDs-paqWTN8";

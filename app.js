@@ -8,9 +8,9 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection,
-  query, where, onSnapshot, addDoc, arrayUnion, arrayRemove, deleteField
+  query, where, onSnapshot, addDoc, arrayUnion, arrayRemove, deleteField, orderBy, limit
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-import { firebaseConfig, mapsKey, adminUids } from "./firebase-config.js";
+import { firebaseConfig, mapsKey, adminUids, vapidPublicKey } from "./firebase-config.js";
 import { THEMES, themeOf, applyTheme, startParticles, DEFAULT_THEME } from "./themes.js";
 
 const fb = initializeApp(firebaseConfig);
@@ -32,6 +32,35 @@ async function registerPush(uid) {
     Push.addListener("pushNotificationActionPerformed", a => { const url = a && a.notification && a.notification.data && a.notification.data.url; if (url) location.hash = url; });
     await Push.register();
   } catch {}
+}
+
+// ---------- web push (installed PWA / browsers) ----------
+// iPhone only delivers web push to apps added to the Home Screen.
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+const STANDALONE = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true;
+const WEBPUSH_OK = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+function b64ToU8(s) { const pad = "=".repeat((4 - s.length % 4) % 4); const b = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from([...b].map(c => c.charCodeAt(0))); }
+const pushState = () => NATIVE ? "native" : !WEBPUSH_OK ? "unsupported" : Notification.permission === "denied" ? "denied"
+  : (S.profile && S.profile.webPushEnabled && Notification.permission === "granted") ? "on" : "off";
+async function enableWebPush() {
+  if (NATIVE) return registerPush(myUid());
+  if (IOS && !STANDALONE) return toast("On iPhone, first add Friendly to your Home Screen (Share → Add to Home Screen), then turn notifications on from there.");
+  if (!WEBPUSH_OK) return toast("This browser can't receive notifications.");
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") return toast("Notifications stay off. You can allow them in your browser settings any time.");
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(vapidPublicKey) });
+    await updateDoc(doc(db, "users", myUid()), { webPush: arrayUnion(JSON.parse(JSON.stringify(sub))), webPushEnabled: true });
+    toast("Notifications on 🔔");
+  } catch (e) { toast("Couldn't turn on notifications: " + e.message); }
+}
+async function disableWebPush() {
+  try {
+    const reg = await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription();
+    if (sub) { await updateDoc(doc(db, "users", myUid()), { webPush: arrayRemove(JSON.parse(JSON.stringify(sub))) }); await sub.unsubscribe(); }
+    await updateDoc(doc(db, "users", myUid()), { webPushEnabled: false }); toast("Notifications off");
+  } catch (e) { toast(e.message); }
 }
 
 // ---------- tiny helpers ----------
@@ -158,6 +187,7 @@ function parseRoute() {
   if (p[0] === "e") return { name: "event", id: p[1] };
   if (p[0] === "g") return { name: "group", id: p[1] };
   if (p[0] === "x") return { name: "expense", id: p[1] };
+  if (p[0] === "activity") return { name: "activity" };
   if (p[0] === "new") return { name: "new" };
   if (p[0] === "money") return { name: "money" };
   if (p[0] === "groups") return { name: "groups" };
@@ -207,6 +237,11 @@ function subscribeAll(u) {
   }));
   add(on("settlements", query(collection(db, "settlements"), where("involved", "array-contains", u.uid)), snap => {
     S.settlements = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); render();
+  }));
+
+  // activity feed (written by Cloud Functions for everything I'd be notified about)
+  add(on("activity", query(collection(db, "activity"), where("uids", "array-contains", u.uid), orderBy("createdAt", "desc"), limit(60)), snap => {
+    S.activity = snap.docs.map(d => ({ id: d.id, ...d.data() })); render();
   }));
 
   // events where I'm directly invited
@@ -356,7 +391,8 @@ function shell(body) {
   return `
   <header class="topbar">
     <div class="brand" data-go="#/">Friend<span class="tilt">l</span>y</div>
-    <button class="me-chip" data-go="#/profile">${avatar(S.user.uid)}<span>${esc(first(p.name))}</span></button>
+    <div class="topbar-right"><button class="bell" data-go="#/activity" title="Activity">🔔${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ""}</button>
+    <button class="me-chip" data-go="#/profile">${avatar(S.user.uid)}<span>${esc(first(p.name))}</span></button></div>
   </header>
   <nav class="tabs">
     ${T("home", "Events", "#/")}
@@ -375,6 +411,8 @@ function wireShell() {
   if (S.route.name === "group") wireGroupPage();
   if (S.route.name === "money") wireMoney();
   if (S.route.name === "expense") wireExpensePage();
+  if (S.route.name === "activity") wireActivity();
+  if (S.route.name !== "activity") S._actOpenSeen = null;
   if (S.route.name === "profile") wireProfile();
 }
 function routeBody(r) {
@@ -384,6 +422,7 @@ function routeBody(r) {
   if (r.name === "group") return groupPageBody(r.id);
   if (r.name === "money") return moneyBody();
   if (r.name === "expense") return expenseBody(r.id);
+  if (r.name === "activity") return activityBody();
   if (r.name === "profile") return profileBody();
   return homeBody();
 }
@@ -415,6 +454,7 @@ function homeBody() {
   </div>` : "";
 
   return `
+  ${notifCard()}
   <div class="section-head"><h2>Upcoming</h2><button class="btn primary small" data-go="#/new">＋ New event</button></div>
   ${filterBar}
   <div class="ev-grid">${upcoming.length ? upcoming.map(eventCard).join("") : emptyState("🗓️", "No plans yet", "Create your first event: pick a theme and invite the crew.")}</div>
@@ -441,12 +481,15 @@ function eventCard(ev) {
         <span class="count">${going} going${ev.capacity > 0 ? " / " + ev.capacity : ""}</span>
       </div>
       ${rsvpDot}
+      ${isNewEvent(ev) ? `<span class="new-pill">New</span>` : ""}
     </div>
   </a>`;
 }
 function wireHome() {
   document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
   document.querySelectorAll("[data-filter]").forEach(b => b.onclick = () => { homeFilter = b.dataset.filter; render(); });
+  if (el("pushOn")) el("pushOn").onclick = enableWebPush;
+  if (el("pushLater")) el("pushLater").onclick = () => { localStorage.setItem("friendlyPushDismissed", "1"); render(); };
 }
 
 // ---------- GROUPS ----------
@@ -1346,6 +1389,8 @@ function profileBody() {
     <p class="muted sm">Your Venmo and phone are shared only with people in your groups, so they can pay you back.</p>
     <button class="btn primary" id="saveProfile">Save profile</button>
   </div>
+  <div class="section-head" style="margin-top:22px"><h2>Notifications</h2></div>
+  <div class="card member-row"><span class="li">🔔</span><div style="flex:1;min-width:0"><b>${({ on: "On for this device", off: "Off", denied: "Blocked in your browser settings", unsupported: "Not available in this browser", native: "Managed in iPhone Settings" })[pushState()]}</b><div class="muted sm">${IOS && !STANDALONE && pushState() === "off" ? "Add Friendly to your Home Screen first (Share → Add to Home Screen)." : "Invites, comments, RSVPs, and day-of reminders."}</div></div>${pushState() === "off" ? `<button class="btn small primary" id="pushToggle">Turn on</button>` : pushState() === "on" ? `<button class="btn small" id="pushToggle">Turn off</button>` : ""}</div>
   <button class="btn danger-ghost" id="signOut" style="margin-top:20px">Sign out</button>
   <button class="btn ghost small" id="deleteAccount" style="margin-top:28px;opacity:.7">Delete my account</button>
   ${isAdmin() ? `<div class="section-head" style="margin-top:28px"><h2>Reports <span class="muted sm">moderation</span></h2></div>
@@ -1383,6 +1428,7 @@ function wireProfile() {
     } catch (e) { toast(e.message); }
   };
   el("signOut").onclick = () => { stopListening(); signOut(auth); };
+  const pt = el("pushToggle"); if (pt) pt.onclick = () => pushState() === "on" ? disableWebPush() : enableWebPush();
   wireReports();
   // App Store requires in-app account deletion (guideline 5.1.1). Re-auth first:
   // Firebase refuses to delete a user without a recent sign-in.
@@ -1410,6 +1456,28 @@ async function deleteAccount() {
     await deleteUser(u);
     closeDialog(); toast("Your account has been deleted.");
   } catch (e) { toast(e.code === "auth/invalid-credential" || e.code === "auth/wrong-password" ? "That password didn't match." : e.message); }
+}
+
+// ---------- ACTIVITY ----------
+const seenAt = () => (S.profile && S.profile.activitySeenAt) || 0;
+const unreadCount = () => (S.activity || []).filter(a => a.createdAt > seenAt()).length;
+const isNewEvent = ev => (S.activity || []).some(a => a.createdAt > seenAt() && String(a.url || "").endsWith("#/e/" + ev.id));
+const actIcon = a => /invited you/.test(a.title) ? "🎟️" : /^Today:/.test(a.title) ? "⏰" : /reported/i.test(a.title) ? "⚑" : /is going|might come|can't make|joined the waitlist|requested/.test(a.title) ? "✅" : "💬";
+function notifCard() {
+  if (NATIVE || localStorage.getItem("friendlyPushDismissed")) return "";
+  const st = pushState(); if (st !== "off") return "";
+  const needsInstall = IOS && !STANDALONE;
+  return `<div class="card notif-card"><span class="li">🔔</span><div style="flex:1;min-width:0"><b>${needsInstall ? "Get a buzz when plans change" : "Turn on notifications"}</b><div class="muted sm">${needsInstall ? "Add Friendly to your Home Screen (Share → Add to Home Screen), then turn them on from your profile." : "New invites, comments, RSVPs, and day-of reminders, right on this device."}</div></div><div class="btnrow">${needsInstall ? "" : `<button class="btn primary small" id="pushOn">Turn on</button>`}<button class="btn ghost small" id="pushLater">Later</button></div></div>`;
+}
+function activityBody() {
+  if (S._actOpenSeen == null) S._actOpenSeen = seenAt();   // keep "new" highlights until you leave the page
+  const rows = S.activity || [];
+  return `<div class="section-head"><h2>Activity</h2></div>
+  <div class="card">${rows.length ? rows.map(a => `<a class="act-row ${a.createdAt > S._actOpenSeen ? "new" : ""}" data-act="${esc(a.url || "#/")}"><span class="li">${actIcon(a)}</span><div style="flex:1;min-width:0"><b>${esc(a.title)}</b><div class="muted sm" style="overflow-wrap:anywhere">${esc(a.body || "")}</div></div><span class="muted sm">${ago(a.createdAt)}</span></a>`).join("") : emptyState("🔔", "Nothing yet", "Invites, comments, RSVPs, and reminders will show up here.")}</div>`;
+}
+function wireActivity() {
+  document.querySelectorAll("[data-act]").forEach(a => a.onclick = e => { e.preventDefault(); location.hash = String(a.dataset.act).replace(/^.*#/, "#"); });
+  if (unreadCount()) updateDoc(doc(db, "users", myUid()), { activitySeenAt: Date.now() }).catch(() => {});
 }
 
 // ---------- dialog helper ----------

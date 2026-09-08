@@ -1,7 +1,7 @@
 // Friendly service worker: cache the app shell so the installed PWA opens
 // instantly. Firebase (Firestore/Auth) traffic and fonts always hit the
 // network. Bump CACHE to invalidate old shells on deploy.
-const CACHE = "friendly-fb-v17";
+const CACHE = "friendly-fb-v18";
 const SHELL = [
   "./", "./index.html", "./styles.css", "./app.js", "./themes.js",
   "./firebase-config.js", "./manifest.webmanifest",
@@ -29,4 +29,21 @@ self.addEventListener("fetch", e => {
     }).catch(() => caches.match(e.request, { ignoreSearch: e.request.mode === "navigate" })
       .then(cached => cached || caches.match("./index.html")))
   );
+});
+
+// ---- Web push ----
+self.addEventListener("push", e => {
+  let d = {}; try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data && e.data.text() }; }
+  e.waitUntil(self.registration.showNotification(d.title || "Friendly", {
+    body: d.body || "", icon: "./icons/icon-192.png", badge: "./icons/icon-192.png",
+    data: { url: d.url || "/" }, tag: d.tag || undefined
+  }));
+});
+self.addEventListener("notificationclick", e => {
+  e.notification.close();
+  const url = new URL((e.notification.data && e.notification.data.url) || "/", self.location.origin).href;
+  e.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then(cs => {
+    for (const c of cs) if (c.url.startsWith(self.location.origin)) { c.navigate(url); return c.focus(); }
+    return clients.openWindow(url);
+  }));
 });

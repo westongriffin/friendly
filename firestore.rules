@@ -14,6 +14,11 @@ service cloud.firestore {
       return signedIn() && uid() in ['zzJY7MHFnyN2kAqq13hv79rZTVF2', 'TUngQGsAKTRtHBpVEpZwFFHE0sP2'];
     }
 
+    // ---- Activity feed: written by Cloud Functions, readable by its recipients ----
+    match /activity/{itemId} {
+      allow read: if signedIn() && uid() in resource.data.uids;
+    }
+
     // ---- Reports: anyone signed in can file one; only admins see them ----
     match /reports/{reportId} {
       allow create: if signedIn() && request.resource.data.reporterId == uid()
