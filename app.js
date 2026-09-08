@@ -10,12 +10,14 @@ import {
   getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection,
   query, where, onSnapshot, addDoc, arrayUnion
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-functions.js";
 import { firebaseConfig } from "./firebase-config.js";
 import { THEMES, themeOf, applyTheme, startParticles, DEFAULT_THEME } from "./themes.js";
 
 const fb = initializeApp(firebaseConfig);
 const auth = getAuth(fb);
 const db = getFirestore(fb);
+const fns = getFunctions(fb, "us-central1");
 
 // Native bridge (present only inside the Capacitor iOS/Android app). All of
 // this degrades to web behavior when window.Capacitor is absent.
@@ -73,13 +75,16 @@ async function compressImage(src, maxDim = 1000, quality = 0.72) {
   return c.toDataURL("image/jpeg", quality);
 }
 async function generateCover(prompt) {
-  // Pollinations is a free, no-API-key image generator (Stable Diffusion).
-  // We bake the result into a data URL so the invite is self-contained.
+  // Primary: Google Vertex Imagen via our Cloud Function (runs in our own
+  // project; no key in the app). Falls back to a free generator if it errors.
+  try {
+    const res = await httpsCallable(fns, "generateCover")({ prompt });
+    if (res && res.data && res.data.image) return compressImage(res.data.image, 1024, 0.8);
+  } catch (e) { console.warn("Imagen unavailable, using fallback:", e && e.message); }
   const seed = Math.floor(Math.random() * 1e6);
   const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt + ", vibrant party invitation art, bold, high quality")}?width=1024&height=640&nologo=true&seed=${seed}`;
   const res = await fetch(url); if (!res.ok) throw new Error("Generator busy — try again");
-  const blob = await res.blob();
-  return compressImage(await blobToURL(blob), 1024, 0.74);
+  return compressImage(await blobToURL(await res.blob()), 1024, 0.74);
 }
 function pickFile(accept = "image/*") { return new Promise(res => { const i = document.createElement("input"); i.type = "file"; i.accept = accept; i.onchange = () => res(i.files[0] || null); i.click(); }); }
 

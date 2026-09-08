@@ -7,13 +7,37 @@
 // credentials:  firebase functions:config:set twilio.sid=... twilio.token=... twilio.from=+1...
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
+const { GoogleAuth } = require("google-auth-library");
 const logger = require("firebase-functions/logger");
 
 initializeApp();
 const db = getFirestore();
+
+// ---- AI cover art via Vertex Imagen (runs in your own project) ----
+const PROJECT = "friendly-6992a", LOCATION = "us-central1", IMAGEN_MODEL = "imagen-3.0-generate-002";
+const gauth = new GoogleAuth({ scopes: "https://www.googleapis.com/auth/cloud-platform" });
+
+exports.generateCover = onCall({ region: "us-central1", timeoutSeconds: 120, memory: "512MiB" }, async req => {
+  if (!req.auth) throw new HttpsError("unauthenticated", "Please sign in.");
+  const prompt = String((req.data && req.data.prompt) || "").trim().slice(0, 400);
+  if (!prompt) throw new HttpsError("invalid-argument", "Describe the cover you want.");
+  const token = (await (await gauth.getClient()).getAccessToken()).token;
+  const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${LOCATION}/publishers/google/models/${IMAGEN_MODEL}:predict`;
+  const body = {
+    instances: [{ prompt: prompt + ", vibrant party invitation art, bold, celebratory, high quality" }],
+    parameters: { sampleCount: 1, aspectRatio: "16:9", safetySetting: "block_medium_and_above" }
+  };
+  const r = await fetch(url, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) { logger.error("imagen " + r.status + ": " + (await r.text()).slice(0, 300)); throw new HttpsError("internal", "The image generator had an issue — try again."); }
+  const j = await r.json();
+  const b64 = j.predictions && j.predictions[0] && j.predictions[0].bytesBase64Encoded;
+  if (!b64) throw new HttpsError("internal", "No image came back — try a different prompt.");
+  return { image: "data:image/png;base64," + b64 };
+});
 
 const firstName = n => (n || "Someone").split(" ")[0];
 
