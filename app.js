@@ -182,14 +182,17 @@ onAuthStateChanged(auth, async u => {
 
 function subscribeAll(u) {
   const add = fn => S.subs.push(fn);
-  add(onSnapshot(doc(db, "users", u.uid), d => { S.profile = d.data(); rebuildContacts(); S.ready = true; render(); }));
+  // Every core listener gets a named error handler, so a denied query shows
+  // in the console as what it is instead of an "uncaught" mystery.
+  const on = (name, q, cb) => onSnapshot(q, cb, err => console.warn("listener " + name + ":", err.code || err.message));
+  add(on("profile", doc(db, "users", u.uid), d => { S.profile = d.data(); rebuildContacts(); S.ready = true; render(); }));
 
-  add(onSnapshot(query(collection(db, "groups"), where("memberUids", "array-contains", u.uid)), snap => {
+  add(on("groups", query(collection(db, "groups"), where("memberUids", "array-contains", u.uid)), snap => {
     S.groups = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }]));
     rebuildContacts(); resubscribeEvents(u); render();
   }));
 
-  add(onSnapshot(query(collection(db, "groups"), where("invitedEmails", "array-contains", (u.email || "").toLowerCase())), snap => {
+  add(on("invites", query(collection(db, "groups"), where("invitedEmails", "array-contains", (u.email || "").toLowerCase())), snap => {
     // Build plain docs first, then key the Map by id. (An earlier version mapped
     // to [id, doc] pairs before filtering, so every invite lost its fields and
     // Join looked up an undefined key: the "Join does nothing" bug.)
@@ -197,19 +200,21 @@ function subscribeAll(u) {
     render();
   }));
 
-  add(onSnapshot(query(collection(db, "expenses"), where("involved", "array-contains", u.uid)), snap => {
+  add(on("expenses", query(collection(db, "expenses"), where("involved", "array-contains", u.uid)), snap => {
     S.expenses = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); render();
   }));
-  add(onSnapshot(query(collection(db, "settlements"), where("involved", "array-contains", u.uid)), snap => {
+  add(on("settlements", query(collection(db, "settlements"), where("involved", "array-contains", u.uid)), snap => {
     S.settlements = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); render();
   }));
 
   // events where I'm directly invited
-  add(onSnapshot(query(collection(db, "events"), where("invitedUids", "array-contains", u.uid)), snap => {
-    snap.docChanges().forEach(c => { if (c.type === "removed") S.events.delete(c.doc.id); else S.events.set(c.doc.id, { id: c.doc.id, ...c.doc.data() }); });
+  add(on("events", query(collection(db, "events"), where("invitedUids", "array-contains", u.uid)), snap => {
+    snap.docChanges().forEach(c => { if (c.type === "removed") S.events.delete(c.doc.id); else { const ev = { id: c.doc.id, ...c.doc.data() }; S.events.set(ev.id, ev); noteNames(ev); } });
     render();
   }));
 }
+// Remember the guest names an event carries, for guests outside my groups.
+function noteNames(ev) { S.nameHints = S.nameHints || new Map(); for (const [uid, n] of Object.entries(ev.names || {})) if (n) S.nameHints.set(uid, n); }
 
 // events tied to any of my groups (re-subscribed when group set changes)
 function resubscribeEvents(u) {
@@ -221,7 +226,7 @@ function resubscribeEvents(u) {
   if (!gids.length) return;
   const subscribe = attempt => {
     S._groupEventsUnsub = onSnapshot(query(collection(db, "events"), where("groupId", "in", gids)), snap => {
-      snap.docChanges().forEach(c => { if (c.type === "removed") S.events.delete(c.doc.id); else S.events.set(c.doc.id, { id: c.doc.id, ...c.doc.data() }); });
+      snap.docChanges().forEach(c => { if (c.type === "removed") S.events.delete(c.doc.id); else { const ev = { id: c.doc.id, ...c.doc.data() }; S.events.set(ev.id, ev); noteNames(ev); } });
       render();
     }, err => {
       // Right after creating or joining a group, the local groups snapshot fires
@@ -244,8 +249,11 @@ function rebuildContacts() {
     for (const [uid, info] of Object.entries(g.members || {})) if (!m.has(uid)) m.set(uid, info);
   S.contacts = m;
 }
-const nameOf = uid => (S.contacts.get(uid) || {}).name || "Someone";
-function avatar(uid, cls = "") { const info = S.contacts.get(uid) || {}; return `<span class="avatar ${cls}" style="background:${colorFor(uid)}">${esc(initials(info.name || "?"))}</span>`; }
+// Names come from shared groups (contacts); guests who joined an event by link
+// are only known by the names the event carries (see noteNames).
+const nameHint = uid => (S.nameHints && S.nameHints.get(uid)) || "";
+const nameOf = uid => (S.contacts.get(uid) || {}).name || nameHint(uid) || "Someone";
+function avatar(uid, cls = "") { const name = (S.contacts.get(uid) || {}).name || nameHint(uid); return `<span class="avatar ${cls}" style="background:${colorFor(uid)}">${esc(initials(name || "?"))}</span>`; }
 
 // ---------- render root ----------
 function render() {
@@ -768,6 +776,8 @@ async function createEvent(thenText) {
   const id = newId();
   const ev = {
     hostId: myUid(), hostName: S.profile.name, cohostUids, groupId, invitedUids,
+    // Guest names travel with the event so link-joined guests can see who's who.
+    names: Object.fromEntries(invitedUids.map(u => [u, u === myUid() ? S.profile.name : nameOf(u)])),
     title, emoji: compose.emoji, theme: compose.theme, cover: compose.cover || "",
     date, time: el("cTime").value || "", endTime: el("cEnd").value || "",
     location: el("cWhere").value.trim(), notes: el("cNotes").value.trim(),
@@ -913,7 +923,7 @@ function wireEventPage(ev) {
   S._autoJoined = S._autoJoined || new Set();
   if (!(ev.invitedUids || []).includes(myUid()) && ev.groupId && S.groups.has(ev.groupId) && !S._autoJoined.has(id)) {
     S._autoJoined.add(id);
-    updateDoc(doc(db, "events", id), { invitedUids: arrayUnion(myUid()) }).catch(e => console.warn("auto-join failed:", e.message));
+    updateDoc(doc(db, "events", id), { invitedUids: arrayUnion(myUid()), [`names.${myUid()}`]: S.profile.name }).catch(e => console.warn("auto-join failed:", e.message));
   }
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
   document.querySelectorAll("[data-rsvp]").forEach(b => b.onclick = () => setRsvp(ev, b.dataset.rsvp));
@@ -1060,7 +1070,7 @@ function textEventInvite(ev) {
 }
 async function joinViaLink(ev, btn) {
   if (btn) { btn.disabled = true; btn.textContent = "Joining…"; }
-  try { await updateDoc(doc(db, "events", ev.id), { invitedUids: arrayUnion(myUid()) }); toast("You're on the list! RSVP below."); }
+  try { await updateDoc(doc(db, "events", ev.id), { invitedUids: arrayUnion(myUid()), [`names.${myUid()}`]: S.profile.name }); toast("You're on the list! RSVP below."); }
   catch (e) { if (btn) { btn.disabled = false; btn.textContent = "Join this event"; } toast("Couldn't join: " + e.message); }
 }
 function shareEvent(ev) {
