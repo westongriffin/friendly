@@ -1,10 +1,10 @@
 # Friendly
 
-Plan hangouts, invite the group, and settle up afterwards — all in one shared,
+Plan hangouts, invite the group, and settle up afterwards, all in one shared,
 installable web app. Lives at **https://officialfriendly.com**.
 
 - **Frontend**: a static PWA (this repo), hosted on GitHub Pages. Friends can
-  install it from the browser — "Add to Home Screen" on a phone, "Install app"
+  install it from the browser: "Add to Home Screen" on a phone, "Install app"
   on desktop Chrome/Edge.
 - **Backend**: a Google Sheet, fronted by a Google Apps Script web app
   ([`apps-script/Code.gs`](apps-script/Code.gs)). Every member, event, expense,
@@ -28,7 +28,7 @@ installable web app. Lives at **https://officialfriendly.com**.
    window.FRIENDLY_CONFIG = { scriptUrl: "https://script.google.com/macros/s/…/exec" };
    ```
 
-5. Commit and push. Done — the site now reads and writes your sheet.
+5. Commit and push. Done. The site now reads and writes your sheet.
 
 To update the script later: paste the new code in the Apps Script editor, then
 **Deploy → Manage deployments → ✏️ → New version**. The URL stays the same.
@@ -65,12 +65,12 @@ Until DNS is set up, the site also works at
 - **Money**: add expenses split evenly among chosen friends, see who owes
   whom, and record reimbursements ("Record payment") to zero things out.
 - **Paying each other**: profiles can hold a Venmo username and a phone
-  number. Settle-up rows then get one-tap buttons — Venmo opens prefilled
+  number. Settle-up rows then get one-tap buttons: Venmo opens prefilled
   with recipient/amount/note (or a Request for money owed to you), and the
   Apple Cash button opens Messages to that friend (Apple Cash is attached
   there; Apple offers no deeper integration). Money never moves through the
-  app itself — pay in Venmo/Messages, then tap Record payment.
-- **Push notifications**: enable per device from the Friends tab — invites,
+  app itself: pay in Venmo/Messages, then tap Record payment.
+- **Push notifications**: enable per device from the Friends tab: invites,
   new expenses, payments, and RSVPs. On iPhone this requires iOS 16.4+ and
   the app installed to the home screen first (Apple's rule for web push).
   The backend signs Web Push (VAPID/ES256) itself; the private key lives in
@@ -83,7 +83,7 @@ Until DNS is set up, the site also works at
 
 - Identity is trust-based: anyone with the link can claim any profile. Fine
   for a friend group; don't use it with strangers.
-- The Apps Script URL in `config.js` is public — anyone who has it can read
+- The Apps Script URL in `config.js` is public; anyone who has it can read
   and write the group's data. Don't put anything sensitive in the sheet.
 - Editing sheet rows by hand is fine, but keep the `id` column intact and
   JSON columns (`invitees`, `rsvps`, `split`) valid.

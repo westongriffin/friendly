@@ -1,4 +1,4 @@
-// Friendly — Firebase project configuration.
+// Friendly: Firebase project configuration.
 // These values are safe to ship publicly; access is enforced by Firestore
 // security rules (see firestore.rules), not by hiding this config.
 export const firebaseConfig = {
