@@ -7,7 +7,6 @@
 // credentials:  firebase functions:config:set twilio.sid=... twilio.token=... twilio.from=+1...
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
-const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
@@ -18,25 +17,37 @@ initializeApp();
 const db = getFirestore();
 
 // ---- AI cover art via Vertex Imagen (runs in your own project) ----
+// Firestore-triggered so it works on domain-restricted orgs (no public HTTP
+// invocation needed). The app creates coverRequests/{id}; we generate and write
+// the image back onto that doc; the app reads it and deletes the request.
 const PROJECT = "friendly-6992a", LOCATION = "us-central1", IMAGEN_MODEL = "imagen-3.0-generate-002";
 const gauth = new GoogleAuth({ scopes: "https://www.googleapis.com/auth/cloud-platform" });
 
-exports.generateCover = onCall({ region: "us-central1", timeoutSeconds: 120, memory: "512MiB" }, async req => {
-  if (!req.auth) throw new HttpsError("unauthenticated", "Please sign in.");
-  const prompt = String((req.data && req.data.prompt) || "").trim().slice(0, 400);
-  if (!prompt) throw new HttpsError("invalid-argument", "Describe the cover you want.");
+async function imagenGenerate(prompt) {
   const token = (await (await gauth.getClient()).getAccessToken()).token;
   const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${LOCATION}/publishers/google/models/${IMAGEN_MODEL}:predict`;
   const body = {
     instances: [{ prompt: prompt + ", vibrant party invitation art, bold, celebratory, high quality" }],
-    parameters: { sampleCount: 1, aspectRatio: "16:9", safetySetting: "block_medium_and_above" }
+    parameters: { sampleCount: 1, aspectRatio: "16:9", outputOptions: { mimeType: "image/jpeg", compressionQuality: 82 }, safetySetting: "block_medium_and_above" }
   };
   const r = await fetch(url, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!r.ok) { logger.error("imagen " + r.status + ": " + (await r.text()).slice(0, 300)); throw new HttpsError("internal", "The image generator had an issue — try again."); }
+  if (!r.ok) throw new Error("imagen " + r.status + ": " + (await r.text()).slice(0, 200));
   const j = await r.json();
   const b64 = j.predictions && j.predictions[0] && j.predictions[0].bytesBase64Encoded;
-  if (!b64) throw new HttpsError("internal", "No image came back — try a different prompt.");
-  return { image: "data:image/png;base64," + b64 };
+  if (!b64) throw new Error("no image in response");
+  return "data:image/jpeg;base64," + b64;
+}
+
+exports.onCoverRequest = onDocumentCreated({ document: "coverRequests/{id}", region: "us-central1", timeoutSeconds: 120, memory: "512MiB" }, async e => {
+  const d = e.data && e.data.data(); if (!d || !d.prompt) return;
+  const ref = e.data.ref;
+  try {
+    const image = await imagenGenerate(String(d.prompt).slice(0, 400));
+    await ref.update({ status: "done", image });
+  } catch (err) {
+    logger.error("cover generation failed: " + err.message);
+    await ref.update({ status: "error", error: "generation failed" });
+  }
 });
 
 const firstName = n => (n || "Someone").split(" ")[0];

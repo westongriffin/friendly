@@ -118,6 +118,16 @@ service cloud.firestore {
       allow update, delete: if signedIn() && uid() == resource.data.addedBy;
     }
 
+    // ---- AI cover requests ----
+    // The client writes { uid, prompt, status:"pending" }; a Cloud Function
+    // (Admin SDK, bypasses these rules) fills in the generated image. Each doc
+    // is private to the requester, who reads the result and deletes it.
+    match /coverRequests/{reqId} {
+      allow read, delete: if signedIn() && uid() == resource.data.uid;
+      allow create: if signedIn() && request.resource.data.uid == uid()
+        && request.resource.data.status == "pending";
+    }
+
     // ---- Settlements ----
     // Doc shape: { from, to, amountCents, involved:[from,to], note, addedBy, createdAt }
     match /settlements/{settlementId} {
