@@ -22,7 +22,7 @@ var SITE_URL = "https://officialfriendly.com";
 
 var TABLES = {
   members: {
-    cols: ["id", "name", "email", "createdAt", "venmo", "phone"],
+    cols: ["id", "name", "email", "createdAt", "venmo", "phone", "pinHash"],
     json: [], num: ["createdAt"]
   },
   events: {

@@ -208,6 +208,8 @@ dialog::backdrop{background:rgba(20,16,10,.45)}
             <div class="field"><label for="jVenmo">Venmo</label><input id="jVenmo" maxlength="40" placeholder="@sam-rivera"></div>
             <div class="field"><label for="jPhone">Phone</label><input id="jPhone" type="tel" maxlength="20" placeholder="+1 555 123 4567" autocomplete="tel"></div>
           </div>
+          <div class="field"><label for="jPin">Choose a 4-digit PIN</label><input id="jPin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required autocomplete="off" placeholder="&bull;&bull;&bull;&bull;">
+          <p style="margin:4px 0 0;font-size:12px;color:var(--muted)">Protects your profile when signing in on a new device.</p></div>
           <button class="btn primary" style="width:100%" type="submit">Create my profile</button>
         </form>
       </div>
@@ -274,6 +276,19 @@ dialog::backdrop{background:rgba(20,16,10,.45)}
   </div>
 </form></dialog>
 
+<dialog id="pinDialog"><form class="dlg" id="pinForm">
+  <h3 id="pinTitle">Enter PIN</h3>
+  <p id="pinHint" style="margin:-6px 0 14px;font-size:13.5px;color:var(--muted)"></p>
+  <div class="field"><label for="pinInput">4-digit PIN</label>
+    <input id="pinInput" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required autocomplete="off"
+      style="text-align:center;font-family:var(--mono);font-size:22px;letter-spacing:.4em">
+  </div>
+  <div class="dlg-actions">
+    <button type="button" class="btn" data-close>Cancel</button>
+    <button class="btn primary" id="pinSubmit">Unlock</button>
+  </div>
+</form></dialog>
+
 <dialog id="profileDialog"><form class="dlg" id="profileForm" method="dialog">
   <h3>Your profile</h3>
   <div class="field"><label for="pfName">Name</label><input id="pfName" required maxlength="40"></div>
@@ -283,6 +298,7 @@ dialog::backdrop{background:rgba(20,16,10,.45)}
     <div class="field"><label for="pfPhone">Phone (Apple Cash)</label><input id="pfPhone" type="tel" maxlength="20" placeholder="+1 555 123 4567"></div>
   </div>
   <p style="margin:-4px 0 12px;font-size:12.5px;color:var(--muted)">Friends use these to pay you: Venmo opens prefilled, Apple&nbsp;Cash goes through Messages.</p>
+  <div class="field"><label for="pfPin">Change PIN (leave blank to keep)</label><input id="pfPin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off" placeholder="&bull;&bull;&bull;&bull;"></div>
   <div class="dlg-actions">
     <button type="button" class="btn ghost" id="switchProfile">Switch profile</button>
     <span style="flex:1"></span>
@@ -619,8 +635,46 @@ window.enablePush = async () => {
   } catch (e) { console.error(e); toast("Couldn’t enable notifications: " + e.message); }
 };
 
+// ---------- PIN protection ----------
+// A courtesy lock for claiming profiles on new devices. Only a salted
+// SHA-256 hash of the PIN is stored, never the PIN itself.
+async function pinHashFor(memberId, pin) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("friendly:" + memberId + ":" + pin));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+let pinTarget = null;
+window.pickMe = id => {
+  const m = S.members.get(id); if (!m) return;
+  if (!(window.crypto && crypto.subtle)) { toast("This browser can’t verify PINs. Use the https:// address."); return; }
+  pinTarget = id;
+  const first = m.name.split(" ")[0];
+  const hasPin = !!m.pinHash;
+  $("#pinTitle").textContent = hasPin ? "Enter " + first + "’s PIN" : "Create a PIN for " + first;
+  $("#pinHint").textContent = hasPin
+    ? "This profile is PIN protected."
+    : "This profile has no PIN yet. Choose a 4-digit code to protect it; you’ll use it to sign in on new devices.";
+  $("#pinSubmit").textContent = hasPin ? "Unlock" : "Set PIN and continue";
+  $("#pinInput").value = "";
+  $("#pinDialog").showModal();
+  setTimeout(() => $("#pinInput").focus(), 60);
+};
+$("#pinForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const pin = $("#pinInput").value;
+  if (!/^\d{4}$/.test(pin)) { toast("PINs are exactly 4 digits."); return; }
+  const m = S.members.get(pinTarget); if (!m) { $("#pinDialog").close(); return; }
+  const hash = await pinHashFor(m.id, pin);
+  if (m.pinHash) {
+    if (hash !== m.pinHash) { toast("Wrong PIN. Try again."); $("#pinInput").value = ""; $("#pinInput").focus(); return; }
+  } else {
+    m.pinHash = hash;
+    upsert("members", { ...m }, "PIN set for this profile");
+  }
+  $("#pinDialog").close();
+  S.me = pinTarget; store.k = pinTarget; render();
+});
+
 // ---------- actions ----------
-window.pickMe = id => { S.me = id; store.k = id; render(); };
 
 window.rsvp = (evId, status) => {
   const ev = S.events.find(e => e.id === evId);
@@ -730,18 +784,32 @@ window.openProfile = () => {
   $("#pfVenmo").value = m.venmo || ""; $("#pfPhone").value = m.phone || "";
   $("#profileDialog").showModal();
 };
-$("#profileForm").addEventListener("submit", () => {
+$("#profileForm").addEventListener("submit", async e => {
+  e.preventDefault();
   const m = S.members.get(S.me);
-  upsert("members", { ...m, name: $("#pfName").value.trim(), email: $("#pfEmail").value.trim(),
-    venmo: $("#pfVenmo").value.trim(), phone: $("#pfPhone").value.trim() }, "Profile saved");
+  const row = { ...m, name: $("#pfName").value.trim(), email: $("#pfEmail").value.trim(),
+    venmo: $("#pfVenmo").value.trim(), phone: $("#pfPhone").value.trim() };
+  const pin = $("#pfPin").value;
+  if (pin) {
+    if (!/^\d{4}$/.test(pin)) { toast("PINs are exactly 4 digits."); return; }
+    row.pinHash = await pinHashFor(m.id, pin);
+  }
+  $("#pfPin").value = "";
+  $("#profileDialog").close();
+  upsert("members", row, "Profile saved");
 });
 $("#switchProfile").addEventListener("click", () => { $("#profileDialog").close(); S.me = null; store.k = null; render(); });
 
 $("#meChip").addEventListener("click", () => openProfile());
-$("#joinForm").addEventListener("submit", e => {
+$("#joinForm").addEventListener("submit", async e => {
   e.preventDefault();
-  const row = { id: newId(), name: $("#jName").value.trim(), email: $("#jEmail").value.trim(),
-    venmo: $("#jVenmo").value.trim(), phone: $("#jPhone").value.trim(), createdAt: Date.now() };
+  const pin = $("#jPin").value;
+  if (!/^\d{4}$/.test(pin)) { toast("PINs are exactly 4 digits."); return; }
+  if (!(window.crypto && crypto.subtle)) { toast("This browser can’t set PINs. Use the https:// address."); return; }
+  const id = newId();
+  const row = { id, name: $("#jName").value.trim(), email: $("#jEmail").value.trim(),
+    venmo: $("#jVenmo").value.trim(), phone: $("#jPhone").value.trim(),
+    pinHash: await pinHashFor(id, pin), createdAt: Date.now() };
   S.members.set(row.id, row); S.me = row.id; store.k = row.id; render();
   upsert("members", row, "Welcome to the group!");
 });

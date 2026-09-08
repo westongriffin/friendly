@@ -2,7 +2,7 @@
 // instantly, and shows push notifications. API calls always hit the network.
 importScripts("./config.js");
 const API = ((self.FRIENDLY_CONFIG || {}).scriptUrl || "").trim();
-const CACHE = "friendly-v2";
+const CACHE = "friendly-v3";
 const SHELL = [
   "./",
   "./index.html",
