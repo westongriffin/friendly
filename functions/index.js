@@ -8,7 +8,7 @@
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { initializeApp } = require("firebase-admin/app");
-const { getFirestore } = require("firebase-admin/firestore");
+const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const { GoogleAuth } = require("google-auth-library");
 const sharp = require("sharp");
@@ -102,6 +102,44 @@ exports.onCoverRequest = onDocumentCreated({ document: "coverRequests/{id}", reg
   }
   if (image) await ref.update({ status: "done", source, image });
   else await ref.update({ status: "error", error: "generation failed" });
+});
+
+// ---- Receipt reading (Gemini vision) ----
+// Same request/response-doc pattern as covers: the app writes
+// receiptRequests/{id} with a photo; we write back itemized JSON.
+const RECEIPT_MODEL = "gemini-2.5-flash";
+async function readReceipt(dataUrl) {
+  const m = /^data:(image\/[a-z]+);base64,(.+)$/i.exec(dataUrl); if (!m) throw new Error("not an image");
+  const token = (await (await gauth.getClient()).getAccessToken()).token;
+  const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${LOCATION}/publishers/google/models/${RECEIPT_MODEL}:generateContent`;
+  const body = {
+    contents: [{ role: "user", parts: [
+      { inlineData: { mimeType: m[1], data: m[2] } },
+      { text: "Read this receipt. List every purchased line item with its price after any per-line discount (merge quantity lines into one item with the extended price), plus subtotal, tax, tip (0 if none is printed), total, and the merchant name. Prices are dollars as numbers. Ignore payment, change, and loyalty lines." }
+    ] }],
+    generationConfig: {
+      temperature: 0, responseMimeType: "application/json",
+      responseSchema: { type: "OBJECT", required: ["items"], properties: {
+        merchant: { type: "STRING" },
+        items: { type: "ARRAY", items: { type: "OBJECT", required: ["name", "price"], properties: { name: { type: "STRING" }, price: { type: "NUMBER" } } } },
+        subtotal: { type: "NUMBER" }, tax: { type: "NUMBER" }, tip: { type: "NUMBER" }, total: { type: "NUMBER" }
+      } }
+    }
+  };
+  const r = await fetch(url, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(RECEIPT_MODEL + " " + r.status + ": " + (await r.text()).slice(0, 160));
+  const j = await r.json();
+  const text = ((((j.candidates || [])[0] || {}).content || {}).parts || []).map(p => p.text || "").join("");
+  const data = JSON.parse(text);
+  if (!Array.isArray(data.items) || !data.items.length) throw new Error("no line items found");
+  return data;
+}
+
+exports.onReceiptRequest = onDocumentCreated({ document: "receiptRequests/{id}", region: "us-central1", timeoutSeconds: 120, memory: "512MiB" }, async e => {
+  const d = e.data && e.data.data(); if (!d || !d.image) return;
+  const ref = e.data.ref;
+  try { const data = await readReceipt(String(d.image)); await ref.update({ status: "done", data, image: FieldValue.delete() }); }
+  catch (err) { logger.error("receipt read failed: " + err.message); await ref.update({ status: "error", error: "couldn't read that receipt", image: FieldValue.delete() }); }
 });
 
 const firstName = n => (n || "Someone").split(" ")[0];

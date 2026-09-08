@@ -32,6 +32,16 @@ a{color:inherit;text-decoration:none;cursor:pointer}
 .places-list button{display:flex;flex-direction:column;width:100%;text-align:left;padding:9px 12px;gap:1px}
 .places-list button+button{border-top:1px solid var(--line)} .places-list button:hover{background:var(--surface2)}
 .places-list span{font-size:12px;color:var(--muted)}
+/* Receipt itemizer */
+.itz-item{display:flex;flex-wrap:wrap;gap:6px 8px;padding:10px 0;border-top:1px solid var(--line)}
+.itz-item input{border:1px solid var(--line);border-radius:9px;padding:7px 9px;background:var(--bg)}
+.itz-item .nm{flex:1;min-width:120px} .itz-item .pr{width:88px;text-align:right;font-family:var(--mono)}
+.itz-item .who{display:flex;flex-wrap:wrap;gap:6px;width:100%}
+.itz-item .who button{border:1px solid var(--line);border-radius:999px;padding:4px 11px;font-size:12.5px;background:var(--surface)}
+.itz-item .who button.on{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.itz-item .who button.all{margin-left:auto;color:var(--muted)}
+.itz-sum{margin-top:12px;padding:10px 14px;font-size:13.5px} .itz-sum div{display:flex;justify-content:space-between;padding:3px 0}
+.itz-sum .tot{border-top:1px solid var(--line);margin-top:4px;padding-top:7px;font-size:15px}
 .muted{color:var(--muted)} .sm{font-size:12.5px} .mono{font-family:var(--mono)}
 h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;margin:0;text-wrap:balance}
 img{max-width:100%}

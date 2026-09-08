@@ -1054,6 +1054,8 @@ function pairwise() {
   const owes = {};
   const add = (d, c, cents) => { if (d === c || !cents) return; (owes[d] = owes[d] || {})[c] = (owes[d][c] || 0) + cents; };
   for (const x of S.expenses.values()) {
+    // Itemized expenses carry exact per-person amounts; otherwise split evenly.
+    if (x.shares) { for (const [u, c] of Object.entries(x.shares)) if (S.contacts.has(u)) add(u, x.paidBy, c); continue; }
     const split = (x.split || []).filter(u => S.contacts.has(u)); if (!split.length) continue;
     const base = Math.floor(x.amountCents / split.length); let rem = x.amountCents - base * split.length;
     for (const u of split) add(u, x.paidBy, base + (rem-- > 0 ? 1 : 0));
@@ -1084,7 +1086,7 @@ function moneyBody() {
   <div class="card">${rows.length ? rows.map(r => {
     if (r.kind === "s") return `<div class="ledger"><div class="li pay">⤴</div><div style="flex:1"><b>${esc(nameOf(r.from))} paid ${esc(nameOf(r.to))}</b><div class="muted sm">${r.note ? esc(r.note) + " · " : ""}${new Date(r.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(r.amountCents)}</span>${r.addedBy === me ? `<button class="btn ghost small" data-dels="${r.id}">✕</button>` : ""}</div>`;
     const n = (r.split || []).length || 1;
-    return `<div class="ledger"><div class="li">🧾</div><div style="flex:1"><b>${esc(r.desc)}</b><div class="muted sm">${esc(nameOf(r.paidBy))} paid · split ${n} way${n > 1 ? "s" : ""} · ${new Date(r.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(r.amountCents)}</span><button class="btn ghost small" data-xopen="${r.id}" title="Details & discussion">💬</button>${r.addedBy === me ? `<button class="btn ghost small" data-dele="${r.id}">✕</button>` : ""}</div>`;
+    return `<div class="ledger"><div class="li">🧾</div><div style="flex:1"><b>${esc(r.desc)}</b><div class="muted sm">${esc(nameOf(r.paidBy))} paid · ${r.shares ? "itemized, " + n + " people" : `split ${n} way${n > 1 ? "s" : ""}`} ·${new Date(r.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(r.amountCents)}</span><button class="btn ghost small" data-xopen="${r.id}" title="Details & discussion">💬</button>${r.addedBy === me ? `<button class="btn ghost small" data-dele="${r.id}">✕</button>` : ""}</div>`;
   }).join("") : emptyState("💸", "No shared costs yet", "Add an expense after your next hangout.")}</div>`;
 }
 function wireMoney() {
@@ -1107,8 +1109,12 @@ function expenseBody(id) {
   <button class="link-back" data-go="#/money">‹ Money</button>
   <div class="group-hero"><span class="li" style="width:52px;height:52px;font-size:24px">🧾</span>
     <div><h1>${esc(x.desc || "Expense")}</h1><div class="muted">${fmt$(x.amountCents)} · ${esc(nameOf(x.paidBy))} paid${ev ? " · " + esc(ev.title) : ""} · ${new Date(x.createdAt).toLocaleDateString()}</div></div></div>
-  <div class="section-head"><h2>Split ${n} way${n > 1 ? "s" : ""}</h2></div>
-  <div class="card">${(x.split || []).map(u => `<div class="member-row">${avatar(u, "lg")}<div style="flex:1;min-width:0"><b>${esc(nameOf(u))}${u === myUid() ? " (you)" : ""}</b></div><span class="amt sm">${fmt$(share)}</span></div>`).join("")}</div>
+  <div class="section-head"><h2>${x.shares ? "Who owes what" : `Split ${n} way${n > 1 ? "s" : ""}`}</h2></div>
+  <div class="card">${(x.split || []).map(u => `<div class="member-row">${avatar(u, "lg")}<div style="flex:1;min-width:0"><b>${esc(nameOf(u))}${u === myUid() ? " (you)" : ""}</b></div><span class="amt sm">${fmt$(x.shares ? (x.shares[u] || 0) : share)}</span></div>`).join("")}</div>
+  ${(x.items || []).length ? `<div class="section-head" style="margin-top:22px"><h2>Receipt${x.merchant ? " · " + esc(x.merchant) : ""}</h2></div>
+  <div class="card">${x.items.map(it => `<div class="member-row"><div style="flex:1;min-width:0"><b>${esc(it.name)}</b><div class="muted sm">${(it.uids || []).map(u => esc(first(nameOf(u)))).join(", ") || "unassigned"}</div></div><span class="amt sm">${fmt$(it.cents)}</span></div>`).join("")}
+    ${x.tax ? `<div class="member-row"><div style="flex:1"><b>Tax</b><div class="muted sm">split in proportion</div></div><span class="amt sm">${fmt$(x.tax)}</span></div>` : ""}
+    ${x.tip ? `<div class="member-row"><div style="flex:1"><b>Tip</b><div class="muted sm">split in proportion</div></div><span class="amt sm">${fmt$(x.tip)}</span></div>` : ""}</div>` : ""}
   <div class="section-head" style="margin-top:22px"><h2>Discussion</h2></div>
   <div class="card th-plain" id="wall"><p class="muted">Loading…</p></div>`;
 }
@@ -1123,19 +1129,111 @@ function wireExpensePage() {
 }
 function payVenmo(uid, cents, txn) { const v = (S.contacts.get(uid) || {}).venmo; if (!v) return; window.open(`https://venmo.com/${encodeURIComponent(v.replace(/^@/, ""))}?txn=${txn}&amount=${(cents / 100).toFixed(2)}&note=${encodeURIComponent("Friendly 🤝")}`, "_blank"); toast("Finish in Venmo, then tap Record."); }
 function payApple(uid, cents) { const p = (S.contacts.get(uid) || {}).phone; if (!p) return; const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?"; location.href = "sms:" + p.replace(/[^+\d]/g, "") + sep + "body=" + encodeURIComponent(`Sending $${(cents / 100).toFixed(2)} Apple Cash for our Friendly tab 🤝`); toast("Attach Apple Cash in Messages, then Record."); }
+const payerOptions = (people, sel) => people.map(([u, i]) => `<option value="${u}" ${u === (sel || myUid()) ? "selected" : ""}>${esc(first(i.name))}</option>`).join("");
 function openExpense(eventId, restrict) {
   const people = [...S.contacts.entries()];
   dialog(`<h3>Add expense</h3>
     <label class="field"><span>What was it?</span><input id="xDesc" maxlength="80" placeholder="Pizza & drinks"></label>
     <div class="two"><label class="field"><span>Amount ($)</span><input id="xAmt" inputmode="decimal" placeholder="42.50"></label>
-    <label class="field"><span>Paid by</span><select id="xPayer">${people.map(([u, i]) => `<option value="${u}" ${u === myUid() ? "selected" : ""}>${esc(first(i.name))}</option>`).join("")}</select></label></label></div>
-    <span class="field-label">Split between</span><div class="check-grid" id="xSplit">${people.map(([u, i]) => `<label class="cbox"><input type="checkbox" name="spl" value="${u}" ${!restrict || restrict.includes(u) ? "checked" : ""}>${esc(first(i.name))}</label>`).join("")}</div>`,
+    <label class="field"><span>Paid by</span><select id="xPayer">${payerOptions(people)}</select></label></div>
+    <span class="field-label">Split between</span><div class="check-grid" id="xSplit">${people.map(([u, i]) => `<label class="cbox"><input type="checkbox" name="spl" value="${u}" ${!restrict || restrict.includes(u) ? "checked" : ""}>${esc(first(i.name))}</label>`).join("")}</div>
+    <button type="button" class="btn small" id="xScan" style="margin-top:12px">📷 Scan a receipt to itemize</button>
+    <p class="muted sm" style="margin-top:6px">Snap the receipt, assign each line to whoever had it — tax and tip split in proportion.</p>`,
     "Add expense", async () => {
       const amount = parseAmount(el("xAmt").value); if (!amount) return toast("Enter a valid amount.");
       const split = [...document.querySelectorAll('input[name=spl]:checked')].map(i => i.value); if (!split.length) return toast("Pick who splits it.");
       const paidBy = el("xPayer").value; const involved = [...new Set([...split, paidBy])];
       try { await setDoc(doc(db, "expenses", newId()), { desc: el("xDesc").value.trim(), amountCents: amount, paidBy, split, involved, eventId: eventId || null, groupId: null, addedBy: myUid(), createdAt: Date.now() }); closeDialog(); toast("Expense added"); } catch (e) { toast(e.message); }
     });
+  el("xScan").onclick = () => scanReceipt(eventId, restrict, { desc: el("xDesc").value.trim(), paidBy: el("xPayer").value });
+}
+
+// ----- Receipt scan → itemize → assign -----
+// Generic request/response doc: write {uid, ...payload, status:"pending"},
+// resolve with the doc once a Cloud Function marks it done.
+function requestViaFirestore(col, payload, timeoutMs = 90000) {
+  return new Promise(async (resolve, reject) => {
+    const uid = S.user && S.user.uid; if (!uid) return reject(new Error("signed out"));
+    const ref = doc(db, col, newId());
+    let unsub = null, timer = null;
+    const done = (fn, arg) => { clearTimeout(timer); if (unsub) unsub(); deleteDoc(ref).catch(() => {}); fn(arg); };
+    try { await setDoc(ref, { uid, ...payload, status: "pending", createdAt: Date.now() }); } catch (e) { return reject(e); }
+    timer = setTimeout(() => done(reject, new Error("timed out")), timeoutMs);
+    unsub = onSnapshot(ref, s => { const d = s.data(); if (!d) return; if (d.status === "done") done(resolve, d); else if (d.status === "error") done(reject, new Error(d.error || "failed")); }, err => done(reject, err));
+  });
+}
+async function scanReceipt(eventId, restrict, seed) {
+  const f = await pickFile("image/*"); if (!f) return;
+  toast("Reading the receipt…");
+  try {
+    const image = await compressImage(f, 1400, 0.72);
+    const res = await requestViaFirestore("receiptRequests", { image });
+    itemizeDialog(eventId, restrict, seed, res.data || {});
+  } catch (e) { toast("Couldn't read that receipt: " + e.message); }
+}
+const toCents = v => Math.max(0, Math.round((Number(v) || 0) * 100));
+// Each item's cost splits evenly among the people on it; tax and tip follow
+// each person's share of the subtotal. Rounding drift lands on the biggest share.
+function computeShares(items, tax, tip) {
+  const sub = {}; let subtotal = 0;
+  for (const it of items) {
+    const who = [...it.uids]; if (!who.length || !it.cents) continue;
+    subtotal += it.cents; const base = Math.floor(it.cents / who.length); let rem = it.cents - base * who.length;
+    for (const u of who) sub[u] = (sub[u] || 0) + base + (rem-- > 0 ? 1 : 0);
+  }
+  const shares = {}; let sum = 0;
+  for (const [u, c] of Object.entries(sub)) { shares[u] = c + (subtotal ? Math.round((tax + tip) * c / subtotal) : 0); sum += shares[u]; }
+  const total = subtotal + tax + tip, drift = total - sum;
+  if (drift && Object.keys(shares).length) { const big = Object.keys(shares).sort((a, b) => shares[b] - shares[a])[0]; shares[big] += drift; }
+  return { shares, subtotal, total };
+}
+function itemizeDialog(eventId, restrict, seed, data) {
+  const people = [...S.contacts.entries()].filter(([u]) => !restrict || restrict.includes(u) || u === seed.paidBy);
+  const items = (data.items || []).map(it => ({ name: String(it.name || "Item").slice(0, 60), cents: toCents(it.price), uids: new Set() }));
+  const st = { tax: toCents(data.tax), tip: toCents(data.tip) };
+  const chips = it => people.map(([u, i]) => `<button type="button" class="${it.uids.has(u) ? "on" : ""}" data-who="${u}">${esc(first(i.name))}</button>`).join("");
+  const rowHtml = (it, k) => `<div class="itz-item" data-k="${k}">
+      <input class="nm" value="${esc(it.name)}" maxlength="60" aria-label="Item">
+      <input class="pr" inputmode="decimal" value="${(it.cents / 100).toFixed(2)}" aria-label="Price">
+      <div class="who">${chips(it)}<button type="button" class="all" data-all="1">everyone</button></div></div>`;
+  dialog(`<h3>Itemize${data.merchant ? " · " + esc(data.merchant) : ""}</h3>
+    <div class="two"><label class="field"><span>What was it?</span><input id="xDesc" maxlength="80" value="${esc(seed.desc || data.merchant || "")}" placeholder="Dinner"></label>
+    <label class="field"><span>Paid by</span><select id="xPayer">${payerOptions(people, seed.paidBy)}</select></label></div>
+    <p class="muted sm" style="margin:-2px 0 6px">Tap who had each line. Tax and tip are split in proportion to what each person ordered.</p>
+    <div id="itz">${items.map(rowHtml).join("")}</div>
+    <button type="button" class="btn small" id="itzAdd" style="margin-top:8px">＋ Add a line</button>
+    <div class="two" style="margin-top:12px"><label class="field"><span>Tax ($)</span><input id="xTax" inputmode="decimal" value="${(st.tax / 100).toFixed(2)}"></label>
+    <label class="field"><span>Tip ($)</span><input id="xTip" inputmode="decimal" value="${(st.tip / 100).toFixed(2)}"></label></div>
+    <div class="btnrow" style="margin-top:-4px">${[15, 18, 20].map(p => `<button type="button" class="btn ghost small" data-tip="${p}">Tip ${p}%</button>`).join("")}</div>
+    <div class="itz-sum card" id="itzSum"></div>`,
+    "Add expense", async () => {
+      const unassigned = items.filter(it => it.cents && !it.uids.size).length;
+      if (unassigned) return toast(unassigned + " line" + (unassigned > 1 ? "s" : "") + " still need" + (unassigned > 1 ? "" : "s") + " a person.");
+      const { shares, total } = computeShares(items, st.tax, st.tip); const split = Object.keys(shares); if (!split.length) return toast("Assign at least one line.");
+      const paidBy = el("xPayer").value; const involved = [...new Set([...split, paidBy])];
+      const rec = { desc: el("xDesc").value.trim() || data.merchant || "Receipt", amountCents: total, paidBy, split, shares, involved, eventId: eventId || null, groupId: null, addedBy: myUid(), createdAt: Date.now(),
+        items: items.filter(it => it.cents).map(it => ({ name: it.name, cents: it.cents, uids: [...it.uids] })), tax: st.tax, tip: st.tip, merchant: data.merchant || "" };
+      try { await setDoc(doc(db, "expenses", newId()), rec); closeDialog(); toast("Itemized expense added"); } catch (e) { toast(e.message); }
+    });
+  const renderSum = () => {
+    const { shares, subtotal, total } = computeShares(items, st.tax, st.tip);
+    el("itzSum").innerHTML = `<div><span>Subtotal</span><b>${fmt$(subtotal)}</b></div><div><span>Tax + tip</span><b>${fmt$(st.tax + st.tip)}</b></div><div class="tot"><span>Total</span><b>${fmt$(total)}</b></div>
+      ${Object.entries(shares).map(([u, c]) => `<div><span>${esc(first(nameOf(u)))}</span><b>${fmt$(c)}</b></div>`).join("") || `<div class="muted">Assign lines to see who owes what.</div>`}`;
+  };
+  const wireRows = () => {
+    document.querySelectorAll("#itz .itz-item").forEach(row => {
+      const it = items[+row.dataset.k];
+      row.querySelector(".nm").oninput = e => { it.name = e.target.value; };
+      row.querySelector(".pr").oninput = e => { it.cents = toCents(e.target.value); renderSum(); };
+      row.querySelectorAll("[data-who]").forEach(b => b.onclick = () => { const u = b.dataset.who; it.uids.has(u) ? it.uids.delete(u) : it.uids.add(u); b.classList.toggle("on", it.uids.has(u)); renderSum(); });
+      row.querySelector("[data-all]").onclick = () => { const all = people.every(([u]) => it.uids.has(u)); people.forEach(([u]) => all ? it.uids.delete(u) : it.uids.add(u)); row.querySelectorAll("[data-who]").forEach(b => b.classList.toggle("on", it.uids.has(b.dataset.who))); renderSum(); };
+    });
+  };
+  el("itzAdd").onclick = () => { items.push({ name: "", cents: 0, uids: new Set() }); el("itz").insertAdjacentHTML("beforeend", rowHtml(items[items.length - 1], items.length - 1)); wireRows(); el("itz").lastElementChild.querySelector(".nm").focus(); };
+  el("xTax").oninput = e => { st.tax = toCents(e.target.value); renderSum(); };
+  el("xTip").oninput = e => { st.tip = toCents(e.target.value); renderSum(); };
+  document.querySelectorAll("[data-tip]").forEach(b => b.onclick = () => { const { subtotal } = computeShares(items, 0, 0); st.tip = Math.round(subtotal * +b.dataset.tip / 100); el("xTip").value = (st.tip / 100).toFixed(2); renderSum(); });
+  wireRows(); renderSum();
 }
 function openSettle(from, to, amount) {
   const people = [...S.contacts.entries()];
