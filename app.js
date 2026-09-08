@@ -1544,6 +1544,12 @@ function meetingBody(ev) {
   <div class="card th-plain" id="wall" style="margin-top:22px"><p class="muted">Loading…</p></div>`;
 }
 function wireMeeting(ev) {
+  // Group members who joined after the meeting was made aren't on it yet; add them quietly.
+  S._autoJoined = S._autoJoined || new Set();
+  if (!(ev.invitedUids || []).includes(myUid()) && ev.groupId && S.groups.has(ev.groupId) && !S._autoJoined.has(ev.id)) {
+    S._autoJoined.add(ev.id);
+    updateDoc(doc(db, "events", ev.id), { invitedUids: arrayUnion(myUid()), [`names.${myUid()}`]: S.profile.name }).catch(e => console.warn("auto-join failed:", e.message));
+  }
   document.querySelectorAll("[data-rsvp]").forEach(b => b.onclick = () => setRsvp(ev, b.dataset.rsvp));
   const j = $("[data-join]"); if (j) j.onclick = () => joinViaLink(ev, j);
   const cal = $("[data-cal]"); if (cal) cal.onclick = () => downloadIcs(ev);
