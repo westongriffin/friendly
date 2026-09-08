@@ -1652,8 +1652,12 @@ function photosPageBody() {
 }
 function wirePhotosPage() {
   document.querySelectorAll("[data-mem]").forEach(im => im.onclick = () => lightbox(im.src));
-  if (S._memLoading) return;
-  S._memLoading = true; loadMemories().then(() => { S._memLoading = false; if (S.route.name === "photos") render(); });
+  // Fetch only events not cached yet; re-render only if that fetched something
+  // (otherwise render -> wire -> load -> render would loop forever).
+  const missing = [...S.events.values()].some(ev => !S.memories.has(ev.id));
+  if (S._memLoading || !missing) return;
+  S._memLoading = true;
+  loadMemories().then(() => { S._memLoading = false; if (S.route.name === "photos") render(); });
 }
 
 // ---------- dialog helper ----------
