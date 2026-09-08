@@ -10,7 +10,7 @@ import {
   getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection,
   query, where, onSnapshot, addDoc, arrayUnion, arrayRemove, deleteField
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-import { firebaseConfig, mapsKey } from "./firebase-config.js";
+import { firebaseConfig, mapsKey, adminUids } from "./firebase-config.js";
 import { THEMES, themeOf, applyTheme, startParticles, DEFAULT_THEME } from "./themes.js";
 
 const fb = initializeApp(firebaseConfig);
@@ -164,7 +164,9 @@ function parseRoute() {
   if (p[0] === "profile") return { name: "profile" };
   return { name: "home" };
 }
-window.addEventListener("hashchange", () => { S.route = parseRoute(); render(); });
+// New screen, start at the top (the SPA otherwise keeps the old scroll position,
+// so an event page could open at the party wall instead of the cover).
+window.addEventListener("hashchange", () => { S.route = parseRoute(); window.scrollTo(0, 0); render(); });
 window.go = path => { location.hash = path; };
 
 // ---------- auth ----------
@@ -298,6 +300,7 @@ function renderAuth(root) {
         <label class="field"><span>Password</span>
           <input id="aPass" type="password" required minlength="6" placeholder="At least 6 characters" autocomplete="${authMode === "in" ? "current-password" : "new-password"}"></label>
         <button class="btn primary lg" type="submit">${authMode === "in" ? "Sign in" : "Create account"}</button>
+        ${authMode === "up" ? `<p class="muted sm" style="margin:10px 0 0;text-align:center">By creating an account you agree to the <a href="./terms.html" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">Terms</a>: no harassment or objectionable content, and accounts that post it are removed.</p>` : ""}
       </form>
       <p class="auth-foot">${authMode === "in" ? "New here?" : "Already have an account?"}
         <a id="authSwap">${authMode === "in" ? "Create an account" : "Sign in"}</a></p>
@@ -361,7 +364,7 @@ function shell(body) {
     ${T("money", "Money", "#/money")}
   </nav>
   <main class="wrap">${inviteBanner()}${body}</main>
-  <button class="fab" data-go="#/new" title="Create event">＋</button>`;
+  ${["new", "group", "expense", "profile"].includes(tab) ? "" : `<button class="fab" data-go="#/new" title="Create event">＋</button>`}`;
 }
 function wireShell() {
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
@@ -914,9 +917,9 @@ function questionsBlock(ev, me, myR) {
     <button class="btn-th ghost small" id="saveAnswers">Save answers</button></div>`;
 }
 function wallInner(ev, title = "Party wall") {
-  const cs = S.comments;
+  const cs = S.comments.filter(visibleContent);
   return `<div class="glass-head">${esc(title)} <span>${cs.length}</span></div>
-    <div class="wall-list">${cs.length ? cs.map(c => `<div class="wall-msg">${avatar(c.authorId, "sm")}<div><div class="wall-who">${esc(first(c.authorName || nameOf(c.authorId)))} <i>${ago(c.createdAt)}</i></div><div class="wall-text">${esc(c.text)}</div></div>${c.authorId === myUid() ? `<button class="wall-del" data-delc="${c.id}">✕</button>` : ""}</div>`).join("") : `<p class="muted-th">Be the first to say something 👋</p>`}</div>
+    <div class="wall-list">${cs.length ? cs.map(c => `<div class="wall-msg">${avatar(c.authorId, "sm")}<div><div class="wall-who">${esc(first(c.authorName || nameOf(c.authorId)))} <i>${ago(c.createdAt)}</i></div><div class="wall-text">${esc(c.text)}</div></div>${c.authorId === myUid() || isAdmin() ? `<button class="wall-del" data-delc="${c.id}" title="Delete">✕</button>` : `<button class="wall-del" data-report="comment|${c.id}" title="Report">⚑</button>`}</div>`).join("") : `<p class="muted-th">Be the first to say something 👋</p>`}</div>
     <form class="wall-form" id="wallForm"><input id="wallInput" maxlength="300" placeholder="Post to the wall…" autocomplete="off"><button class="btn-th accent small">Post</button></form>`;
 }
 function wireEventPage(ev) {
@@ -948,6 +951,7 @@ function wireEventPage(ev) {
 function wireWall(ev) {
   const f = el("wallForm"); if (f) f.onsubmit = e => { e.preventDefault(); postComment(ev); };
   document.querySelectorAll("[data-delc]").forEach(b => b.onclick = () => deleteComment(ev, b.dataset.delc));
+  document.querySelectorAll("[data-report]").forEach(b => b.onclick = () => { const [kind, id] = b.dataset.report.split("|"); reportContent(ev, kind, id); });
 }
 
 // ----- Polls -----
@@ -1021,8 +1025,9 @@ function addSongDialog(ev) {
 
 // ----- Photo wall -----
 function photosInner(ev) {
-  const tiles = S.photos.map(p => `<img src="${p.img}" data-photo="${p.id}" alt="" loading="lazy">`).join("");
-  return `<div class="glass-head">Photos <span>${S.photos.length}</span></div><div class="photo-grid"><button class="photo-add" id="addPhoto">＋</button>${tiles || ""}</div>${S.photos.length ? "" : `<p class="muted-th" style="margin-top:8px">Share pics from the night.</p>`}`;
+  const ps = S.photos.filter(visibleContent);
+  const tiles = ps.map(p => `<div class="photo-tile"><img src="${p.img}" data-photo="${p.id}" alt="" loading="lazy">${p.addedBy === myUid() || isAdmin() ? `<button class="photo-act" data-delphoto="${p.id}" title="Remove">✕</button>` : `<button class="photo-act" data-report="photo|${p.id}" title="Report">⚑</button>`}</div>`).join("");
+  return `<div class="glass-head">Photos <span>${ps.length}</span></div><div class="photo-grid"><button class="photo-add" id="addPhoto">＋</button>${tiles || ""}</div>${ps.length ? "" : `<p class="muted-th" style="margin-top:8px">Share pics from the night.</p>`}`;
 }
 function wirePhotos(ev) {
   if (el("addPhoto")) el("addPhoto").onclick = async () => {
@@ -1031,6 +1036,8 @@ function wirePhotos(ev) {
     catch (e) { toast("Couldn't add photo: " + e.message); }
   };
   document.querySelectorAll("[data-photo]").forEach(im => im.onclick = () => { const box = document.createElement("div"); box.className = "lightbox"; box.innerHTML = `<img src="${im.src}" alt="">`; box.onclick = () => box.remove(); document.body.appendChild(box); });
+  document.querySelectorAll("[data-delphoto]").forEach(b => b.onclick = () => { if (confirm("Remove this photo?")) deleteDoc(doc(subCol(ev, "photos"), b.dataset.delphoto)).catch(e => toast(e.message)); });
+  document.querySelectorAll("#photosCard [data-report]").forEach(b => b.onclick = () => { const [kind, id] = b.dataset.report.split("|"); reportContent(ev, kind, id); });
 }
 async function setRsvp(ev, status) {
   const me = myUid();
@@ -1061,6 +1068,28 @@ async function postComment(ev) {
   input.value = "";
   try { await addDoc(subCol(ev, "comments"), { authorId: myUid(), authorName: S.profile.name, text, createdAt: Date.now() }); }
   catch (e) { toast("Couldn't post: " + e.message); }
+}
+// ----- Reporting & blocking (App Store guideline 1.2 for user content) -----
+const isAdmin = () => adminUids.includes(myUid());
+const REPORT_REASONS = ["Spam", "Harassment or bullying", "Hate or violence", "Nudity or sexual content", "Something else"];
+// Hide anything I reported and everything from people I blocked.
+const visibleContent = item => !(S.profile.blockedUids || []).includes(item.authorId || item.addedBy) && !(S.profile.hiddenIds || []).includes(item.id);
+function reportContent(ev, kind, id) {
+  const item = (kind === "photo" ? S.photos : S.comments).find(x => x.id === id); if (!item) return;
+  const who = item.authorId || item.addedBy;
+  dialog(`<h3>Report this ${kind === "photo" ? "photo" : "comment"}</h3>
+    <p class="muted" style="margin-top:-6px">We review every report within 24 hours. Reported content is hidden from you right away.</p>
+    <label class="field"><span>Reason</span><select id="rpReason">${REPORT_REASONS.map(r => `<option>${r}</option>`).join("")}</select></label>
+    <label class="cbox"><input type="checkbox" id="rpBlock"> Also block ${esc(first(nameOf(who)))}: hide everything they post</label>`,
+    "Report", async () => {
+      const path = doc(subCol(ev, kind === "photo" ? "photos" : "comments"), id).path;
+      const up = { hiddenIds: arrayUnion(id) }; if (el("rpBlock").checked) up.blockedUids = arrayUnion(who);
+      try {
+        await addDoc(collection(db, "reports"), { reporterId: myUid(), reporterName: S.profile.name, targetUid: who, kind, path, snippet: kind === "photo" ? "(photo)" : String(item.text || "").slice(0, 200), reason: el("rpReason").value, status: "open", createdAt: Date.now() });
+        await updateDoc(doc(db, "users", myUid()), up);
+        closeDialog(); toast("Thanks. We'll review it within 24 hours.");
+      } catch (e) { toast(e.message); }
+    });
 }
 async function deleteComment(ev, cid) { try { await deleteDoc(doc(subCol(ev, "comments"), cid)); } catch (e) { toast(e.message); } }
 const eventUrl = ev => "https://officialfriendly.com/#/e/" + ev.id;
@@ -1318,7 +1347,28 @@ function profileBody() {
     <button class="btn primary" id="saveProfile">Save profile</button>
   </div>
   <button class="btn danger-ghost" id="signOut" style="margin-top:20px">Sign out</button>
-  <button class="btn ghost small" id="deleteAccount" style="margin-top:28px;opacity:.7">Delete my account</button>`;
+  <button class="btn ghost small" id="deleteAccount" style="margin-top:28px;opacity:.7">Delete my account</button>
+  ${isAdmin() ? `<div class="section-head" style="margin-top:28px"><h2>Reports <span class="muted sm">moderation</span></h2></div>
+  <div class="card" id="reportsCard"><p class="muted" style="padding:14px 16px;margin:0">Loading…</p></div>` : ""}`;
+}
+// Moderation queue (admins only): remove the reported content or dismiss.
+function reportsInner(rows) {
+  if (!rows.length) return `<p class="muted" style="padding:14px 16px;margin:0">No open reports. 🎉</p>`;
+  return rows.map(r => `<div class="member-row" style="align-items:flex-start;flex-wrap:wrap"><div style="flex:1;min-width:0"><b>${esc(r.reason)}</b> <span class="muted sm">· ${esc(r.kind)} · by ${esc(r.reporterName || "someone")} · ${ago(r.createdAt)}</span>
+    <div class="sm" style="margin-top:4px;overflow-wrap:anywhere">${esc(r.snippet || "")}</div><div class="muted sm mono">${esc(r.path)}</div></div>
+    <div class="btnrow" style="width:100%;margin-top:6px"><button class="btn small danger-ghost" data-rmreport="${r.id}">Remove content</button><button class="btn small" data-dismiss="${r.id}">Dismiss</button></div></div>`).join("");
+}
+function wireReports() {
+  if (!el("reportsCard")) return;
+  S.evSubs.push(onSnapshot(query(collection(db, "reports"), where("status", "==", "open")), snap => {
+    const rows = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.createdAt - a.createdAt);
+    const c = el("reportsCard"); if (!c) return; c.innerHTML = reportsInner(rows);
+    c.querySelectorAll("[data-rmreport]").forEach(b => b.onclick = async () => {
+      const r = rows.find(x => x.id === b.dataset.rmreport); if (!r || !confirm("Remove this content for everyone?")) return;
+      try { await deleteDoc(doc(db, r.path)); await updateDoc(doc(db, "reports", r.id), { status: "removed", handledAt: Date.now() }); toast("Content removed"); } catch (e) { toast(e.message); }
+    });
+    c.querySelectorAll("[data-dismiss]").forEach(b => b.onclick = () => updateDoc(doc(db, "reports", b.dataset.dismiss), { status: "dismissed", handledAt: Date.now() }).catch(e => toast(e.message)));
+  }, err => toast("Reports: " + err.message)));
 }
 function wireProfile() {
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
@@ -1333,6 +1383,7 @@ function wireProfile() {
     } catch (e) { toast(e.message); }
   };
   el("signOut").onclick = () => { stopListening(); signOut(auth); };
+  wireReports();
   // App Store requires in-app account deletion (guideline 5.1.1). Re-auth first:
   // Firebase refuses to delete a user without a recent sign-in.
   el("deleteAccount").onclick = () => dialog(`

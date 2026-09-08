@@ -210,6 +210,14 @@ exports.onExpenseComment = onDocumentCreated("expenses/{xid}/comments/{cid}", as
     "/#/x/" + e.params.xid);
 });
 
+// Content reported -> tell the moderators (we promise a 24-hour review).
+// Keep in sync with adminUids in firebase-config.js and isAdmin() in the rules.
+const ADMIN_UIDS = ["zzJY7MHFnyN2kAqq13hv79rZTVF2", "TUngQGsAKTRtHBpVEpZwFFHE0sP2"];
+exports.onReport = onDocumentCreated("reports/{id}", async e => {
+  const r = e.data && e.data.data(); if (!r) return;
+  await notify(ADMIN_UIDS, "Content reported: " + (r.reason || "review needed"), String(r.snippet || r.kind || "").slice(0, 120), "/#/profile");
+});
+
 // RSVP change -> tell the host who's coming.
 exports.onRsvp = onDocumentUpdated("events/{id}", async e => {
   const before = e.data.before.data(), after = e.data.after.data();

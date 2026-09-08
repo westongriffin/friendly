@@ -49,7 +49,8 @@ followers.
 ```
 
 - **Keywords (100):** `party,events,rsvp,invite,friends,plans,hangout,group,split,bills,expenses,evite,birthday`
-- **Support URL:** `https://officialfriendly.com`
+- **Support URL:** `https://officialfriendly.com/support.html`
+- **Terms (EULA):** Apple's standard EULA is fine; our own house rules are at `https://officialfriendly.com/terms.html` (linked at sign-up)
 - **Marketing URL:** `https://officialfriendly.com`
 - **Privacy Policy URL:** `https://officialfriendly.com/privacy.html`
 - **Copyright:** `2026 Wes Griffin` **[you]** (or your LLC if you have one)

@@ -8,6 +8,18 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function uid() { return request.auth.uid; }
     function email() { return request.auth.token.email; }
+    // App moderators: may read the report queue and remove any user content.
+    // Keep in sync with adminUids in firebase-config.js and functions/index.js.
+    function isAdmin() {
+      return signedIn() && uid() in ['zzJY7MHFnyN2kAqq13hv79rZTVF2', 'TUngQGsAKTRtHBpVEpZwFFHE0sP2'];
+    }
+
+    // ---- Reports: anyone signed in can file one; only admins see them ----
+    match /reports/{reportId} {
+      allow create: if signedIn() && request.resource.data.reporterId == uid()
+        && request.resource.data.status == "open";
+      allow read, update, delete: if isAdmin();
+    }
 
     function groupMemberUids(gid) {
       return get(/databases/$(database)/documents/groups/$(gid)).data.memberUids;
@@ -48,14 +60,14 @@ service cloud.firestore {
       match /comments/{commentId} {
         allow read: if isMember();
         allow create: if isMember() && request.resource.data.authorId == uid();
-        allow delete: if signedIn() && resource.data.authorId == uid();
+        allow delete: if isAdmin() || (signedIn() && resource.data.authorId == uid());
       }
       // Group polls (dates, ideas) — any member adds; members vote (votes map only).
       match /polls/{pollId} {
         allow read, create: if isMember();
         allow update: if isMember()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes']);
-        allow delete: if signedIn() && (resource.data.authorId == uid()
+        allow delete: if isAdmin() || signedIn() && (resource.data.authorId == uid()
           || uid() == get(/databases/$(database)/documents/groups/$(groupId)).data.ownerId);
       }
     }
@@ -111,13 +123,13 @@ service cloud.firestore {
       match /comments/{commentId} {
         allow read: if canReadEvent();
         allow create: if canReadEvent() && request.resource.data.authorId == uid();
-        allow delete: if signedIn() && resource.data.authorId == uid();
+        allow delete: if isAdmin() || (signedIn() && resource.data.authorId == uid());
       }
       // Photos — event guests add and view; remove your own.
       match /photos/{photoId} {
         allow read: if canReadEvent();
         allow create: if canReadEvent() && request.resource.data.addedBy == uid();
-        allow delete: if signedIn() && resource.data.addedBy == uid();
+        allow delete: if isAdmin() || (signedIn() && resource.data.addedBy == uid());
       }
       // Polls — host adds; any guest can vote (updates only the votes map).
       match /polls/{pollId} {
@@ -125,7 +137,7 @@ service cloud.firestore {
         allow create: if canReadEvent() && request.resource.data.authorId == uid();
         allow update: if canReadEvent()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes']);
-        allow delete: if signedIn() && resource.data.authorId == uid();
+        allow delete: if isAdmin() || (signedIn() && resource.data.authorId == uid());
       }
       // Playlist — guests add songs and toggle upvotes (votes map only).
       match /songs/{songId} {
@@ -133,7 +145,7 @@ service cloud.firestore {
         allow create: if canReadEvent() && request.resource.data.addedBy == uid();
         allow update: if canReadEvent()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes']);
-        allow delete: if signedIn() && resource.data.addedBy == uid();
+        allow delete: if isAdmin() || (signedIn() && resource.data.addedBy == uid());
       }
     }
 
@@ -154,7 +166,7 @@ service cloud.firestore {
         }
         allow read: if involved();
         allow create: if involved() && request.resource.data.authorId == uid();
-        allow delete: if signedIn() && resource.data.authorId == uid();
+        allow delete: if isAdmin() || (signedIn() && resource.data.authorId == uid());
       }
     }
 

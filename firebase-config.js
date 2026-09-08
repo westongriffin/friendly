@@ -16,3 +16,7 @@ export const firebaseConfig = {
 // restrict it to HTTP referrers https://officialfriendly.com/* and to the
 // Places API (New) → paste it here.
 export const mapsKey = "AIzaSyDGf2O_wK32SP2K6-4tSJRFPBrrnOe7IB8";
+
+// Accounts that moderate reported content (see the Reports list on the profile
+// page). Must match ADMIN_UIDS in functions/index.js and isAdmin() in firestore.rules.
+export const adminUids = ["zzJY7MHFnyN2kAqq13hv79rZTVF2", "TUngQGsAKTRtHBpVEpZwFFHE0sP2"];
