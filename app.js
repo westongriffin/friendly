@@ -4,7 +4,8 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
   getAuth, onAuthStateChanged, createUserWithEmailAndPassword,
-  signInWithEmailAndPassword, signOut, deleteUser, reauthenticateWithCredential, EmailAuthProvider
+  signInWithEmailAndPassword, signOut, deleteUser, reauthenticateWithCredential, EmailAuthProvider,
+  sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection,
@@ -189,6 +190,7 @@ function parseRoute() {
   if (p[0] === "x") return { name: "expense", id: p[1] };
   if (p[0] === "activity") return { name: "activity" };
   if (p[0] === "photos") return { name: "photos" };
+  if (p[0] === "search") return { name: "search" };
   if (p[0] === "new") return { name: "new" };
   if (p[0] === "money") return { name: "money" };
   if (p[0] === "groups") return { name: "groups" };
@@ -338,6 +340,7 @@ function renderAuth(root) {
         <button class="btn primary lg" type="submit">${authMode === "in" ? "Sign in" : "Create account"}</button>
         ${authMode === "up" ? `<p class="muted sm" style="margin:10px 0 0;text-align:center">By creating an account you agree to the <a href="./terms.html" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">Terms</a>: no harassment or objectionable content, and accounts that post it are removed.</p>` : ""}
       </form>
+      ${authMode === "in" ? `<p class="auth-foot"><a id="magicLink">Email me a sign-in link instead</a></p>` : ""}
       <p class="auth-foot">${authMode === "in" ? "New here?" : "Already have an account?"}
         <a id="authSwap">${authMode === "in" ? "Create an account" : "Sign in"}</a></p>
     </div>
@@ -346,6 +349,7 @@ function renderAuth(root) {
   el("segIn").onclick = () => { authMode = "in"; renderAuth(root); };
   el("segUp").onclick = () => { authMode = "up"; renderAuth(root); };
   el("authSwap").onclick = () => { authMode = authMode === "in" ? "up" : "in"; renderAuth(root); };
+  if (el("magicLink")) el("magicLink").onclick = sendMagicLink;
   el("authForm").onsubmit = async e => {
     e.preventDefault();
     const email = el("aEmail").value.trim(), pass = el("aPass").value, name = el("aName").value.trim();
@@ -392,7 +396,7 @@ function shell(body) {
   return `
   <header class="topbar">
     <div class="brand" data-go="#/">Friend<span class="tilt">l</span>y</div>
-    <div class="topbar-right"><button class="bell" data-go="#/activity" title="Activity">🔔${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ""}</button>
+    <div class="topbar-right"><button class="bell" data-go="#/search" title="Search">🔍</button><button class="bell" data-go="#/activity" title="Activity">🔔${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ""}</button>
     <button class="me-chip" data-go="#/profile">${avatar(S.user.uid)}<span>${esc(first(p.name))}</span></button></div>
   </header>
   <nav class="tabs">
@@ -414,6 +418,7 @@ function wireShell() {
   if (S.route.name === "expense") wireExpensePage();
   if (S.route.name === "activity") wireActivity();
   if (S.route.name === "photos") wirePhotosPage();
+  if (S.route.name === "search") wireSearch();
   if (S.route.name !== "activity") S._actOpenSeen = null;
   if (S.route.name === "profile") wireProfile();
 }
@@ -426,6 +431,7 @@ function routeBody(r) {
   if (r.name === "expense") return expenseBody(r.id);
   if (r.name === "activity") return activityBody();
   if (r.name === "photos") return photosPageBody();
+  if (r.name === "search") return searchBody();
   if (r.name === "profile") return profileBody();
   return homeBody();
 }
@@ -533,6 +539,8 @@ function groupPageBody(gid) {
   <div class="card">${members.map(m => `<div class="member-row">${avatar(m.uid, "lg")}
     <div style="flex:1;min-width:0"><b>${esc(m.name || "Member")}${m.uid === myUid() ? " (you)" : ""}${m.uid === g.ownerId ? " · host" : ""}</b>
     ${m.venmo ? `<div class="muted sm mono">${esc(m.venmo)}</div>` : ""}</div></div>`).join("")}</div>
+  <div class="section-head" style="margin-top:22px"><h2>Crew tab</h2><button class="btn small" id="gExpense">＋ Expense</button></div>
+  ${groupTab(g)}
   ${(g.invitedEmails || []).length ? `<div class="section-head" style="margin-top:18px"><h2>Invited</h2></div>
     <div class="card">${g.invitedEmails.map(e => `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">✉︎</span><div style="flex:1"><b class="mono sm">${esc(e)}</b><div class="muted sm">Hasn't joined yet</div></div>${owner ? `<button class="btn ghost small" data-uninvite="${esc(e)}">✕</button>` : ""}</div>`).join("")}</div>` : ""}
   <div class="card th-plain" id="wall" style="margin-top:22px"><p class="muted">Loading…</p></div>
@@ -544,6 +552,8 @@ function groupPageBody(gid) {
 function wireGroupPage() {
   const g = S.groups.get(S.route.id); if (!g) { document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go)); return; }
   if (el("inviteBtn")) el("inviteBtn").onclick = () => openInviteDialog(g);
+  if (el("gExpense")) el("gExpense").onclick = () => openExpense(null, g.memberUids, g.id);
+  document.querySelectorAll("[data-xopen]").forEach(b => b.onclick = () => go("#/x/" + b.dataset.xopen));
   if (el("delGroup")) el("delGroup").onclick = () => deleteGroup(g);
   if (el("leaveGroup")) el("leaveGroup").onclick = () => leaveGroup(g);
   document.querySelectorAll("[data-uninvite]").forEach(b => b.onclick = () => uninvite(g, b.dataset.uninvite));
@@ -680,8 +690,9 @@ async function leaveGroup(g) {
 const compose = { theme: DEFAULT_THEME, emoji: "🎉", cover: null, coverTab: "emoji",
   title: "", date: "", time: "", end: "", where: "", notes: "", cap: "", approval: false,
   questions: [], invitees: new Set(), cohosts: new Set(), groupId: "" };
-function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), cohosts: new Set(), groupId: "", kind: "event", repeat: "", guestEmails: "" }); }
+function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), cohosts: new Set(), groupId: "", kind: "event", repeat: "", guestEmails: "", _restored: false, _fromDraft: false }); }
 function composeBody() {
+  restoreDraft();
   const emojis = ["🎉", "🍕", "🌮", "🍻", "🎂", "🎬", "🎮", "🏖️", "🥾", "⚽", "🎲", "🍜", "🎃", "🎄", "🕺", "🔥"];
   const groups = [...S.groups.values()];
   const th = themeOf(compose.theme);
@@ -692,6 +703,7 @@ function composeBody() {
       <button type="button" class="${compose.kind !== "meeting" ? "on" : ""}" data-kind="event">🎉 Event</button>
       <button type="button" class="${compose.kind === "meeting" ? "on" : ""}" data-kind="meeting">📅 Meeting</button>
     </div>
+    ${compose._fromDraft ? `<p class="muted sm" style="margin:-4px 0 10px">Restored your draft · <a id="discardDraft" style="color:var(--accent);font-weight:600">Discard</a></p>` : ""}
     ${compose.kind === "meeting" ? `<p class="muted sm" style="margin:-4px 0 12px">A plain calendar entry: title, time, place, who. Everyone gets a calendar invite by email.</p>` : ""}
     <div class="${compose.kind === "meeting" ? "hidden" : ""}">
     <div class="compose-preview t-${th.id}" id="cPreview" style="--th-accent:${th.accent};--th-ink:${th.ink};--th-on-accent:${th.onAccent};font-family:${th.font},system-ui">
@@ -732,7 +744,7 @@ function composeBody() {
       </div>
       <label class="field"><span>Where</span><input id="cWhere" maxlength="90" value="${esc(compose.where)}" placeholder="Address or vibe"></label>
       <label class="field"><span>The details</span><textarea id="cNotes" maxlength="600" placeholder="Dress code, what to bring, parking…">${esc(compose.notes)}</textarea></label>
-      <div class="two">
+      <div class="two stack-sm">
         <label class="field"><span>Repeats</span><select id="cRepeat"><option value="" ${!compose.repeat ? "selected" : ""}>Never</option><option value="weekly" ${compose.repeat === "weekly" ? "selected" : ""}>Every week</option><option value="biweekly" ${compose.repeat === "biweekly" ? "selected" : ""}>Every 2 weeks</option><option value="monthly" ${compose.repeat === "monthly" ? "selected" : ""}>Every month</option></select></label>
         <label class="field"><span>Also email invites to</span><input id="cEmails" value="${esc(compose.guestEmails || "")}" placeholder="pat@example.com, sam@…"></label>
       </div>
@@ -790,6 +802,7 @@ function syncCompose() {
   compose.cap = el("cCap").value; if (el("cApproval")) compose.approval = el("cApproval").checked;
   if (el("cOpenLink")) compose.openLink = el("cOpenLink").checked;
   if (el("cRepeat")) compose.repeat = el("cRepeat").value; if (el("cEmails")) compose.guestEmails = el("cEmails").value;
+  saveDraft();
 }
 function wireCompose() {
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
@@ -808,6 +821,7 @@ function wireCompose() {
   wireQ();
   el("createEventBtn").onclick = () => createEvent(false);
   document.querySelectorAll("[data-kind]").forEach(b => b.onclick = () => { syncCompose(); compose.kind = b.dataset.kind; render(); });
+  if (el("discardDraft")) el("discardDraft").onclick = () => { localStorage.removeItem("friendlyDraft"); resetCompose(); compose._restored = true; render(); };
   el("cTextInvite").onclick = () => createEvent(true);
 }
 function refreshCoverUI() {
@@ -862,7 +876,7 @@ async function createEvent(thenText) {
   try {
     el("createEventBtn").disabled = true; el("createEventBtn").textContent = "Creating…";
     await setDoc(doc(db, "events", id), ev);
-    composeStop(); resetCompose();
+    composeStop(); resetCompose(); localStorage.removeItem("friendlyDraft");
     go("#/e/" + id); toast((ev.kind === "meeting" ? "Meeting" : "Event") + " created, invites are on their way");
     // "Create & text": hand off to Messages once the event page is up.
     if (thenText) setTimeout(() => textEventInvite({ id, ...ev }), 400);
@@ -924,7 +938,8 @@ function eventInner(ev) {
       <button class="rb no ${myR === "no" ? "on" : ""}" data-rsvp="no">Can't go</button>
     </div>
     ${myR === "going" || myR === "waitlist" ? `<div class="plus"><span>Bringing</span>
-      <button data-plus="-1" ${myPlus <= 0 ? "disabled" : ""}>−</button><b>+${myPlus}</b><button data-plus="1">＋</button></div>` : ""}
+      <button data-plus="-1" ${myPlus <= 0 ? "disabled" : ""}>−</button><b>+${myPlus}</b><button data-plus="1">＋</button></div>
+    ${myPlus > 0 ? `<input class="plus-name" id="plusName" maxlength="60" placeholder="Who's coming with you?" value="${esc((ev.plusNames || {})[me] || "")}">` : ""}` : ""}
     ${myR === "pending" ? `<p class="pending-note">⏳ Waiting for the host to approve you.</p>` : ""}
     ${full && myR !== "going" ? `<p class="full-note">This event is full. RSVP to join the waitlist.</p>` : ""}
     ${questionsBlock(ev, me, myR)}` : ev.openLink ? `<p class="not-invited">You're invited! Join the guest list to RSVP.</p><div class="rsvp"><button class="rb going" data-join>Join this event</button></div>` : `<p class="not-invited">You're viewing this event but aren't on the guest list.</p>`;
@@ -947,7 +962,8 @@ function eventInner(ev) {
     ${ev.cover ? "" : `<div class="ev-emoji">${esc(ev.emoji || "🎉")}</div>`}
     <h1 class="ev-title">${esc(ev.title)}</h1>
     <div class="ev-when">${esc(fmtWhen(ev))}</div>
-    ${ev.location ? `<div class="ev-where"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}" target="_blank" rel="noopener" title="Open in Google Maps">📍 ${esc(ev.location)}</a></div>` : ""}
+    <div class="ev-count">${countdown(ev)}</div>
+    ${ev.location ? `<div class="ev-where"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}" target="_blank" rel="noopener" title="Open in Google Maps">📍 ${esc(ev.location)}</a></div>${/zoom|meet\.google|teams|http|online|call/i.test(ev.location) ? "" : `<details class="map-wrap"><summary>Show map</summary><iframe class="map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="https://maps.google.com/maps?q=${encodeURIComponent(ev.location)}&output=embed" title="Map"></iframe></details>`}` : ""}
     <div class="ev-hosts">Hosted by ${hosts.map(u => esc(first(nameOf(u)))).join(" & ")}${grp ? ` · <span class="grp-tag">${esc(grp.emoji || "")} ${esc(grp.name)}</span>` : ""}</div>
     ${ev.capacity > 0 ? `<div class="ev-cap ${full ? "full" : ""}">${going} / ${ev.capacity} spots${full ? " · full" : ""}</div>` : ""}
     ${hypeBar}
@@ -974,7 +990,7 @@ function eventInner(ev) {
     ${manage ? `<button class="btn-th" data-text>Text invite</button>` : ""}
     <button class="btn-th" data-cal>Add to calendar</button>
     <button class="btn-th" data-expense>${cost ? fmt$(cost) + " · " : ""}Expenses</button>
-    ${manage ? `<button class="btn-th" data-edit>Edit</button><button class="btn-th danger" data-del>Delete</button>` : ""}
+    ${manage ? `<button class="btn-th" data-edit>Edit</button><button class="btn-th" data-dup>Duplicate</button><button class="btn-th danger" data-del>Delete</button>` : ""}
   </div>
   <div class="ev-foot">Friendly</div>`;
 }
@@ -1043,6 +1059,7 @@ async function toggleReaction(ev, cid, k) {
 
 function wireEventPage(ev) {
   const id = ev.id;
+  const dup = $("[data-dup]"); if (dup) dup.onclick = () => duplicateEvent(ev);
   // Group members who joined after the event was created aren't in invitedUids
   // yet (it's snapshotted at creation); add them quietly so they can RSVP.
   S._autoJoined = S._autoJoined || new Set();
@@ -1057,13 +1074,14 @@ function wireEventPage(ev) {
   document.querySelectorAll("[data-approve]").forEach(b => b.onclick = () => hostSetRsvp(ev, b.dataset.approve, "going"));
   document.querySelectorAll("[data-promote]").forEach(b => b.onclick = () => hostSetRsvp(ev, b.dataset.promote, "going"));
   if (el("saveAnswers")) el("saveAnswers").onclick = () => saveAnswers(ev);
+  if (el("plusName")) el("plusName").onchange = () => updateDoc(doc(db, "events", ev.id), { [`plusNames.${myUid()}`]: el("plusName").value.trim() }).then(() => toast("Saved")).catch(e => toast(e.message));
   if (el("viewAnswers")) el("viewAnswers").onclick = () => showAnswers(ev);
   if (el("nudgeBtn")) el("nudgeBtn").onclick = () => nudge(ev, el("nudgeBtn"));
   const share = $("[data-share]"); if (share) share.onclick = () => shareEvent(ev);
   const txt = $("[data-text]"); if (txt) txt.onclick = () => textEventInvite(ev);
   const join = $("[data-join]"); if (join) join.onclick = () => joinViaLink(ev, join);
   const cal = $("[data-cal]"); if (cal) cal.onclick = () => downloadIcs(ev);
-  const exp = $("[data-expense]"); if (exp) exp.onclick = () => openExpense(ev.id, ev.invitedUids);
+  const exp = $("[data-expense]"); if (exp) exp.onclick = () => openExpense(ev.id, ev.invitedUids, ev.groupId || null);
   const edit = $("[data-edit]"); if (edit) edit.onclick = () => editEvent(ev);
   const del = $("[data-del]"); if (del) del.onclick = () => delEvent(ev);
   wireWall(ev);
@@ -1282,13 +1300,14 @@ function moneyBody() {
   const me = myUid(); const pairs = pairwise();
   const iOwe = pairs.filter(p => p.from === me).reduce((t, p) => t + p.amount, 0);
   const owed = pairs.filter(p => p.to === me).reduce((t, p) => t + p.amount, 0);
-  const mine = pairs.filter(p => p.from === me || p.to === me);
+  const settleList = S.simplePay ? simplify(pairs) : pairs;
+  const mine = settleList.filter(p => p.from === me || p.to === me);
   const rows = [...[...S.expenses.values()].map(x => ({ ...x, kind: "e" })), ...[...S.settlements.values()].map(s => ({ ...s, kind: "s" }))].sort((a, b) => b.createdAt - a.createdAt);
   return `
   <div class="section-head"><h2>Money</h2><button class="btn primary small" id="addExpense">＋ Expense</button></div>
   <div class="tiles"><div class="card tile owe"><span class="muted sm">You owe</span><div class="amt">${fmt$(iOwe)}</div></div>
     <div class="card tile owed"><span class="muted sm">Owed to you</span><div class="amt">${fmt$(owed)}</div></div></div>
-  ${mine.length ? `<div class="section-head"><h2>Settle up</h2></div><div class="stack">${mine.map(p => {
+  ${mine.length ? `<div class="section-head"><h2>Settle up</h2>${pairs.length > 1 ? `<button class="btn small ${S.simplePay ? "primary" : ""}" id="simplePay" title="Combine debts into the fewest payments">${S.simplePay ? "✓ Fewest payments" : "Fewest payments"}</button>` : ""}</div><div class="stack">${mine.map(p => {
     const other = S.contacts.get(p.from === me ? p.to : p.from) || {};
     let pay = "";
     if (p.from === me) { if (other.venmo) pay += `<button class="btn small venmo" data-venmo="${p.to}" data-amt="${p.amount}">Venmo</button>`; if (other.phone) pay += `<button class="btn small apple" data-apple="${p.to}" data-amt="${p.amount}"> Cash</button>`; }
@@ -1304,6 +1323,7 @@ function moneyBody() {
 }
 function wireMoney() {
   el("addExpense").onclick = () => openExpense(null, null);
+  if (el("simplePay")) el("simplePay").onclick = () => { S.simplePay = !S.simplePay; render(); };
   document.querySelectorAll("[data-xopen]").forEach(b => b.onclick = () => go("#/x/" + b.dataset.xopen));
   document.querySelectorAll("[data-venmo]").forEach(b => b.onclick = () => payVenmo(b.dataset.venmo, +b.dataset.amt, "pay"));
   document.querySelectorAll("[data-request]").forEach(b => b.onclick = () => payVenmo(b.dataset.request, +b.dataset.amt, "charge"));
@@ -1322,6 +1342,7 @@ function expenseBody(id) {
   <button class="link-back" data-go="#/money">‹ Money</button>
   <div class="group-hero"><span class="li" style="width:52px;height:52px;font-size:24px">🧾</span>
     <div><h1>${esc(x.desc || "Expense")}</h1><div class="muted">${fmt$(x.amountCents)} · ${esc(nameOf(x.paidBy))} paid${ev ? " · " + esc(ev.title) : ""} · ${new Date(x.createdAt).toLocaleDateString()}</div></div></div>
+  ${x.receipt ? `<div class="btnrow" style="margin-top:12px"><button class="btn small" id="viewReceipt">🧾 View receipt</button></div>` : ""}
   <div class="section-head"><h2>${x.shares ? "Who owes what" : `Split ${n} way${n > 1 ? "s" : ""}`}</h2></div>
   <div class="card">${(x.split || []).map(u => `<div class="member-row">${avatar(u, "lg")}<div style="flex:1;min-width:0"><b>${esc(nameOf(u))}${u === myUid() ? " (you)" : ""}</b></div><span class="amt sm">${fmt$(x.shares ? (x.shares[u] || 0) : share)}</span></div>`).join("")}</div>
   ${(x.items || []).length ? `<div class="section-head" style="margin-top:22px"><h2>Receipt${x.merchant ? " · " + esc(x.merchant) : ""}</h2></div>
@@ -1333,6 +1354,7 @@ function expenseBody(id) {
 function wireExpensePage() {
   const x = S.expenses.get(S.route.id); if (!x) return;
   const pseudo = { id: x.id, _col: ["expenses", x.id], _manage: false, title: x.desc };
+  if (el("viewReceipt")) el("viewReceipt").onclick = () => lightbox(x.receipt);
   S.comments = [];
   S.evSubs.push(onSnapshot(subCol(pseudo, "comments"), snap => {
     S.comments = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.createdAt - b.createdAt);
@@ -1342,7 +1364,7 @@ function wireExpensePage() {
 function payVenmo(uid, cents, txn) { const v = (S.contacts.get(uid) || {}).venmo; if (!v) return; window.open(`https://venmo.com/${encodeURIComponent(v.replace(/^@/, ""))}?txn=${txn}&amount=${(cents / 100).toFixed(2)}&note=${encodeURIComponent("Friendly 🤝")}`, "_blank"); toast("Finish in Venmo, then tap Record."); }
 function payApple(uid, cents) { const p = (S.contacts.get(uid) || {}).phone; if (!p) return; const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?"; location.href = "sms:" + p.replace(/[^+\d]/g, "") + sep + "body=" + encodeURIComponent(`Sending $${(cents / 100).toFixed(2)} Apple Cash for our Friendly tab 🤝`); toast("Attach Apple Cash in Messages, then Record."); }
 const payerOptions = (people, sel) => people.map(([u, i]) => `<option value="${u}" ${u === (sel || myUid()) ? "selected" : ""}>${esc(first(i.name))}</option>`).join("");
-function openExpense(eventId, restrict) {
+function openExpense(eventId, restrict, groupId) {
   const people = [...S.contacts.entries()];
   dialog(`<h3>Add expense</h3>
     <label class="field"><span>What was it?</span><input id="xDesc" maxlength="80" placeholder="Pizza & drinks"></label>
@@ -1355,9 +1377,9 @@ function openExpense(eventId, restrict) {
       const amount = parseAmount(el("xAmt").value); if (!amount) return toast("Enter a valid amount.");
       const split = [...document.querySelectorAll('input[name=spl]:checked')].map(i => i.value); if (!split.length) return toast("Pick who splits it.");
       const paidBy = el("xPayer").value; const involved = [...new Set([...split, paidBy])];
-      try { await setDoc(doc(db, "expenses", newId()), { desc: el("xDesc").value.trim(), amountCents: amount, paidBy, split, involved, eventId: eventId || null, groupId: null, addedBy: myUid(), createdAt: Date.now() }); closeDialog(); toast("Expense added"); } catch (e) { toast(e.message); }
+      try { await setDoc(doc(db, "expenses", newId()), { desc: el("xDesc").value.trim(), amountCents: amount, paidBy, split, involved, eventId: eventId || null, groupId: groupId || (eventId && (S.events.get(eventId) || {}).groupId) || null, addedBy: myUid(), createdAt: Date.now() }); closeDialog(); toast("Expense added"); } catch (e) { toast(e.message); }
     });
-  el("xScan").onclick = () => scanReceipt(eventId, restrict, { desc: el("xDesc").value.trim(), paidBy: el("xPayer").value });
+  el("xScan").onclick = () => scanReceipt(eventId, restrict, { desc: el("xDesc").value.trim(), paidBy: el("xPayer").value }, groupId);
 }
 
 // ----- Receipt scan → itemize → assign -----
@@ -1374,13 +1396,14 @@ function requestViaFirestore(col, payload, timeoutMs = 90000) {
     unsub = onSnapshot(ref, s => { const d = s.data(); if (!d) return; if (d.status === "done") done(resolve, d); else if (d.status === "error") done(reject, new Error(d.error || "failed")); }, err => done(reject, err));
   });
 }
-async function scanReceipt(eventId, restrict, seed) {
+async function scanReceipt(eventId, restrict, seed, groupId) {
   const f = await pickFile("image/*"); if (!f) return;
   toast("Reading the receipt…");
   try {
     const image = await compressImage(f, 1400, 0.72);
+    const thumb = await compressImage(f, 640, 0.55);   // kept on the expense for reference
     const res = await requestViaFirestore("receiptRequests", { image });
-    itemizeDialog(eventId, restrict, seed, res.data || {});
+    itemizeDialog(eventId, restrict, seed, res.data || {}, thumb, groupId);
   } catch (e) { toast("Couldn't read that receipt: " + e.message); }
 }
 const toCents = v => Math.max(0, Math.round((Number(v) || 0) * 100));
@@ -1399,7 +1422,7 @@ function computeShares(items, tax, tip) {
   if (drift && Object.keys(shares).length) { const big = Object.keys(shares).sort((a, b) => shares[b] - shares[a])[0]; shares[big] += drift; }
   return { shares, subtotal, total };
 }
-function itemizeDialog(eventId, restrict, seed, data) {
+function itemizeDialog(eventId, restrict, seed, data, receipt, groupId) {
   const people = [...S.contacts.entries()].filter(([u]) => !restrict || restrict.includes(u) || u === seed.paidBy);
   const items = (data.items || []).map(it => ({ name: String(it.name || "Item").slice(0, 60), cents: toCents(it.price), uids: new Set() }));
   const st = { tax: toCents(data.tax), tip: toCents(data.tip) };
@@ -1424,7 +1447,8 @@ function itemizeDialog(eventId, restrict, seed, data) {
       const { shares, total } = computeShares(items, st.tax, st.tip); const split = Object.keys(shares); if (!split.length) return toast("Assign at least one line.");
       const paidBy = el("xPayer").value; const involved = [...new Set([...split, paidBy])];
       const rec = { desc: el("xDesc").value.trim() || data.merchant || "Receipt", amountCents: total, paidBy, split, shares, involved, eventId: eventId || null, groupId: null, addedBy: myUid(), createdAt: Date.now(),
-        items: items.filter(it => it.cents).map(it => ({ name: it.name, cents: it.cents, uids: [...it.uids] })), tax: st.tax, tip: st.tip, merchant: data.merchant || "" };
+        items: items.filter(it => it.cents).map(it => ({ name: it.name, cents: it.cents, uids: [...it.uids] })), tax: st.tax, tip: st.tip, merchant: data.merchant || "", receipt: receipt || "" };
+      rec.groupId = groupId || (eventId && (S.events.get(eventId) || {}).groupId) || null;
       try { await setDoc(doc(db, "expenses", newId()), rec); closeDialog(); toast("Itemized expense added"); } catch (e) { toast(e.message); }
     });
   const renderSum = () => {
@@ -1585,7 +1609,7 @@ function meetingBody(ev) {
   return `
   <button class="link-back" data-go="#/">‹ Back</button>
   <div class="group-hero"><span class="li" style="width:52px;height:52px;font-size:24px">📅</span>
-    <div><h1>${esc(ev.title)}</h1><div class="muted">${esc(fmtWhen(ev))}${ev.repeat ? " · repeats " + { weekly: "weekly", biweekly: "every 2 weeks", monthly: "monthly" }[ev.repeat] : ""}</div></div></div>
+    <div><h1>${esc(ev.title)}</h1><div class="muted">${esc(fmtWhen(ev))} · ${countdown(ev)}${ev.repeat ? " · repeats " + { weekly: "weekly", biweekly: "every 2 weeks", monthly: "monthly" }[ev.repeat] : ""}</div></div></div>
   <div class="card" style="padding:14px 16px">
     ${ev.location ? `<p style="margin:0 0 8px">📍 <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">${esc(ev.location)}</a></p>` : ""}
     <p class="muted" style="margin:0 0 8px">Organized by ${esc(nameOf(ev.hostId) === "Someone" ? (ev.hostName || "the organizer") : nameOf(ev.hostId))}</p>
@@ -1598,7 +1622,7 @@ function meetingBody(ev) {
   </div>` : ev.openLink ? `<div class="btnrow" style="margin-top:14px"><button class="btn primary" data-join>Join this meeting</button></div>` : `<p class="muted" style="margin-top:12px">You're viewing this meeting but aren't on the invite list.</p>`}
   <div class="btnrow" style="margin-top:10px">
     <button class="btn small" data-cal>Add to calendar</button>
-    ${manage ? `<button class="btn small" data-text>Text invite</button><button class="btn small" data-nudge>Nudge non-responders</button><button class="btn small" data-edit>Edit</button><button class="btn small danger-ghost" data-del>Delete</button>` : ""}
+    ${manage ? `<button class="btn small" data-text>Text invite</button><button class="btn small" data-nudge>Nudge non-responders</button><button class="btn small" data-edit>Edit</button><button class="btn small" data-dup>Duplicate</button><button class="btn small danger-ghost" data-del>Delete</button>` : ""}
   </div>
   <div class="section-head" style="margin-top:22px"><h2>Who's coming</h2></div>
   <div class="card" style="padding:8px 16px">${row("Accepted", g.going) + row("Maybe", g.maybe) + row("Declined", g.no) + row("No answer yet", g.none) || `<p class="muted">Nobody invited yet.</p>`}</div>
@@ -1617,6 +1641,7 @@ function wireMeeting(ev) {
   const txt = $("[data-text]"); if (txt) txt.onclick = () => textEventInvite(ev);
   const nd = $("[data-nudge]"); if (nd) nd.onclick = () => nudge(ev, nd);
   const ed = $("[data-edit]"); if (ed) ed.onclick = () => editEvent(ev);
+  const dp = $("[data-dup]"); if (dp) dp.onclick = () => duplicateEvent(ev);
   const dl = $("[data-del]"); if (dl) dl.onclick = () => delEvent(ev);
   const pseudo = { id: ev.id, _col: ["events", ev.id], _manage: false, title: ev.title };
   S.comments = [];
@@ -1686,6 +1711,107 @@ function wirePhotosPage() {
   if (S._memLoading || !missing) return;
   S._memLoading = true;
   loadMemories().then(() => { S._memLoading = false; if (S.route.name === "photos") render(); });
+}
+
+// ---------- sprint 3b helpers: countdown, group tab, simplify, search, drafts, duplicate, magic link ----------
+function countdown(ev) {
+  if (!ev.date) return "";
+  const [y, m, d] = ev.date.split("-").map(Number); const [sh, sm] = (ev.time || "09:00").split(":").map(Number);
+  const start = new Date(y, m - 1, d, sh, sm).getTime();
+  const end = ev.endTime ? new Date(y, m - 1, d, ...ev.endTime.split(":").map(Number)).getTime() : start + 3 * 3600e3;
+  const now = Date.now(), diff = start - now, H = 3600e3, D = 24 * H;
+  if (now >= start && now <= end) return "Happening now 🎉";
+  if (diff > 0) { if (diff < H) return "Starts in " + Math.max(1, Math.round(diff / 60000)) + " min"; if (diff < D) return "Starts in " + Math.round(diff / H) + " hours"; const days = Math.round(diff / D); return days === 1 ? "Tomorrow" : "In " + days + " days"; }
+  const ago = now - end; if (ago < D) return "Earlier today"; const days = Math.round(ago / D); return days === 1 ? "Yesterday" : days + " days ago";
+}
+// Balances between the members of one group, from that group's expenses (and settlements between members).
+function groupBalances(g) {
+  const members = new Set(g.memberUids || []); const owes = {};
+  const add = (a, b, cents) => { if (a === b || !cents || !members.has(a) || !members.has(b)) return; (owes[a] = owes[a] || {})[b] = (owes[a][b] || 0) + cents; };
+  const xs = [...S.expenses.values()].filter(x => x.groupId === g.id);
+  for (const x of xs) {
+    if (x.shares) { for (const [u, c] of Object.entries(x.shares)) add(u, x.paidBy, c); continue; }
+    const split = x.split || []; if (!split.length) continue;
+    const base = Math.floor(x.amountCents / split.length); let rem = x.amountCents - base * split.length;
+    for (const u of split) add(u, x.paidBy, base + (rem-- > 0 ? 1 : 0));
+  }
+  for (const s of S.settlements.values()) if (members.has(s.from) && members.has(s.to)) add(s.to, s.from, s.amountCents);
+  const pairs = []; const seen = new Set();
+  for (const a in owes) for (const b in owes[a]) { const k = a < b ? a + b : b + a; if (seen.has(k)) continue; seen.add(k); const net = (owes[a]?.[b] || 0) - (owes[b]?.[a] || 0); if (net > 0) pairs.push({ from: a, to: b, amount: net }); else if (net < 0) pairs.push({ from: b, to: a, amount: -net }); }
+  return { expenses: xs.sort((a, b) => b.createdAt - a.createdAt), total: xs.reduce((t, x) => t + x.amountCents, 0), pairs };
+}
+function groupTab(g) {
+  const { expenses, total, pairs } = groupBalances(g);
+  if (!expenses.length) return `<div class="card empty" style="padding:16px"><b>No shared costs yet</b><p class="muted" style="margin:4px 0 0">Add an expense here and it lands on this group's tab.</p></div>`;
+  return `<div class="card">
+    <div class="member-row"><div style="flex:1"><b>Total spent together</b><div class="muted sm">${expenses.length} expense${expenses.length === 1 ? "" : "s"}</div></div><span class="amt sm">${fmt$(total)}</span></div>
+    ${pairs.length ? pairs.map(p => `<div class="member-row">${avatar(p.from)}<div style="flex:1;min-width:0"><b>${esc(first(nameOf(p.from)))} owes ${esc(first(nameOf(p.to)))}</b></div><span class="amt sm">${fmt$(p.amount)}</span></div>`).join("") : `<div class="member-row"><div class="muted">All square 🎉</div></div>`}
+    ${expenses.slice(0, 5).map(x => `<div class="ledger"><div class="li">🧾</div><div style="flex:1;min-width:0"><b>${esc(x.desc)}</b><div class="muted sm">${esc(first(nameOf(x.paidBy)))} paid · ${new Date(x.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(x.amountCents)}</span><button class="btn ghost small" data-xopen="${x.id}">💬</button></div>`).join("")}
+    <div class="member-row"><a class="muted sm" data-go="#/money">Settle up from the Money tab ›</a></div></div>`;
+}
+// Fewest payments that settle everyone: net each person, then match the biggest debtor to the biggest creditor.
+function simplify(pairs) {
+  const bal = {}; pairs.forEach(p => { bal[p.from] = (bal[p.from] || 0) - p.amount; bal[p.to] = (bal[p.to] || 0) + p.amount; });
+  const debt = Object.entries(bal).filter(([, v]) => v < 0).map(([u, v]) => ({ u, v: -v })).sort((a, b) => b.v - a.v);
+  const cred = Object.entries(bal).filter(([, v]) => v > 0).map(([u, v]) => ({ u, v })).sort((a, b) => b.v - a.v);
+  const out = []; let i = 0, j = 0;
+  while (i < debt.length && j < cred.length) { const amt = Math.min(debt[i].v, cred[j].v); if (amt > 0) out.push({ from: debt[i].u, to: cred[j].u, amount: amt }); debt[i].v -= amt; cred[j].v -= amt; if (debt[i].v <= 0) i++; if (cred[j].v <= 0) j++; }
+  return out;
+}
+// ---------- SEARCH ----------
+S.q = S.q || "";
+function searchResults(q) {
+  const ql = q.trim().toLowerCase(); if (!ql) return "";
+  const hit = s => String(s || "").toLowerCase().includes(ql);
+  const evs = [...S.events.values()].filter(ev => hit(ev.title) || hit(ev.location) || hit(ev.notes)).sort((a, b) => b.date.localeCompare(a.date));
+  const gs = [...S.groups.values()].filter(g => hit(g.name));
+  const xs = [...S.expenses.values()].filter(x => hit(x.desc) || hit(x.merchant)).sort((a, b) => b.createdAt - a.createdAt);
+  if (!evs.length && !gs.length && !xs.length) return emptyState("🔍", "Nothing matched", "Try a different word: event titles, places, notes, groups, and expenses are searchable.");
+  return `${evs.length ? `<div class="section-head"><h2>Events</h2></div><div class="stack">${evs.map(ev => `<a class="card meet-card" data-ev="${ev.id}"><span class="li">${ev.kind === "meeting" ? "📅" : esc(ev.emoji || "🎉")}</span><div style="flex:1;min-width:0"><b>${esc(ev.title)}</b><div class="muted sm">${esc(fmtWhen(ev))}${ev.location ? " · " + esc(ev.location) : ""}</div></div><span class="chev">›</span></a>`).join("")}</div>` : ""}
+    ${gs.length ? `<div class="section-head"><h2>Groups</h2></div><div class="stack">${gs.map(groupRow).join("")}</div>` : ""}
+    ${xs.length ? `<div class="section-head"><h2>Expenses</h2></div><div class="card">${xs.map(x => `<div class="ledger"><div class="li">🧾</div><div style="flex:1;min-width:0"><b>${esc(x.desc)}</b><div class="muted sm">${esc(first(nameOf(x.paidBy)))} paid · ${new Date(x.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(x.amountCents)}</span><button class="btn ghost small" data-xopen="${x.id}">💬</button></div>`).join("")}</div>` : ""}`;
+}
+function searchBody() {
+  return `<div class="section-head"><h2>Search</h2></div>
+  <input class="search-box" id="searchBox" value="${esc(S.q)}" placeholder="Events, places, groups, expenses…" autocomplete="off">
+  <div id="searchResults">${searchResults(S.q)}</div>`;
+}
+function wireSearch() {
+  const box = el("searchBox"); if (!box) return; box.focus();
+  const wireResults = () => {
+    document.querySelectorAll("#searchResults [data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
+    document.querySelectorAll("#searchResults [data-group]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/g/" + a.dataset.group); });
+    document.querySelectorAll("#searchResults [data-xopen]").forEach(b => b.onclick = () => go("#/x/" + b.dataset.xopen));
+    document.querySelectorAll("#searchResults [data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
+  };
+  box.oninput = () => { S.q = box.value; el("searchResults").innerHTML = searchResults(S.q); wireResults(); };
+  wireResults();
+}
+// ---------- drafts (the composer remembers what you typed) ----------
+function saveDraft() {
+  try { if (compose.title || compose.notes) localStorage.setItem("friendlyDraft", JSON.stringify({ ...compose, invitees: [...compose.invitees], cohosts: [...compose.cohosts], _restored: undefined, _fromDraft: undefined })); } catch {}
+}
+function restoreDraft() {
+  if (compose._restored || compose.title) return; compose._restored = true;
+  try { const d = JSON.parse(localStorage.getItem("friendlyDraft") || "null"); if (!d || !(d.title || d.notes)) return;
+    Object.assign(compose, d, { invitees: new Set(d.invitees || []), cohosts: new Set(d.cohosts || []), cover: d.cover || null, questions: d.questions || [] }); compose._fromDraft = true; } catch {}
+}
+function duplicateEvent(ev) {
+  resetCompose(); compose._restored = true;
+  Object.assign(compose, { title: ev.title, emoji: ev.emoji || "🎉", theme: ev.theme || DEFAULT_THEME, cover: ev.cover || null, coverTab: ev.cover ? "upload" : "emoji", time: ev.time || "", end: ev.endTime || "", where: ev.location || "", notes: ev.notes || "", cap: ev.capacity ? String(ev.capacity) : "", approval: !!ev.approval, questions: (ev.questions || []).map(q => ({ ...q, id: newId() })), groupId: ev.groupId || "", invitees: new Set(ev.groupId ? [] : (ev.invitedUids || []).filter(u => u !== myUid())), cohosts: new Set(ev.cohostUids || []), kind: ev.kind || "event", repeat: ev.repeat || "", openLink: ev.openLink !== false, date: "" });
+  go("#/new"); toast("Copied. Pick a date and it's ready.");
+}
+// ---------- passwordless sign-in (email link) ----------
+async function sendMagicLink() {
+  const email = (el("aEmail").value || "").trim(); if (!email.includes("@")) return toast("Enter your email first.");
+  try {
+    await sendSignInLinkToEmail(auth, email, { url: location.origin + location.pathname + location.hash, handleCodeInApp: true });
+    localStorage.setItem("friendlyMagicEmail", email); toast("Check your email for a sign-in link ✉️");
+  } catch (e) { toast(e.code === "auth/operation-not-allowed" ? "Sign-in links aren't switched on yet. Use your password for now." : authError(e)); }
+}
+if (isSignInWithEmailLink(auth, location.href)) {
+  const email = localStorage.getItem("friendlyMagicEmail") || prompt("Confirm your email to finish signing in");
+  if (email) signInWithEmailLink(auth, email, location.href).then(() => { localStorage.removeItem("friendlyMagicEmail"); history.replaceState(null, "", location.pathname + location.hash); }).catch(e => toast(authError(e)));
 }
 
 // ---------- dialog helper ----------
