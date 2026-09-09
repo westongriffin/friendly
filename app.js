@@ -1041,6 +1041,34 @@ async function toggleReaction(ev, cid, k) {
   try { await updateDoc(doc(subCol(ev, "comments"), cid), { [`reactions.${k}`]: has ? arrayRemove(myUid()) : arrayUnion(myUid()) }); } catch (e) { toast(e.message); }
 }
 
+function wireEventPage(ev) {
+  const id = ev.id;
+  // Group members who joined after the event was created aren't in invitedUids
+  // yet (it's snapshotted at creation); add them quietly so they can RSVP.
+  S._autoJoined = S._autoJoined || new Set();
+  if (!(ev.invitedUids || []).includes(myUid()) && ev.groupId && S.groups.has(ev.groupId) && !S._autoJoined.has(id)) {
+    S._autoJoined.add(id);
+    updateDoc(doc(db, "events", id), { invitedUids: arrayUnion(myUid()), [`names.${myUid()}`]: S.profile.name }).catch(e => console.warn("auto-join failed:", e.message));
+  }
+  document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
+  document.querySelectorAll("[data-rsvp]").forEach(b => b.onclick = () => setRsvp(ev, b.dataset.rsvp));
+  document.querySelectorAll("[data-plus]").forEach(b => b.onclick = () => setPlus(ev, Number(b.dataset.plus)));
+  document.querySelectorAll("[data-hype]").forEach(b => b.onclick = () => setHype(ev, b.dataset.hype));
+  document.querySelectorAll("[data-approve]").forEach(b => b.onclick = () => hostSetRsvp(ev, b.dataset.approve, "going"));
+  document.querySelectorAll("[data-promote]").forEach(b => b.onclick = () => hostSetRsvp(ev, b.dataset.promote, "going"));
+  if (el("saveAnswers")) el("saveAnswers").onclick = () => saveAnswers(ev);
+  if (el("viewAnswers")) el("viewAnswers").onclick = () => showAnswers(ev);
+  if (el("nudgeBtn")) el("nudgeBtn").onclick = () => nudge(ev, el("nudgeBtn"));
+  const share = $("[data-share]"); if (share) share.onclick = () => shareEvent(ev);
+  const txt = $("[data-text]"); if (txt) txt.onclick = () => textEventInvite(ev);
+  const join = $("[data-join]"); if (join) join.onclick = () => joinViaLink(ev, join);
+  const cal = $("[data-cal]"); if (cal) cal.onclick = () => downloadIcs(ev);
+  const exp = $("[data-expense]"); if (exp) exp.onclick = () => openExpense(ev.id, ev.invitedUids);
+  const edit = $("[data-edit]"); if (edit) edit.onclick = () => editEvent(ev);
+  const del = $("[data-del]"); if (del) del.onclick = () => delEvent(ev);
+  wireWall(ev);
+}
+
 // ----- Polls -----
 function pollsInner(ev, hint = "Add a poll to help decide: food, time, theme.") {
   const me = myUid(); const manage = canManage(ev);
