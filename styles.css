@@ -393,3 +393,7 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .t-y2k{--paint:linear-gradient(160deg,#E4EEFF,#B7C9F0 45%,#8FB0E8),repeating-linear-gradient(115deg,rgba(255,255,255,.4) 0 2px,transparent 2px 10px);--bgsize:200% 200%,auto;--anim:drift;--anim-dur:18s}
 .t-retro{--paint:radial-gradient(circle at 50% 60%,#FFC15E,#FF6A88 20%,transparent 38%),linear-gradient(#1E0838 0 58%,#FF3D7F 58% 59%,#12052A 59%);--bgsize:cover}
 .t-retro.event-page::after,.t-retro.compose-preview::before{}
+/* Touch devices: iOS Safari zooms the whole page when a field under 16px gets
+   focus, and never zooms back, so the page drifts sideways. 16px in fields
+   stops the zoom. Desktop keeps the 15px body size. */
+@media (pointer:coarse){input,select,textarea{font-size:16px}}
