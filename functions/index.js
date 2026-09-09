@@ -155,11 +155,14 @@ exports.onReceiptRequest = onDocumentCreated({ document: "receiptRequests/{id}",
 // One email per guest with an invite.ics (METHOD:REQUEST / CANCEL) so Gmail,
 // Apple Mail and Outlook show Accept/Decline and file it on the calendar.
 // Organizer is the host (Reply-To goes to them); the sender is Friendly.
-// Requires the RESEND_API_KEY secret (a value of "unset" means "not configured").
-const RESEND_API_KEY = defineSecret("RESEND_API_KEY");
-const MAIL = { secrets: [VAPID_PRIVATE, RESEND_API_KEY] };
+// Requires the MAILGUN_API_KEY secret (a value of "unset" means "not configured").
+// Mailgun sending domain: mail.officialfriendly.com (Wix can only host TXT/CNAME
+// records for it, which is all Mailgun needs).
+const MAILGUN_API_KEY = defineSecret("MAILGUN_API_KEY");
+const MAILGUN_API = "https://api.mailgun.net/v3/mail.officialfriendly.com";
+const MAIL = { secrets: [VAPID_PRIVATE, MAILGUN_API_KEY] };
 // Shown as "<Host name> via Friendly"; replies and calendar responses go to the host.
-const MAIL_FROM = name => `${String(name || "Friendly").replace(/[<>"]/g, "")} via Friendly <invites@officialfriendly.com>`;
+const MAIL_FROM = name => `${String(name || "Friendly").replace(/[<>"]/g, "")} via Friendly <invites@mail.officialfriendly.com>`;
 const SITE = "https://officialfriendly.com";
 const icsEsc = s => String(s || "").replace(/\\/g, "\\\\").replace(/;/g, "\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
 const icsFold = line => { const out = []; let s = line; while (s.length > 73) { out.push(s.slice(0, 73)); s = " " + s.slice(73); } out.push(s); return out.join("\r\n"); };
@@ -187,7 +190,7 @@ function buildIcs(id, ev, method, attendees, host, seq) {
 const humanWhen = ev => { const [y, m, d] = ev.date.split("-").map(Number); const day = new Date(y, m - 1, d).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }); const t = x => { const [h, mi] = x.split(":").map(Number); const ap = h >= 12 ? "PM" : "AM"; return ((h % 12) || 12) + (mi ? ":" + String(mi).padStart(2, "0") : "") + " " + ap; }; return day + (ev.time ? " at " + t(ev.time) + (ev.endTime ? " to " + t(ev.endTime) : "") : ""); };
 // onlyUids: restrict to newly added guests (used when the guest list grows).
 async function sendInviteEmails(id, ev, method, onlyUids) {
-  const key = RESEND_API_KEY.value(); if (!key || key === "unset") { logger.info("email invites skipped: RESEND_API_KEY not set"); return; }
+  const key = MAILGUN_API_KEY.value(); if (!key || key === "unset") { logger.info("email invites skipped: MAILGUN_API_KEY not set"); return; }
   if (!ev || !ev.date || !ev.title) return;
   const uids = [...new Set([...(ev.invitedUids || []), ev.hostId])].filter(Boolean);
   const snaps = uids.length ? await db.getAll(...uids.map(u => db.doc("users/" + u))) : [];
@@ -215,12 +218,14 @@ async function sendInviteEmails(id, ev, method, onlyUids) {
   </div>`;
   let sent = 0;
   for (const a of targets) {
-    const r = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" }, body: JSON.stringify({
-      from: MAIL_FROM(host.name), to: [a.email], reply_to: host.email || undefined, subject, html,
-      attachments: [{ filename: "invite.ics", content: Buffer.from(ics).toString("base64"), content_type: "text/calendar; method=" + method }]
-    }) });
-    if (!r.ok) logger.warn("resend " + r.status + ": " + (await r.text()).slice(0, 200)); else sent++;
-    await new Promise(res => setTimeout(res, 550));   // free tier: 2 requests/second
+    const form = new FormData();
+    form.append("from", MAIL_FROM(host.name)); form.append("to", a.email);
+    if (host.email) form.append("h:Reply-To", host.email);
+    form.append("subject", subject); form.append("html", html);
+    form.append("attachment", new Blob([ics], { type: "text/calendar; method=" + method }), "invite.ics");
+    const r = await fetch(MAILGUN_API + "/messages", { method: "POST", headers: { Authorization: "Basic " + Buffer.from("api:" + key).toString("base64") }, body: form });
+    if (!r.ok) logger.warn("mailgun " + r.status + ": " + (await r.text()).slice(0, 200)); else sent++;
+    await new Promise(res => setTimeout(res, 150));
   }
   logger.info(`invite emails (${method}) sent: ${sent}/${targets.length} for ${id}`);
 }
