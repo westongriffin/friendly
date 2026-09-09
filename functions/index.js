@@ -7,6 +7,7 @@
 // credentials:  firebase functions:config:set twilio.sid=... twilio.token=... twilio.from=+1...
 const { onDocumentCreated, onDocumentUpdated, onDocumentDeleted } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onRequest } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const webpush = require("web-push");
 const { initializeApp } = require("firebase-admin/app");
@@ -247,12 +248,73 @@ function addPeriod(date, repeat) {
   return x.toISOString().slice(0, 10);
 }
 
+// ---- Public HTTP endpoints (org policy now allows public invokers) ----
+const FN_BASE = "https://us-central1-friendly-6992a.cloudfunctions.net";
+const htmlEsc = s => String(s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// Rich link previews for texted/shared invites: /p/{eventId} serves OpenGraph
+// tags (iMessage, WhatsApp, Slack unfurl them) then sends people on to the app;
+// /p/{eventId}/cover.jpg serves the preview's cover image.
+exports.share = onRequest({ region: "us-central1", invoker: "public", memory: "256MiB" }, async (req, res) => {
+  const m = /^\/p\/([a-f0-9]{8,64})(\/cover\.jpg)?\/?$/i.exec(req.path || "");
+  if (!m) { res.redirect(302, SITE); return; }
+  const id = m[1]; const snap = await db.doc("previews/" + id).get(); const p = snap.exists ? snap.data() : null;
+  if (m[2]) {
+    const c = p && p.cover ? /^data:image\/jpeg;base64,(.+)$/i.exec(p.cover) : null;
+    if (!c) { res.redirect(302, SITE + "/icons/icon-512.png"); return; }
+    res.set("Cache-Control", "public, max-age=600"); res.type("image/jpeg").send(Buffer.from(c[1], "base64")); return;
+  }
+  const target = SITE + "/#/e/" + id;
+  if (!p) { res.redirect(302, target); return; }
+  const title = (p.kind === "meeting" ? "📅 " : (p.emoji ? p.emoji + " " : "")) + p.title;
+  const when = humanWhen({ date: p.date, time: p.time, endTime: p.endTime });
+  const desc = when + (p.location ? " · " + p.location : "") + (p.hostName ? " · hosted by " + p.hostName : "") + (p.going ? " · " + p.going + " going" : "");
+  const img = p.cover ? FN_BASE + "/share/p/" + id + "/cover.jpg" : SITE + "/icons/icon-512.png";
+  res.set("Cache-Control", "public, max-age=300");
+  res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${htmlEsc(title)}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta property="og:type" content="website"><meta property="og:site_name" content="Friendly">
+<meta property="og:title" content="${htmlEsc(title)}"><meta property="og:description" content="${htmlEsc(desc)}">
+<meta property="og:image" content="${img}"><meta property="og:url" content="${FN_BASE}/share/p/${id}">
+<meta name="twitter:card" content="${p.cover ? "summary_large_image" : "summary"}"><meta name="twitter:title" content="${htmlEsc(title)}"><meta name="twitter:description" content="${htmlEsc(desc)}"><meta name="twitter:image" content="${img}">
+<meta http-equiv="refresh" content="0;url=${target}"><script>location.replace(${JSON.stringify(target)});</script></head>
+<body style="font-family:-apple-system,system-ui,sans-serif;padding:24px;color:#2A2019"><p>Opening your invite… <a href="${target}">Tap here if it doesn't open.</a></p></body></html>`);
+});
+
+// Calendar subscription: /cal?u=<uid>&t=<token> is a live .ics feed of every
+// event the user is invited to (subscribe once in iPhone/Google Calendar).
+// The token lives on the user's profile; the app makes it on first use.
+exports.cal = onRequest({ region: "us-central1", invoker: "public", memory: "256MiB" }, async (req, res) => {
+  const u = String(req.query.u || ""), t = String(req.query.t || "");
+  if (!/^[A-Za-z0-9]{10,64}$/.test(u) || !/^[a-f0-9]{24,64}$/i.test(t)) { res.status(400).send("bad request"); return; }
+  const user = await db.doc("users/" + u).get();
+  if (!user.exists || user.get("calToken") !== t) { res.status(403).send("forbidden"); return; }
+  const snap = await db.collection("events").where("invitedUids", "array-contains", u).get();
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Friendly//officialfriendly.com//EN", "CALSCALE:GREGORIAN", "METHOD:PUBLISH", "X-WR-CALNAME:Friendly", "X-WR-TIMEZONE:America/Chicago", "REFRESH-INTERVAL;VALUE=DURATION:PT1H", "X-PUBLISHED-TTL:PT1H"];
+  snap.forEach(d => {
+    const ev = d.data(); if (!ev.date || !ev.title) return;
+    const my = (ev.rsvps || {})[u] || "no answer yet";
+    const ymd = ev.date.replace(/-/g, "");
+    let dt;
+    if (!ev.time) dt = `DTSTART;VALUE=DATE:${ymd}\r\nDTEND;VALUE=DATE:${nextDay(ev.date).replace(/-/g, "")}`;
+    else { const s = minutes(ev.time); let e = ev.endTime ? minutes(ev.endTime) : s + 120; if (e <= s) e = s + 120; dt = `DTSTART:${ymd}T${hhmm(s)}\r\nDTEND:${e >= 1440 ? nextDay(ev.date).replace(/-/g, "") : ymd}T${hhmm(e % 1440)}`; }
+    lines.push("BEGIN:VEVENT", "UID:" + d.id + "@officialfriendly.com", "DTSTAMP:" + stamp, dt,
+      "SUMMARY:" + icsEsc((ev.kind === "meeting" ? "" : (ev.emoji ? ev.emoji + " " : "")) + ev.title),
+      ev.location ? "LOCATION:" + icsEsc(ev.location) : null,
+      "DESCRIPTION:" + icsEsc("Your RSVP: " + my + (ev.hostName ? "\nHost: " + ev.hostName : "") + (ev.notes ? "\n\n" + ev.notes : "") + "\n\n" + SITE + "/#/e/" + d.id),
+      "URL:" + SITE + "/#/e/" + d.id, "STATUS:" + (my === "no" ? "CANCELLED" : "CONFIRMED"), "END:VEVENT");
+  });
+  lines.push("END:VCALENDAR");
+  res.set("Cache-Control", "private, max-age=300"); res.set("Content-Disposition", 'inline; filename="friendly.ics"');
+  res.type("text/calendar; charset=utf-8").send(lines.filter(Boolean).map(icsFold).join("\r\n") + "\r\n");
+});
+
 const firstName = n => (n || "Someone").split(" ")[0];
+
 const commentPreview = c => c.img && !c.text ? "📷 Photo" : String(c.text || "").slice(0, 120);
 // People named with @ get their own line in the feed / a push of their own.
 const mentionNotify = (c, url, where) => (c.mentions && c.mentions.length) ? notify(c.mentions.filter(u => u !== c.authorId), firstName(c.authorName) + " mentioned you" + (where ? " in " + where : ""), commentPreview(c), url, { type: "mention", actorId: c.authorId }) : Promise.resolve();
-
-
 
 // Every device for a set of users (native FCM tokens + web push subscriptions):
 // send, prune anything dead, and log the item to the Activity feed so it shows

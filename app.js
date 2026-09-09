@@ -1237,7 +1237,10 @@ function reportContent(ev, kind, id) {
     });
 }
 async function deleteComment(ev, cid) { try { await deleteDoc(doc(subCol(ev, "comments"), cid)); } catch (e) { toast(e.message); } }
-const eventUrl = ev => "https://officialfriendly.com/#/e/" + ev.id;
+const FN_BASE = "https://us-central1-friendly-6992a.cloudfunctions.net";
+// Links people text or share go through /share/p/{id} so iMessage, WhatsApp
+// and Slack show a rich preview (cover, title, when); it forwards to the app.
+const eventUrl = ev => ev.openLink ? FN_BASE + "/share/p/" + ev.id : "https://officialfriendly.com/#/e/" + ev.id;
 // Text the invite from the organizer's own phone; the link lets people who
 // aren't on Friendly yet sign up and join (when "anyone with the link" is on).
 function textEventInvite(ev) {
@@ -1251,7 +1254,7 @@ async function joinViaLink(ev, btn) {
   catch (e) { if (btn) { btn.disabled = false; btn.textContent = "Join this event"; } toast("Couldn't join: " + e.message); }
 }
 function shareEvent(ev) {
-  const url = location.origin + location.pathname + "#/e/" + ev.id;
+  const url = eventUrl(ev);
   if (navigator.share) navigator.share({ title: ev.title, text: "You're invited: " + ev.title, url }).catch(() => {});
   else navigator.clipboard.writeText(url).then(() => toast("Invite link copied")).catch(() => prompt("Copy link:", url));
 }
@@ -1501,6 +1504,10 @@ function profileBody() {
   <button class="btn" id="memoriesBtn" style="margin-top:14px">📸 Memories: photos from all your events</button>
   <div class="section-head" style="margin-top:22px"><h2>Notifications</h2></div>
   <div class="card member-row"><span class="li">🔔</span><div style="flex:1;min-width:0"><b>${({ on: "On for this device", off: "Off", denied: "Blocked in your browser settings", unsupported: "Not available in this browser", native: "Managed in iPhone Settings" })[pushState()]}</b><div class="muted sm">${IOS && !STANDALONE && pushState() === "off" ? "Add Friendly to your Home Screen first (Share → Add to Home Screen)." : "Invites, comments, RSVPs, and day-of reminders."}</div></div>${pushState() === "off" ? `<button class="btn small primary" id="pushToggle">Turn on</button>` : pushState() === "on" ? `<button class="btn small" id="pushToggle">Turn off</button>` : ""}</div>
+  <div class="section-head" style="margin-top:22px"><h2>Calendar sync</h2></div>
+  <div class="card" style="padding:14px 16px"><p class="muted sm" style="margin:0 0 10px">Subscribe once and every event you're invited to appears in your calendar and stays up to date when plans change.</p>
+    <div class="btnrow"><button class="btn primary small" id="calSubscribe">Add to iPhone / Apple Calendar</button><button class="btn small" id="calCopy">Copy link for Google Calendar</button></div>
+    <p class="muted sm" style="margin:8px 0 0">Google Calendar: Other calendars → ＋ → From URL → paste the link. Calendars refresh on their own schedule (usually within a few hours).</p></div>
   <button class="btn danger-ghost" id="signOut" style="margin-top:20px">Sign out</button>
   <button class="btn ghost small" id="deleteAccount" style="margin-top:28px;opacity:.7">Delete my account</button>
   ${isAdmin() ? `<div class="section-head" style="margin-top:28px"><h2>Reports <span class="muted sm">moderation</span></h2></div>
@@ -1549,6 +1556,14 @@ function wireProfile() {
     } catch (e) { toast(e.message); }
   };
   if (el("memoriesBtn")) el("memoriesBtn").onclick = () => go("#/photos");
+  // Calendar feed: a private token on the profile, made on first use.
+  const calUrl = async () => {
+    let t = S.profile.calToken;
+    if (!t) { t = [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, "0")).join(""); await updateDoc(doc(db, "users", myUid()), { calToken: t }); }
+    return FN_BASE + "/cal?u=" + myUid() + "&t=" + t;
+  };
+  if (el("calSubscribe")) el("calSubscribe").onclick = async () => { try { const u = await calUrl(); location.href = u.replace(/^https:/, "webcal:"); } catch (e) { toast(e.message); } };
+  if (el("calCopy")) el("calCopy").onclick = async () => { try { const u = await calUrl(); await navigator.clipboard.writeText(u); toast("Link copied. Google Calendar: Other calendars → From URL"); } catch (e) { toast(e.message); } };
   wireReports();
   // App Store requires in-app account deletion (guideline 5.1.1). Re-auth first:
   // Firebase refuses to delete a user without a recent sign-in.
