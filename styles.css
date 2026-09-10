@@ -397,3 +397,24 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
    focus, and never zooms back, so the page drifts sideways. 16px in fields
    stops the zoom. Desktop keeps the 15px body size. */
 @media (pointer:coarse){input,select,textarea{font-size:16px}}
+/* Sprint: threads, reactions, GIFs, capped sections, settle-up layout, undo toast */
+.scroll-cap{max-height:58vh;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding-right:2px}
+.wall-msg.reply{margin:8px 0 0 0;padding-left:10px;border-left:2px solid rgba(255,255,255,.22)}
+.th-plain .wall-msg.reply{border-left-color:var(--line)}
+.reply-chip{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--th-sub);margin:0 0 8px}
+.reply-chip button{color:inherit;min-height:28px;min-width:28px;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;background:rgba(255,255,255,.14)}
+.react-pick{display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center}
+.react-any{width:64px;min-width:0;border-radius:999px;border:1px dashed rgba(255,255,255,.35);background:rgba(255,255,255,.12);padding:4px 10px;font-size:15px;color:var(--th-ink)}
+.th-plain .react-any{border-color:var(--line);background:var(--bg);color:var(--ink)}
+.wall-gif{max-width:220px;max-height:200px}
+.gif-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;max-height:52vh;overflow-y:auto;margin-top:8px}
+.gif-grid img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;cursor:pointer;display:block;background:var(--surface2)}
+.photo-grid{max-height:58vh;overflow-y:auto;overscroll-behavior:contain}
+.settle-row{flex-direction:column;align-items:stretch;gap:10px}
+.settle-top{display:flex;align-items:center;gap:12px;min-width:0}
+.settle-top b{overflow-wrap:anywhere}
+.settle-actions{display:flex;gap:8px;flex-wrap:wrap}
+.settle-actions .btn{flex:1 1 auto;justify-content:center}
+#toast.show{pointer-events:auto}
+.toast-act{margin-left:14px;font-weight:700;color:#FFB4A8;background:none;padding:0;text-decoration:underline}
+.reply-chip[hidden],.react-pick[hidden]{display:none}

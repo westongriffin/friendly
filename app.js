@@ -11,7 +11,7 @@ import {
   getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection,
   query, where, onSnapshot, addDoc, arrayUnion, arrayRemove, deleteField, orderBy, limit, getDocs
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-import { firebaseConfig, mapsKey, adminUids, vapidPublicKey } from "./firebase-config.js";
+import { firebaseConfig, mapsKey, adminUids, vapidPublicKey, giphyKey } from "./firebase-config.js";
 import { THEMES, themeOf, applyTheme, startParticles, DEFAULT_THEME } from "./themes.js";
 
 const fb = initializeApp(firebaseConfig);
@@ -75,7 +75,11 @@ const initials = n => (n || "?").trim().split(/\s+/).slice(0, 2).map(w => w[0].t
 const first = n => (n || "Someone").split(" ")[0];
 const fmt$ = c => (c < 0 ? "−" : "") + "$" + (Math.abs(c) / 100).toFixed(2);
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-function toast(msg) { const t = el("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), 3400); }
+function toast(msg, action, onAction) {
+  const t = el("toast"); t.textContent = msg;
+  if (action) { const b = document.createElement("button"); b.type = "button"; b.className = "toast-act"; b.textContent = action; b.onclick = () => { t.classList.remove("show"); onAction(); }; t.appendChild(b); }
+  t.classList.add("show"); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), action ? 7000 : 3400);
+}
 function todayStr() { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
 function evDate(ev) { const [y, m, d] = (ev.date || "2000-01-01").split("-").map(Number); return new Date(y, m - 1, d); }
 function fmtTime(t) { if (!t) return ""; const [h, mi] = t.split(":").map(Number); const d = new Date(); d.setHours(h, mi); return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }); }
@@ -94,13 +98,20 @@ function parseAmount(v) { const n = Number(String(v).replace(/[$,\s]/g, "")); re
 // photo-wall shots at ~900px. Keeps the app on the free plan (no Storage).
 function loadImg(src) { return new Promise((res, rej) => { const i = new Image(); i.crossOrigin = "anonymous"; i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
 function blobToURL(b) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(b); }); }
-async function compressImage(src, maxDim = 1000, quality = 0.72) {
+async function compressImage(src, maxDim = 1400, quality = 0.8, maxBytes = 720000) {
   const img = await loadImg(typeof src === "string" ? src : await blobToURL(src));
-  let { width: w, height: h } = img;
-  const scale = Math.min(1, maxDim / Math.max(w, h)); w = Math.round(w * scale); h = Math.round(h * scale);
-  const c = document.createElement("canvas"); c.width = w; c.height = h;
-  c.getContext("2d").drawImage(img, 0, 0, w, h);
-  return c.toDataURL("image/jpeg", quality);
+  let w = img.width, h = img.height;
+  const scale = Math.min(1, maxDim / Math.max(w, h)); const tw = Math.max(1, Math.round(w * scale)), th = Math.max(1, Math.round(h * scale));
+  // Shrink by halves first: one big jump from a 12MP photo to a small canvas
+  // throws away detail and looks blurry; stepping down keeps edges crisp.
+  let cur = img;
+  while (w / 2 >= tw && h / 2 >= th) { const c = document.createElement("canvas"); w = Math.round(w / 2); h = Math.round(h / 2); c.width = w; c.height = h; const x = c.getContext("2d"); x.imageSmoothingQuality = "high"; x.drawImage(cur, 0, 0, w, h); cur = c; }
+  const c = document.createElement("canvas"); c.width = tw; c.height = th; const x = c.getContext("2d"); x.imageSmoothingQuality = "high"; x.drawImage(cur, 0, 0, tw, th);
+  let q = quality, out = c.toDataURL("image/jpeg", q);
+  // Images live inside Firestore documents (1MB cap), so stay comfortably under it.
+  while (out.length > maxBytes && q > 0.55) { q -= 0.07; out = c.toDataURL("image/jpeg", q); }
+  if (out.length > maxBytes && maxDim > 800) return compressImage(out, Math.round(maxDim * 0.8), quality, maxBytes);
+  return out;
 }
 async function generateCover(prompt) {
   // Primary: a Gemini image model on Vertex, driven through a Firestore trigger.
@@ -212,6 +223,9 @@ onAuthStateChanged(auth, async u => {
   const snap = await getDoc(uref);
   if (!snap.exists()) await setDoc(uref, { name: u.displayName || first(u.email), email: u.email, venmo: "", phone: "", createdAt: Date.now() });
   subscribeAll(u);
+  // Open on Events. Only top-level tabs are redirected; a link to an event,
+  // group, expense, or invite still goes where it points.
+  if (/^(#\/?|#\/(money|groups|activity|photos|search|profile))$/.test(location.hash)) location.hash = "#/";
   if (NATIVE) registerPush(u.uid);
 });
 
@@ -837,7 +851,7 @@ function wireCover() {
   document.querySelectorAll("[data-ctab]").forEach(b => b.onclick = () => { compose.coverTab = b.dataset.ctab; refreshCoverUI(); });
   document.querySelectorAll("#cEmoji button").forEach(b => b.onclick = () => { compose.emoji = b.dataset.e; document.querySelectorAll("#cEmoji button").forEach(x => x.classList.remove("on")); b.classList.add("on"); const em = el("cPvEmoji"); if (em) em.textContent = b.dataset.e; });
   if (el("coverRemove")) el("coverRemove").onclick = () => { compose.cover = null; refreshCoverUI(); };
-  if (el("coverDrop")) el("coverDrop").onclick = async () => { const f = await pickFile(); if (!f) return; el("coverDrop").textContent = "Processing…"; try { compose.cover = await compressImage(f, 1100, 0.74); refreshCoverUI(); } catch { toast("Couldn't read that image."); el("coverDrop").textContent = "📷 Tap to upload a photo"; } };
+  if (el("coverDrop")) el("coverDrop").onclick = async () => { const f = await pickFile(); if (!f) return; el("coverDrop").textContent = "Processing…"; try { compose.cover = await compressImage(f, 1600, 0.82); refreshCoverUI(); } catch { toast("Couldn't read that image."); el("coverDrop").textContent = "📷 Tap to upload a photo"; } };
   if (el("aiGo")) el("aiGo").onclick = async () => {
     const p = el("aiPrompt").value.trim(); if (!p) return toast("Describe the vibe first.");
     el("coverPanel").innerHTML = `<div class="cover-spin"><div class="spinner"></div>Painting your cover…</div>`;
@@ -1001,8 +1015,16 @@ function questionsBlock(ev, me, myR) {
     ${ev.questions.map(q => `<label class="qa"><span>${esc(q.q)}</span><input data-answer="${q.id}" value="${esc(mine[q.id] || "")}" placeholder="Your answer"></label>`).join("")}
     <button class="btn-th ghost small" id="saveAnswers">Save answers</button></div>`;
 }
-// Reactions are keyed by short names (Firestore field paths can't hold emoji).
+// Reactions: the five original short names plus any emoji from the keyboard,
+// stored as "e<hex>_<hex>" so the key is a plain field name (Firestore field
+// paths can't hold emoji).
 const REACTS = { heart: "❤️", laugh: "😂", fire: "🔥", up: "👍", wow: "😮" };
+const QUICK_REACTS = ["❤️", "😂", "🔥", "👍", "😮", "🎉", "😍", "🙏"];
+const rkey = e => Object.keys(REACTS).find(k => REACTS[k] === e) || "e" + [...e].map(ch => ch.codePointAt(0).toString(16)).join("_");
+const rshow = k => REACTS[k] || (/^e[0-9a-f_]+$/.test(k) ? k.slice(1).split("_").map(h => String.fromCodePoint(parseInt(h, 16))).join("") : "");
+const firstGrapheme = v => { try { return [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(v)][0].segment; } catch { return [...v][0]; } };
+let replyTo = null;   // { id, name, ctx } while composing a threaded reply
+const parentPatch = ev => replyTo && replyTo.ctx === ev.id ? { parentId: replyTo.id } : {};
 function renderText(text, mentions) {
   let h = esc(text);
   (mentions || []).forEach(u => { const n = first(nameOf(u)); if (n && n !== "Someone") h = h.split("@" + esc(n)).join(`<b class="mention">@${esc(n)}</b>`); });
@@ -1016,34 +1038,54 @@ function wallParticipants(ev) {
 }
 function lightbox(src) { const box = document.createElement("div"); box.className = "lightbox"; box.innerHTML = `<img src="${src}" alt="">`; box.onclick = () => box.remove(); document.body.appendChild(box); }
 function wallInner(ev, title = "Party wall") {
-  const cs = S.comments.filter(visibleContent); const me = myUid();
-  const msg = c => {
-    const rx = Object.entries(c.reactions || {}).filter(([k, us]) => REACTS[k] && us && us.length);
-    return `<div class="wall-msg">${avatar(c.authorId, "sm")}<div style="flex:1;min-width:0"><div class="wall-who">${esc(first(c.authorName || nameOf(c.authorId)))} <i>${ago(c.createdAt)}</i></div>
-      ${c.img ? `<img class="wall-img" src="${c.img}" alt="">` : ""}${c.text ? `<div class="wall-text">${renderText(c.text, c.mentions)}</div>` : ""}
-      <div class="react-row">${rx.map(([k, us]) => `<button type="button" class="react ${us.includes(me) ? "on" : ""}" data-react="${c.id}|${k}">${REACTS[k]} ${us.length}</button>`).join("")}<button type="button" class="react add" data-reactpick="${c.id}" title="React">＋</button></div></div>
+  const all = S.comments.filter(visibleContent); const me = myUid();
+  if (replyTo && replyTo.ctx !== ev.id) replyTo = null;
+  const ids = new Set(all.map(c => c.id));
+  const kids = {}; all.forEach(c => { if (c.parentId && ids.has(c.parentId)) (kids[c.parentId] = kids[c.parentId] || []).push(c); });
+  const tops = all.filter(c => !(c.parentId && ids.has(c.parentId)));
+  const msg = (c, topId) => {
+    const rx = Object.entries(c.reactions || {}).filter(([k, us]) => rshow(k) && us && us.length);
+    const who = first(c.authorName || nameOf(c.authorId));
+    return `<div class="wall-msg${topId ? " reply" : ""}">${avatar(c.authorId, "sm")}<div style="flex:1;min-width:0"><div class="wall-who">${esc(who)} <i>${ago(c.createdAt)}</i></div>
+      ${c.gif ? `<img class="wall-img wall-gif" src="${esc(c.gif)}" alt="GIF">` : ""}${c.img ? `<img class="wall-img" src="${c.img}" alt="">` : ""}${c.text ? `<div class="wall-text">${renderText(c.text, c.mentions)}</div>` : ""}
+      <div class="react-row">${rx.map(([k, us]) => `<button type="button" class="react ${us.includes(me) ? "on" : ""}" data-react="${c.id}|${k}">${rshow(k)} ${us.length}</button>`).join("")}<button type="button" class="react add" data-reactpick="${c.id}" title="React">＋</button><button type="button" class="react add" data-reply="${topId || c.id}|${esc(who)}">↩ Reply</button></div>
+      ${(kids[c.id] || []).map(r => msg(r, c.id)).join("")}</div>
       ${c.authorId === me || isAdmin() ? `<button class="wall-del" data-delc="${c.id}" title="Delete">✕</button>` : `<button class="wall-del" data-report="comment|${c.id}" title="Report">⚑</button>`}</div>`;
   };
-  return `<div class="glass-head">${esc(title)} <span>${cs.length}</span></div>
-    <div class="wall-list">${cs.length ? cs.map(msg).join("") : `<p class="muted-th">Be the first to say something 👋</p>`}</div>
+  return `<div class="glass-head">${esc(title)} <span>${all.length}</span></div>
+    <div class="wall-list scroll-cap" id="wallList">${tops.length ? tops.map(c => msg(c, "")).join("") : `<p class="muted-th">Be the first to say something 👋</p>`}</div>
+    <div class="reply-chip" id="replyChip" ${replyTo ? "" : "hidden"}>Replying to <b>${esc(replyTo ? replyTo.name : "")}</b><button type="button" id="cancelReply" title="Cancel reply">✕</button></div>
     <div class="mention-list" id="mentionList" hidden></div>
-    <form class="wall-form" id="wallForm"><button type="button" class="btn-th small" id="wallPhoto" title="Add a photo">📷</button><input id="wallInput" maxlength="300" placeholder="Say something… @ to mention" autocomplete="off"><button class="btn-th accent small">Post</button></form>`;
+    <form class="wall-form" id="wallForm"><button type="button" class="btn-th small" id="wallPhoto" title="Add a photo">📷</button>${giphyKey ? `<button type="button" class="btn-th small" id="wallGif" title="Add a GIF">GIF</button>` : ""}<input id="wallInput" maxlength="300" placeholder="Say something… @ to mention" autocomplete="off"><button class="btn-th accent small">Post</button></form>`;
 }
 function wireWall(ev) {
   const f = el("wallForm"); if (f) f.onsubmit = e => { e.preventDefault(); postComment(ev); };
+  const list = el("wallList"); if (list) list.scrollTop = list.scrollHeight;
+  const bindReacts = () => document.querySelectorAll("[data-react]").forEach(b => b.onclick = () => { const [cid, k] = b.dataset.react.split("|"); toggleReaction(ev, cid, k); });
+  bindReacts();
   document.querySelectorAll("[data-delc]").forEach(b => b.onclick = () => deleteComment(ev, b.dataset.delc));
   document.querySelectorAll("[data-report]").forEach(b => b.onclick = () => { const [kind, id] = b.dataset.report.split("|"); reportContent(ev, kind, id); });
-  document.querySelectorAll("[data-react]").forEach(b => b.onclick = () => { const [cid, k] = b.dataset.react.split("|"); toggleReaction(ev, cid, k); });
+  // "＋" opens a row of common emoji plus a tiny box that accepts any emoji from the keyboard.
   document.querySelectorAll("[data-reactpick]").forEach(b => b.onclick = () => {
-    const cid = b.dataset.reactpick; b.outerHTML = Object.keys(REACTS).map(k => `<button type="button" class="react" data-react="${cid}|${k}">${REACTS[k]}</button>`).join("");
-    document.querySelectorAll("[data-react]").forEach(x => x.onclick = () => { const [c2, k2] = x.dataset.react.split("|"); toggleReaction(ev, c2, k2); });
+    const cid = b.dataset.reactpick; const box = document.createElement("span"); box.className = "react-pick";
+    box.innerHTML = QUICK_REACTS.map(e => `<button type="button" class="react" data-react="${cid}|${rkey(e)}">${e}</button>`).join("") + `<input class="react-any" maxlength="8" placeholder="any" aria-label="Any emoji" inputmode="text">`;
+    b.replaceWith(box); bindReacts();
+    const inp = box.querySelector(".react-any");
+    inp.oninput = () => { const v = inp.value.trim(); if (!v || /^[\x20-\x7e]+$/.test(v)) return; inp.value = ""; toggleReaction(ev, cid, rkey(firstGrapheme(v))); };
   });
+  document.querySelectorAll("[data-reply]").forEach(b => b.onclick = () => {
+    const [id, name] = b.dataset.reply.split("|"); replyTo = { id, name, ctx: ev.id };
+    const ch = el("replyChip"); if (ch) { ch.hidden = false; ch.querySelector("b").textContent = name; }
+    const inp = el("wallInput"); if (inp) inp.focus();
+  });
+  const cr = el("cancelReply"); if (cr) cr.onclick = () => { replyTo = null; el("replyChip").hidden = true; };
   document.querySelectorAll(".wall-img").forEach(im => im.onclick = () => lightbox(im.src));
   const ph = el("wallPhoto"); if (ph) ph.onclick = async () => {
     const file = await pickFile(); if (!file) return; toast("Adding photo…");
-    try { const img = await compressImage(file, 700, 0.62); await addDoc(subCol(ev, "comments"), { authorId: myUid(), authorName: S.profile.name, text: "", img, createdAt: Date.now() }); }
+    try { await addDoc(subCol(ev, "comments"), { authorId: myUid(), authorName: S.profile.name, text: "", img: await compressImage(file, 1200, 0.8), ...parentPatch(ev), createdAt: Date.now() }); replyTo = null; }
     catch (e) { toast("Couldn't add photo: " + e.message); }
   };
+  const gb = el("wallGif"); if (gb) gb.onclick = () => openGifPicker(ev);
   const inp = el("wallInput"), ml = el("mentionList");
   if (inp && ml) inp.oninput = () => {
     const m = /@(\w*)$/.exec(inp.value); if (!m) { ml.hidden = true; return; }
@@ -1051,6 +1093,24 @@ function wireWall(ev) {
     ml.innerHTML = hits.map(p => `<button type="button" data-mention="${esc(p.name)}">@${esc(p.name)}</button>`).join(""); ml.hidden = !hits.length;
     ml.querySelectorAll("[data-mention]").forEach(b => b.onclick = () => { inp.value = inp.value.replace(/@\w*$/, "@" + b.dataset.mention + " "); ml.hidden = true; inp.focus(); });
   };
+}
+// GIF search (GIPHY). The button only appears once giphyKey is set in firebase-config.js.
+function openGifPicker(ev) {
+  dialog(`<h3>Add a GIF</h3><input id="gifQ" class="search-box" placeholder="Search GIPHY…" autocomplete="off"><div class="gif-grid" id="gifGrid"><p class="muted sm">Loading…</p></div><p class="muted sm" style="margin:6px 0 0">Powered by GIPHY</p>`, null, null);
+  const grid = el("gifGrid"), q = el("gifQ"); let timer;
+  const load = async term => {
+    const url = term ? `https://api.giphy.com/v1/gifs/search?api_key=${giphyKey}&q=${encodeURIComponent(term)}&limit=24&rating=pg-13` : `https://api.giphy.com/v1/gifs/trending?api_key=${giphyKey}&limit=24&rating=pg-13`;
+    try {
+      const j = await (await fetch(url)).json();
+      grid.innerHTML = (j.data || []).map(g => `<img src="${esc(g.images.fixed_height_small.url)}" data-gif="${esc(g.images.fixed_height.url)}" alt="${esc(g.title || "GIF")}" loading="lazy">`).join("") || `<p class="muted sm">No GIFs found.</p>`;
+      grid.querySelectorAll("[data-gif]").forEach(im => im.onclick = async () => {
+        const gif = im.dataset.gif; closeDialog();
+        try { await addDoc(subCol(ev, "comments"), { authorId: myUid(), authorName: S.profile.name, text: "", gif, ...parentPatch(ev), createdAt: Date.now() }); replyTo = null; }
+        catch (e) { toast("Couldn't add GIF: " + e.message); }
+      });
+    } catch { grid.innerHTML = `<p class="muted sm">GIPHY isn't reachable right now.</p>`; }
+  };
+  load(""); q.oninput = () => { clearTimeout(timer); timer = setTimeout(() => load(q.value.trim()), 350); }; q.focus();
 }
 async function toggleReaction(ev, cid, k) {
   const c = S.comments.find(x => x.id === cid); const has = c && (c.reactions || {})[k] && c.reactions[k].includes(myUid());
@@ -1099,7 +1159,7 @@ function pollsInner(ev, hint = "Add a poll to help decide: food, time, theme.") 
       return `<div class="poll-opt ${mine === i ? "mine" : ""}" data-vote="${p.id}|${i}"><div class="poll-bar" style="transform:scaleX(${total ? n / total : 0})"></div><div class="poll-opt-in"><span>${esc(o)}</span><span>${pct}%</span></div></div>`;
     }).join("")}<div class="muted-th sm" style="margin-top:4px">${total} vote${total === 1 ? "" : "s"}${manage ? ` · <a data-delpoll="${p.id}">remove</a>` : ""}${planBtn(ev, p)}</div></div>`;
   }).join("");
-  return `<div class="glass-head">Polls${manage ? ` <a class="btn-th ghost small" id="addPoll">＋ Add</a>` : `<span>${S.polls.length}</span>`}</div>${list || `<p class="muted-th">${manage ? esc(hint) : "No polls yet."}</p>`}`;
+  return `<div class="glass-head">Polls${manage ? ` <a class="btn-th ghost small" id="addPoll">＋ Add</a>` : `<span>${S.polls.length}</span>`}</div><div class="scroll-cap">${list || `<p class="muted-th">${manage ? esc(hint) : "No polls yet."}</p>`}</div>`;
 }
 // Group date polls: the leading dated option can become an event in one tap.
 function planBtn(ev, p) {
@@ -1176,7 +1236,7 @@ function photosInner(ev) {
 function wirePhotos(ev) {
   if (el("addPhoto")) el("addPhoto").onclick = async () => {
     const f = await pickFile(); if (!f) return; toast("Uploading photo…");
-    try { const img = await compressImage(f, 900, 0.68); await addDoc(collection(db, "events", ev.id, "photos"), { img, addedBy: myUid(), createdAt: Date.now() }); }
+    try { const img = await compressImage(f, 1400, 0.8); await addDoc(collection(db, "events", ev.id, "photos"), { img, addedBy: myUid(), createdAt: Date.now() }); }
     catch (e) { toast("Couldn't add photo: " + e.message); }
   };
   document.querySelectorAll("[data-photo]").forEach(im => im.onclick = () => lightbox(im.src));
@@ -1211,7 +1271,8 @@ async function postComment(ev) {
   const input = el("wallInput"); const text = input.value.trim(); if (!text) return;
   input.value = ""; const ml = el("mentionList"); if (ml) ml.hidden = true;
   const mentions = wallParticipants(ev).filter(p => new RegExp("@" + p.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i").test(text)).map(p => p.uid);
-  try { await addDoc(subCol(ev, "comments"), { authorId: myUid(), authorName: S.profile.name, text, mentions, createdAt: Date.now() }); }
+  const patch = parentPatch(ev); replyTo = null; const ch = el("replyChip"); if (ch) ch.hidden = true;
+  try { await addDoc(subCol(ev, "comments"), { authorId: myUid(), authorName: S.profile.name, text, mentions, ...patch, createdAt: Date.now() }); }
   catch (e) { toast("Couldn't post: " + e.message); }
 }
 // ----- Reporting & blocking (App Store guideline 1.2 for user content) -----
@@ -1276,9 +1337,11 @@ function editEvent(ev) {
     <label class="field"><span>Start</span><input id="eTime" type="time" value="${ev.time || ""}"></label></div>
     <label class="field"><span>Where</span><input id="eWhere" value="${esc(ev.location || "")}"></label>
     <label class="field"><span>Repeats</span><select id="eRepeat"><option value="" ${!ev.repeat ? "selected" : ""}>Never</option><option value="weekly" ${ev.repeat === "weekly" ? "selected" : ""}>Every week</option><option value="biweekly" ${ev.repeat === "biweekly" ? "selected" : ""}>Every 2 weeks</option><option value="monthly" ${ev.repeat === "monthly" ? "selected" : ""}>Every month</option></select></label>
-    <label class="field"><span>Details</span><textarea id="eNotes">${esc(ev.notes || "")}</textarea></label>`,
+    <label class="field"><span>Details</span><textarea id="eNotes">${esc(ev.notes || "")}</textarea></label>
+    <span class="field-label" style="margin-top:10px">Co-hosts (can edit &amp; manage)</span><div class="check-grid">${contactChecks("ecoh", new Set(ev.cohostUids || []))}</div>`,
     "Save", async () => {
-      try { await updateDoc(doc(db, "events", ev.id), { title: el("eTitle").value.trim(), date: el("eDate").value, time: el("eTime").value, location: el("eWhere").value.trim(), notes: el("eNotes").value.trim(), repeat: el("eRepeat").value }); closeDialog(); toast("Saved"); } catch (e) { toast(e.message); }
+      const cohostUids = [...document.querySelectorAll("input[name=ecoh]:checked")].map(i => i.value).filter(u => u !== ev.hostId);
+      try { await updateDoc(doc(db, "events", ev.id), { cohostUids, ...(cohostUids.length ? { invitedUids: arrayUnion(...cohostUids) } : {}), title: el("eTitle").value.trim(), date: el("eDate").value, time: el("eTime").value, location: el("eWhere").value.trim(), notes: el("eNotes").value.trim(), repeat: el("eRepeat").value }); closeDialog(); toast("Saved"); } catch (e) { toast(e.message); }
     });
   attachPlaces(el("eWhere"));
 }
@@ -1315,7 +1378,7 @@ function moneyBody() {
     let pay = "";
     if (p.from === me) { if (other.venmo) pay += `<button class="btn small venmo" data-venmo="${p.to}" data-amt="${p.amount}">Venmo</button>`; if (other.phone) pay += `<button class="btn small apple" data-apple="${p.to}" data-amt="${p.amount}"> Cash</button>`; }
     else if (other.venmo) pay = `<button class="btn small venmo" data-request="${p.from}" data-amt="${p.amount}">Request</button>`;
-    return `<div class="card settle-row">${avatar(p.from)}<div style="flex:1"><b>${p.from === me ? "You owe " + esc(nameOf(p.to)) : esc(nameOf(p.from)) + " owes you"}</b></div><span class="amt sm">${fmt$(p.amount)}</span>${pay}<button class="btn small" data-record="${p.from}|${p.to}|${p.amount}">Record</button></div>`;
+    return `<div class="card settle-row"><div class="settle-top">${avatar(p.from)}<div style="flex:1"><b>${p.from === me ? "You owe " + esc(nameOf(p.to)) : esc(nameOf(p.from)) + " owes you"}</b></div><span class="amt sm">${fmt$(p.amount)}</span></div><div class="settle-actions">${pay}<button class="btn small" data-record="${p.from}|${p.to}|${p.amount}">${p.from === me ? "Mark as paid" : "Mark as received"}</button></div></div>`;
   }).join("")}</div>` : ""}
   <div class="section-head"><h2>Activity</h2></div>
   <div class="card">${rows.length ? rows.map(r => {
@@ -1364,9 +1427,25 @@ function wireExpensePage() {
     const b = el("wall"); if (b) { b.innerHTML = wallInner(pseudo, "Discussion"); wireWall(pseudo); }
   }, e => toast(e.message)));
 }
-function payVenmo(uid, cents, txn) { const v = (S.contacts.get(uid) || {}).venmo; if (!v) return; window.open(`https://venmo.com/${encodeURIComponent(v.replace(/^@/, ""))}?txn=${txn}&amount=${(cents / 100).toFixed(2)}&note=${encodeURIComponent("Friendly 🤝")}`, "_blank"); toast("Finish in Venmo, then tap Record."); }
-function payApple(uid, cents) { const p = (S.contacts.get(uid) || {}).phone; if (!p) return; const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?"; location.href = "sms:" + p.replace(/[^+\d]/g, "") + sep + "body=" + encodeURIComponent(`Sending $${(cents / 100).toFixed(2)} Apple Cash for our Friendly tab 🤝`); toast("Attach Apple Cash in Messages, then Record."); }
+function payVenmo(uid, cents, txn) { const v = (S.contacts.get(uid) || {}).venmo; if (!v) return; window.open(`https://venmo.com/${encodeURIComponent(v.replace(/^@/, ""))}?txn=${txn}&amount=${(cents / 100).toFixed(2)}&note=${encodeURIComponent("Friendly 🤝")}`, "_blank"); if (txn === "pay") markPaid(myUid(), uid, cents, "Venmo"); else toast("Request sent in Venmo."); }
+// Marks a payment as made. Undo is offered right away, and every settlement can
+// be removed later from the Activity list too.
+async function markPaid(from, to, cents, note) {
+  const ref = doc(db, "settlements", newId());
+  try { await setDoc(ref, { from, to, amountCents: cents, involved: [from, to], note: note || "", addedBy: myUid(), createdAt: Date.now() }); }
+  catch (e) { return toast(e.message); }
+  toast(note ? `Opened ${note} · marked as paid` : "Marked as paid", "Undo", () => deleteDoc(ref).then(() => toast("Undone")).catch(e => toast(e.message)));
+}
+function payApple(uid, cents) { const p = (S.contacts.get(uid) || {}).phone; if (!p) return; const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?"; location.href = "sms:" + p.replace(/[^+\d]/g, "") + sep + "body=" + encodeURIComponent(`Sending $${(cents / 100).toFixed(2)} Apple Cash for our Friendly tab 🤝`); markPaid(myUid(), uid, cents, "Apple Cash"); }
 const payerOptions = (people, sel) => people.map(([u, i]) => `<option value="${u}" ${u === (sel || myUid()) ? "selected" : ""}>${esc(first(i.name))}</option>`).join("");
+// An expense between exactly the members of one group belongs to that group,
+// even when it was added from the Money tab instead of the group page.
+function matchGroupId(involved) {
+  const key = [...new Set(involved)].sort().join("|"); if (involved.length < 2) return null;
+  for (const g of S.groups.values()) if ([...new Set(g.memberUids || [])].sort().join("|") === key) return g.id;
+  return null;
+}
+const inGroup = (x, g) => x.groupId === g.id || (!x.groupId && (x.involved || []).length >= 2 && [...new Set(x.involved)].sort().join("|") === [...new Set(g.memberUids || [])].sort().join("|"));
 function openExpense(eventId, restrict, groupId) {
   const people = [...S.contacts.entries()];
   dialog(`<h3>Add expense</h3>
@@ -1380,7 +1459,7 @@ function openExpense(eventId, restrict, groupId) {
       const amount = parseAmount(el("xAmt").value); if (!amount) return toast("Enter a valid amount.");
       const split = [...document.querySelectorAll('input[name=spl]:checked')].map(i => i.value); if (!split.length) return toast("Pick who splits it.");
       const paidBy = el("xPayer").value; const involved = [...new Set([...split, paidBy])];
-      try { await setDoc(doc(db, "expenses", newId()), { desc: el("xDesc").value.trim(), amountCents: amount, paidBy, split, involved, eventId: eventId || null, groupId: groupId || (eventId && (S.events.get(eventId) || {}).groupId) || null, addedBy: myUid(), createdAt: Date.now() }); closeDialog(); toast("Expense added"); } catch (e) { toast(e.message); }
+      try { await setDoc(doc(db, "expenses", newId()), { desc: el("xDesc").value.trim(), amountCents: amount, paidBy, split, involved, eventId: eventId || null, groupId: groupId || (eventId && (S.events.get(eventId) || {}).groupId) || matchGroupId(involved), addedBy: myUid(), createdAt: Date.now() }); closeDialog(); toast("Expense added"); } catch (e) { toast(e.message); }
     });
   el("xScan").onclick = () => scanReceipt(eventId, restrict, { desc: el("xDesc").value.trim(), paidBy: el("xPayer").value }, groupId);
 }
@@ -1403,8 +1482,8 @@ async function scanReceipt(eventId, restrict, seed, groupId) {
   const f = await pickFile("image/*"); if (!f) return;
   toast("Reading the receipt…");
   try {
-    const image = await compressImage(f, 1400, 0.72);
-    const thumb = await compressImage(f, 640, 0.55);   // kept on the expense for reference
+    const image = await compressImage(f, 2000, 0.85);
+    const thumb = await compressImage(f, 1000, 0.72);   // kept on the expense for reference
     const res = await requestViaFirestore("receiptRequests", { image });
     itemizeDialog(eventId, restrict, seed, res.data || {}, thumb, groupId);
   } catch (e) { toast("Couldn't read that receipt: " + e.message); }
@@ -1449,7 +1528,7 @@ function itemizeDialog(eventId, restrict, seed, data, receipt, groupId) {
       if (unassigned) return toast(unassigned + " line" + (unassigned > 1 ? "s" : "") + " still need" + (unassigned > 1 ? "" : "s") + " a person.");
       const { shares, total } = computeShares(items, st.tax, st.tip); const split = Object.keys(shares); if (!split.length) return toast("Assign at least one line.");
       const paidBy = el("xPayer").value; const involved = [...new Set([...split, paidBy])];
-      const rec = { desc: el("xDesc").value.trim() || data.merchant || "Receipt", amountCents: total, paidBy, split, shares, involved, eventId: eventId || null, groupId: null, addedBy: myUid(), createdAt: Date.now(),
+      const rec = { desc: el("xDesc").value.trim() || data.merchant || "Receipt", amountCents: total, paidBy, split, shares, involved, eventId: eventId || null, groupId: groupId || (eventId && (S.events.get(eventId) || {}).groupId) || matchGroupId(involved), addedBy: myUid(), createdAt: Date.now(),
         items: items.filter(it => it.cents).map(it => ({ name: it.name, cents: it.cents, uids: [...it.uids] })), tax: st.tax, tip: st.tip, merchant: data.merchant || "", receipt: receipt || "" };
       rec.groupId = groupId || (eventId && (S.events.get(eventId) || {}).groupId) || null;
       try { await setDoc(doc(db, "expenses", newId()), rec); closeDialog(); toast("Itemized expense added"); } catch (e) { toast(e.message); }
@@ -1477,14 +1556,14 @@ function itemizeDialog(eventId, restrict, seed, data, receipt, groupId) {
 function openSettle(from, to, amount) {
   const people = [...S.contacts.entries()];
   const opts = sel => people.map(([u, i]) => `<option value="${u}" ${u === sel ? "selected" : ""}>${esc(first(i.name))}</option>`).join("");
-  dialog(`<h3>Record a payment</h3><p class="muted" style="margin-top:-6px">Log a payback so balances update.</p>
+  dialog(`<h3>Mark as paid</h3><p class="muted" style="margin-top:-6px">Log a payback so balances update. You can undo it right after.</p>
     <div class="two"><label class="field"><span>From</span><select id="sFrom">${opts(from || myUid())}</select></label>
     <label class="field"><span>To</span><select id="sTo">${opts(to)}</select></label></div>
     <label class="field"><span>Amount ($)</span><input id="sAmt" inputmode="decimal" value="${amount ? (amount / 100).toFixed(2) : ""}"></label>`,
-    "Record it", async () => {
+    "Mark paid", async () => {
       const amt = parseAmount(el("sAmt").value); if (!amt) return toast("Enter a valid amount.");
       const f = el("sFrom").value, t = el("sTo").value; if (f === t) return toast("Pick two people.");
-      try { await setDoc(doc(db, "settlements", newId()), { from: f, to: t, amountCents: amt, involved: [f, t], note: "", addedBy: myUid(), createdAt: Date.now() }); closeDialog(); toast("Payment recorded"); } catch (e) { toast(e.message); }
+      closeDialog(); markPaid(f, t, amt, "");
     });
 }
 
@@ -1549,7 +1628,7 @@ function wireProfile() {
   el("photoBtn").onclick = async () => {
     const f = await pickFile(); if (!f) return; toast("Updating photo…");
     try {
-      const photo = await compressImage(f, 160, 0.72);
+      const photo = await compressImage(f, 320, 0.82);
       await updateDoc(doc(db, "users", myUid()), { photo });
       for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}.photo`]: photo }).catch(() => {});
       toast("Photo updated");
@@ -1743,7 +1822,7 @@ function countdown(ev) {
 function groupBalances(g) {
   const members = new Set(g.memberUids || []); const owes = {};
   const add = (a, b, cents) => { if (a === b || !cents || !members.has(a) || !members.has(b)) return; (owes[a] = owes[a] || {})[b] = (owes[a][b] || 0) + cents; };
-  const xs = [...S.expenses.values()].filter(x => x.groupId === g.id);
+  const xs = [...S.expenses.values()].filter(x => inGroup(x, g));
   for (const x of xs) {
     if (x.shares) { for (const [u, c] of Object.entries(x.shares)) add(u, x.paidBy, c); continue; }
     const split = x.split || []; if (!split.length) continue;
