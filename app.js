@@ -541,22 +541,25 @@ function groupPageBody(gid) {
   if (!g) return `<div class="card empty"><b>Group not found</b><p class="muted">You may have left it or it was deleted.</p><button class="btn" data-go="#/groups">Back to groups</button></div>`;
   const members = (g.memberUids || []).map(u => ({ uid: u, ...(g.members || {})[u] }));
   const owner = g.ownerId === myUid();
+  // Hosts: the owner plus anyone in hostUids. Hosts invite, manage, and promote; only the owner can delete.
+  const hostUids = [g.ownerId, ...(g.hostUids || [])];
+  const host = hostUids.includes(myUid());
   return `
   <button class="link-back" data-go="#/groups">‹ Groups</button>
   <div class="group-hero"><span class="ge xl" style="background:${g.color || "#FFE0B2"}">${esc(g.emoji || "🎉")}</span>
     <div><h1>${esc(g.name)}</h1><div class="muted">${members.length} member${members.length === 1 ? "" : "s"}</div></div></div>
   <div class="btnrow">
     <button class="btn primary" data-go="#/new">＋ Plan for this group</button>
-    ${owner ? `<button class="btn" id="inviteBtn">Invite by email</button>` : ""}
+    ${host ? `<button class="btn" id="inviteBtn">Invite by email</button>` : ""}
   </div>
   <div class="section-head" style="margin-top:22px"><h2>Members</h2></div>
   <div class="card">${members.map(m => `<div class="member-row">${avatar(m.uid, "lg")}
-    <div style="flex:1;min-width:0"><b>${esc(m.name || "Member")}${m.uid === myUid() ? " (you)" : ""}${m.uid === g.ownerId ? " · host" : ""}</b>
-    ${m.venmo ? `<div class="muted sm mono">${esc(m.venmo)}</div>` : ""}</div></div>`).join("")}</div>
+    <div style="flex:1;min-width:0"><b>${esc(m.name || "Member")}${m.uid === myUid() ? " (you)" : ""}${hostUids.includes(m.uid) ? " · host" : ""}</b>
+    ${m.venmo ? `<div class="muted sm mono">${esc(m.venmo)}</div>` : ""}</div>${host && m.uid !== g.ownerId && m.uid !== myUid() ? `<button class="btn ghost small" data-mkhost="${m.uid}|${hostUids.includes(m.uid) ? 0 : 1}">${hostUids.includes(m.uid) ? "Remove host" : "Make host"}</button>` : ""}</div>`).join("")}</div>
   <div class="section-head" style="margin-top:22px"><h2>Crew tab</h2><button class="btn small" id="gExpense">＋ Expense</button></div>
   ${groupTab(g)}
   ${(g.invitedEmails || []).length ? `<div class="section-head" style="margin-top:18px"><h2>Invited</h2></div>
-    <div class="card">${g.invitedEmails.map(e => `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">✉︎</span><div style="flex:1"><b class="mono sm">${esc(e)}</b><div class="muted sm">Hasn't joined yet</div></div>${owner ? `<button class="btn ghost small" data-uninvite="${esc(e)}">✕</button>` : ""}</div>`).join("")}</div>` : ""}
+    <div class="card">${g.invitedEmails.map(e => `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">✉︎</span><div style="flex:1"><b class="mono sm">${esc(e)}</b><div class="muted sm">Hasn't joined yet</div></div>${host ? `<button class="btn ghost small" data-uninvite="${esc(e)}">✕</button>` : ""}</div>`).join("")}</div>` : ""}
   <div class="card th-plain" id="wall" style="margin-top:22px"><p class="muted">Loading…</p></div>
   <div class="card th-plain" id="pollsCard" style="margin-top:14px"><p class="muted">Loading…</p></div>
   <div class="btnrow" style="margin-top:20px">
@@ -566,6 +569,11 @@ function groupPageBody(gid) {
 function wireGroupPage() {
   const g = S.groups.get(S.route.id); if (!g) { document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go)); return; }
   if (el("inviteBtn")) el("inviteBtn").onclick = () => openInviteDialog(g);
+  document.querySelectorAll("[data-mkhost]").forEach(b => b.onclick = async () => {
+    const [uid, add] = b.dataset.mkhost.split("|");
+    try { await updateDoc(doc(db, "groups", g.id), { hostUids: add === "1" ? arrayUnion(uid) : arrayRemove(uid) }); toast(add === "1" ? first(nameOf(uid)) + " is now a host" : first(nameOf(uid)) + " is no longer a host"); }
+    catch (e) { toast(e.message); }
+  });
   if (el("gExpense")) el("gExpense").onclick = () => openExpense(null, g.memberUids, g.id);
   document.querySelectorAll("[data-xopen]").forEach(b => b.onclick = () => go("#/x/" + b.dataset.xopen));
   if (el("delGroup")) el("delGroup").onclick = () => deleteGroup(g);
@@ -695,7 +703,7 @@ async function leaveGroup(g) {
   if (!confirm(`Leave “${g.name}”?`)) return;
   try {
     const members = { ...(g.members || {}) }; delete members[myUid()];
-    await updateDoc(doc(db, "groups", g.id), { memberUids: (g.memberUids || []).filter(u => u !== myUid()), members });
+    await updateDoc(doc(db, "groups", g.id), { memberUids: (g.memberUids || []).filter(u => u !== myUid()), hostUids: arrayRemove(myUid()), members });
     go("#/groups"); toast("You left " + g.name);
   } catch (e) { toast(e.message); }
 }
@@ -1661,7 +1669,7 @@ async function deleteAccount() {
     for (const g of S.groups.values()) {
       const others = (g.memberUids || []).filter(x => x !== u.uid);
       if (g.ownerId === u.uid && !others.length) { await deleteDoc(doc(db, "groups", g.id)).catch(() => {}); continue; }
-      const up = { memberUids: arrayRemove(u.uid), [`members.${u.uid}`]: deleteField() };
+      const up = { memberUids: arrayRemove(u.uid), hostUids: arrayRemove(u.uid), [`members.${u.uid}`]: deleteField() };
       if (g.ownerId === u.uid) up.ownerId = others[0];
       await updateDoc(doc(db, "groups", g.id), up).catch(() => {});
     }

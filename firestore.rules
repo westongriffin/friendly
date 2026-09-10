@@ -82,7 +82,9 @@ service cloud.firestore {
         allow update: if isMember()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes']);
         allow delete: if isAdmin() || signedIn() && (resource.data.authorId == uid()
-          || uid() == get(/databases/$(database)/documents/groups/$(groupId)).data.ownerId);
+          || uid() == get(/databases/$(database)/documents/groups/$(groupId)).data.ownerId
+          || ('hostUids' in get(/databases/$(database)/documents/groups/$(groupId)).data
+              && uid() in get(/databases/$(database)/documents/groups/$(groupId)).data.hostUids));
       }
     }
 
