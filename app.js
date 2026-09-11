@@ -36,7 +36,15 @@ const NATIVE = !!(CAP && CAP.isNativePlatform && CAP.isNativePlatform());
 // The iOS shell already keeps the web view below the status bar and above the
 // home indicator, so the CSS safe-area padding would double up there.
 if (NATIVE) document.documentElement.classList.add("native");
-const plugin = n => (CAP && CAP.Plugins && CAP.Plugins[n]) || null;
+// Native plugins: the shell loads this site remotely, so no bundled JS registers the
+// plugins. Capacitor.Plugins is empty until registerPlugin() is called for a plugin
+// the native side reports as available.
+const plugin = n => {
+  if (!CAP) return null;
+  if (CAP.Plugins && CAP.Plugins[n]) return CAP.Plugins[n];
+  try { if (CAP.isPluginAvailable && CAP.isPluginAvailable(n) && CAP.registerPlugin) { const p = CAP.registerPlugin(n); if (CAP.Plugins) CAP.Plugins[n] = p; return p; } } catch {}
+  return null;
+};
 async function registerPush(uid) {
   const Push = plugin("PushNotifications"); if (!Push) return;
   try {
@@ -772,9 +780,17 @@ function openInviteDialog(g) {
   if (el("invAddManual")) el("invAddManual").onclick = () => { addPicked(el("invName").value.trim(), el("invPhone").value.trim(), []); el("invName").value = ""; el("invPhone").value = ""; };
   if (el("invPick")) el("invPick").onclick = async () => {
     try {
-      if (nativeContacts) { const r = await nativeContacts.pickContact({ projection: { name: true, emails: true, phones: true } }); const c = r && r.contact; if (!c) return; const nm = c.name ? (c.name.display || [c.name.given, c.name.family].filter(Boolean).join(" ")) : ""; addPicked(nm, ((c.phones || [])[0] || {}).number || "", (c.emails || []).map(e => e.address).filter(Boolean)); }
+      if (nativeContacts) {
+        const r = await nativeContacts.pickContact({ projection: { name: true, emails: true, phones: true } });
+        const c = (r && (r.contact || (r.contacts && r.contacts[0]))) || (r && r.name ? r : null);
+        if (!c) return toast("No contact came back from the picker.");
+        const nm = c.name ? (c.name.display || [c.name.given, c.name.family].filter(Boolean).join(" ")) : (c.displayName || "");
+        const phone = ((c.phones || c.phoneNumbers || [])[0] || {}).number || ((c.phones || [])[0] && typeof c.phones[0] === "string" ? c.phones[0] : "");
+        const emails = (c.emails || []).map(e => (e && e.address) || (typeof e === "string" ? e : "")).filter(Boolean);
+        addPicked(nm, phone, emails);
+      }
       else { const rows = await navigator.contacts.select(["name", "tel", "email"], { multiple: true }); rows.forEach(r => addPicked((r.name || [])[0] || "", (r.tel || [])[0] || "", r.email || [])); }
-    } catch { toast("Contact picking was cancelled."); }
+    } catch (e) { const m = String((e && e.message) || e || ""); toast(/cancel/i.test(m) || !m ? "Contact picking was cancelled." : "Couldn't read that contact: " + m); }
   };
   if (el("invSearch")) {
     const renderResults = q => { const ql = q.toLowerCase(); const hits = known.filter(([u, i]) => !picked.some(p => p.uid === u) && (i.name || "").toLowerCase().includes(ql)); el("invResults").innerHTML = hits.slice(0, 8).map(([u, i]) => `<div class="inv-hit" data-choose="${u}">${avatar(u)}<div><b>${esc(i.name || "Friend")}</b></div><span class="add">Add</span></div>`).join("") || `<p class="muted sm">No one else to add.</p>`; };
