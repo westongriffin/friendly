@@ -6,7 +6,8 @@
   "scripts": {
     "add:ios": "cap add ios",
     "sync": "cap sync",
-    "open:ios": "cap open ios"
+    "open:ios": "cap open ios",
+    "postinstall": "sh scripts/patch-contacts-picker.sh"
   },
   "dependencies": {
     "@capacitor-community/contacts": "^8.0.0",
