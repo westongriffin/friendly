@@ -47,8 +47,14 @@ service cloud.firestore {
     // Doc shape: { name, emoji, ownerId, memberUids[], invitedEmails[],
     //              members: { <uid>: {name, venmo, phone} }, createdAt }
     match /groups/{groupId} {
+      // Phone invites: the user's normalized number (users/{uid}.phoneE164) is on the group's invitedPhones.
+      function phoneInvited() {
+        return 'invitedPhones' in resource.data
+          && exists(/databases/$(database)/documents/users/$(uid()))
+          && get(/databases/$(database)/documents/users/$(uid())).data.get('phoneE164', '-') in resource.data.invitedPhones;
+      }
       allow read: if signedIn()
-        && (uid() in resource.data.memberUids || email() in resource.data.invitedEmails);
+        && (uid() in resource.data.memberUids || email() in resource.data.invitedEmails || phoneInvited());
 
       allow create: if signedIn()
         && request.resource.data.ownerId == uid()
@@ -60,7 +66,7 @@ service cloud.firestore {
       allow update: if signedIn() && (
         uid() == resource.data.ownerId
         || uid() in resource.data.memberUids
-        || (email() in resource.data.invitedEmails
+        || ((email() in resource.data.invitedEmails || phoneInvited())
             && request.resource.data.memberUids.hasAll(resource.data.memberUids)
             && uid() in request.resource.data.memberUids)
       );

@@ -468,6 +468,20 @@ exports.dailyReminders = onSchedule({ schedule: "0 9 * * *", timeZone: "America/
   }
   logger.info("Sent reminders for " + snap.size + " events");
 
+  // Birthdays: a month out, tell the rest of each group so someone can plan.
+  const target = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 30);
+  const mmdd = String(target.getMonth() + 1).padStart(2, "0") + "-" + String(target.getDate()).padStart(2, "0");
+  const groups = await db.collection("groups").get(); let bdays = 0;
+  for (const g of groups.docs) {
+    const data = g.data(); const members = data.members || {};
+    for (const [uid, info] of Object.entries(members)) {
+      if (!info.birthday || !String(info.birthday).endsWith(mmdd)) continue;
+      const others = (data.memberUids || []).filter(u => u !== uid); if (!others.length) continue;
+      await notify(others, firstName(info.name || "A friend") + "'s birthday is a month away 🎂", "Plan something for " + (data.name || "the group") + " before the date fills up.", "/#/g/" + g.id, { type: "birthday", actorId: uid }); bdays++;
+    }
+  }
+  if (bdays) logger.info("Birthday heads-ups sent: " + bdays);
+
   // Repeating events: once an occurrence has passed, create the next one
   // (copies everything, resets RSVPs) and retire the old one from the series.
   const rep = await db.collection("events").where("repeat", "in", ["weekly", "biweekly", "monthly"]).where("date", "<", today).get();

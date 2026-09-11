@@ -164,6 +164,24 @@ function pickFile(accept = "image/*") { return new Promise(res => { const i = do
 // same components by passing a pseudo-event with `_col: ["groups", id]` etc.
 function subCol(ev, name) { return collection(db, ...(ev._col || ["events", ev.id]), name); }
 // Compose a text in the phone's Messages app (iOS wants "&" before body).
+// Phone numbers as +15551234567 so the same person matches whether typed with dashes or spaces.
+const toE164 = p => { const d = String(p || "").trim(); if (!d) return ""; const n = d.replace(/\D/g, ""); if (d.startsWith("+")) return "+" + n; if (n.length === 10) return "+1" + n; if (n.length === 11 && n[0] === "1") return "+" + n; return n ? "+" + n : ""; };
+// Birthdays are stored as YYYY-MM-DD (the year is optional to the user; we only use month and day).
+function nextBirthday(b) { if (!b || b.length < 5) return null; const [, mm, dd] = /(\d{2})-(\d{2})$/.exec(b) || []; if (!mm) return null; const now = new Date(); let d = new Date(now.getFullYear(), +mm - 1, +dd); const t0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()); if (d < t0) d = new Date(now.getFullYear() + 1, +mm - 1, +dd); return d; }
+const daysToBirthday = b => { const d = nextBirthday(b); if (!d) return null; const now = new Date(); return Math.round((d - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000); };
+const ymd = d => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+// Members' birthdays across every group I'm in (uid -> {name, birthday, groupId}), soonest first.
+function upcomingBirthdays(withinDays = 60, onlyGroup = null) {
+  const seen = new Map();
+  for (const g of S.groups.values()) { if (onlyGroup && g.id !== onlyGroup) continue; for (const [uid, info] of Object.entries(g.members || {})) { if (uid === myUid() || !info.birthday || seen.has(uid)) continue; const days = daysToBirthday(info.birthday); if (days == null || days > withinDays) continue; seen.set(uid, { uid, name: info.name || nameOf(uid), days, date: ymd(nextBirthday(info.birthday)), groupId: g.id }); } }
+  return [...seen.values()].sort((a, b) => a.days - b.days);
+}
+function planBirthday(b) { resetCompose(); compose.date = b.date; compose.groupId = b.groupId; compose.title = first(b.name) + "'s birthday"; compose.emoji = "🎂"; go("#/new"); toast("Pick a theme and invite the crew 🎂"); }
+function birthdayCard() {
+  const list = upcomingBirthdays(30); let dismissed = []; try { dismissed = JSON.parse(localStorage.getItem("friendlyBdayDismissed") || "[]"); } catch {}
+  const b = list.find(x => !dismissed.includes(x.uid + ":" + x.date)); if (!b) return "";
+  return `<div class="card notif-card"><span class="notif-ico">🎂</span><div style="flex:1"><b>${esc(first(b.name))}'s birthday is ${b.days === 0 ? "today" : b.days === 1 ? "tomorrow" : "in " + b.days + " days"}</b><div class="muted sm">${esc(fmtDay({ date: b.date }))}. A month out is the sweet spot to plan something.</div></div><span class="btnrow" style="gap:6px"><button class="btn primary small" data-bplan="${b.uid}">Plan something</button><button class="btn ghost small" data-bdismiss="${b.uid}:${b.date}">Later</button></span></div>`;
+}
 function smsLink(numbers, body) { const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?"; return "sms:" + numbers.map(n => n.replace(/[^+\d]/g, "")).join(",") + sep + "body=" + encodeURIComponent(body); }
 // Address autocomplete via Google Places (New). Active only once `mapsKey` is
 // set in firebase-config.js; without it the field stays a plain text box.
@@ -212,6 +230,7 @@ function parseRoute() {
   if (!p.length) return { name: "home" };
   if (p[0] === "e") return { name: "event", id: p[1] };
   if (p[0] === "g") return { name: "group", id: p[1] };
+  if (p[0] === "join") return { name: "join", id: p[1] };
   if (p[0] === "x") return { name: "expense", id: p[1] };
   if (p[0] === "activity") return { name: "activity" };
   if (p[0] === "photos") return { name: "photos" };
@@ -243,7 +262,9 @@ onAuthStateChanged(auth, async u => {
   subscribeAll(u);
   // Open on Events. Only top-level tabs are redirected; a link to an event,
   // group, expense, or invite still goes where it points.
-  if (/^(#\/?|#\/(money|groups|activity|photos|search|profile))$/.test(location.hash)) location.hash = "#/";
+  let pendingJoin = ""; try { pendingJoin = localStorage.getItem("friendlyJoin") || ""; localStorage.removeItem("friendlyJoin"); } catch {}
+  if (pendingJoin) location.hash = "#/join/" + pendingJoin;
+  else if (/^(#\/?|#\/(money|groups|activity|photos|search|profile))$/.test(location.hash)) location.hash = "#/";
   if (NATIVE) registerPush(u.uid);
 });
 
@@ -265,6 +286,14 @@ function subscribeAll(u) {
     // Join looked up an undefined key: the "Join does nothing" bug.)
     S.pendingInvites = new Map(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(g => !(g.memberUids || []).includes(u.uid)).map(g => [g.id, g]));
     render();
+  }));
+
+  // Groups that invited this phone number. Until the matching rule is live the query is
+  // denied and simply logs; once deployed, texted invitees see the Join banner too.
+  S.pendingInvitesPhone = new Map();
+  const phoneKey = (S.profile && S.profile.phoneE164) || "";
+  if (phoneKey) add(on("invitesPhone", query(collection(db, "groups"), where("invitedPhones", "array-contains", phoneKey)), snap => {
+    S.pendingInvitesPhone = new Map(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(g => !(g.memberUids || []).includes(u.uid)).map(g => [g.id, g])); render();
   }));
 
   add(on("expenses", query(collection(db, "expenses"), where("involved", "array-contains", u.uid)), snap => {
@@ -334,7 +363,7 @@ function avatar(uid, cls = "") { const info = S.contacts.get(uid) || {}; const n
 function render() {
   const root = el("app");
   if (!S.ready) { root.innerHTML = `<div class="splash"><div class="logo-mark"></div><p>Loading…</p></div>`; return; }
-  if (!S.user) { if (S.route.name === "event") { renderPreview(root, S.route.id); return; } renderAuth(root); return; }
+  if (!S.user) { if (S.route.name === "event") { renderPreview(root, S.route.id); return; } if (S.route.name === "join") { try { localStorage.setItem("friendlyJoin", S.route.id); } catch {} } renderAuth(root); return; }
   if (!S.profile) { root.innerHTML = `<div class="splash"><div class="logo-mark"></div><p>Setting up your profile…</p></div>`; return; }
   const r = S.route;
   if (r.name === "event") return renderEventPage(root, r.id);
@@ -392,7 +421,7 @@ function renderAuth(root) {
       if (authMode === "up") {
         if (!name) return toast("Add your name so friends recognize you.");
         const cred = await createUserWithEmailAndPassword(auth, email, pass);
-        await setDoc(doc(db, "users", cred.user.uid), { name, email: email.toLowerCase(), venmo, phone, createdAt: Date.now() });
+        await setDoc(doc(db, "users", cred.user.uid), { name, email: email.toLowerCase(), venmo, phone, phoneE164: toE164(phone), createdAt: Date.now() });
       } else {
         await signInWithEmailAndPassword(auth, email, pass);
       }
@@ -413,7 +442,7 @@ function authError(err) {
 // host's name comes from the group doc itself (invitees can't see hosts'
 // profiles yet), so it never falls back to "Someone".
 function inviteBanner() {
-  const invites = [...S.pendingInvites.values()];
+  const invites = [...new Map([...S.pendingInvites.values(), ...((S.pendingInvitesPhone && [...S.pendingInvitesPhone.values()]) || [])].map(g => [g.id, g])).values()];
   if (!invites.length) return "";
   return `<div class="stack" style="margin-bottom:16px">${invites.map(g => {
     const host = ((g.members || {})[g.ownerId] || {}).name || nameOf(g.ownerId);
@@ -457,11 +486,32 @@ function wireShell() {
   if (S.route.name !== "activity") S._actOpenSeen = null;
   if (S.route.name === "profile") wireProfile();
 }
+// A group join link (texted from the Add people dialog). Members go straight to the
+// group; invited people are added by email or phone match; anyone else is told to ask the host.
+function joinBody(gid) {
+  if (S.groups.has(gid)) { setTimeout(() => go("#/g/" + gid), 0); return `<p class="muted">Opening your group…</p>`; }
+  setTimeout(() => { const b = el("joinNow"); if (b) b.onclick = () => joinGroupByLink(gid, b); if (!joinBody._auto) { joinBody._auto = gid; joinGroupByLink(gid, el("joinNow"), true); } }, 0);
+  return `<div class="card empty" style="margin-top:20px"><div class="big">🎉</div><b>You've been invited to a group</b>
+    <p class="muted">Tap Join and you're in, as long as the person who texted you used this phone number or your email.</p>
+    <button class="btn primary" id="joinNow">Join the group</button>
+    <p class="muted sm" id="joinNote" style="margin-top:12px">Your number on file: <b>${esc(S.profile.phoneE164 || S.profile.phone || "none yet")}</b>. If that's not the number they texted, add it on your <a data-go="#/profile">profile</a> and tap Join again.</p></div>`;
+}
+async function joinGroupByLink(gid, btn, quiet) {
+  if (btn) { btn.disabled = true; btn.textContent = "Joining…"; }
+  try {
+    await updateDoc(doc(db, "groups", gid), { memberUids: arrayUnion(myUid()), invitedPhones: arrayRemove(S.profile.phoneE164 || "-"), invitedEmails: arrayRemove((S.user.email || "").toLowerCase()), [`members.${myUid()}`]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "", photo: S.profile.photo || "", birthday: S.profile.birthday || "" } });
+    toast("You're in! 🎉"); go("#/g/" + gid);
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = "Join the group"; }
+    if (!quiet) toast("This group hasn't got you on its list yet. Ask whoever invited you to add you from their Friendly app, then tap Join again.");
+  }
+}
 function routeBody(r) {
   if (r.name === "home") return homeBody();
   if (r.name === "new") return composeBody();
   if (r.name === "groups") return groupsBody();
   if (r.name === "group") return groupPageBody(r.id);
+  if (r.name === "join") return joinBody(r.id);
   if (r.name === "money") return moneyBody();
   if (r.name === "expense") return expenseBody(r.id);
   if (r.name === "activity") return activityBody();
@@ -528,6 +578,7 @@ function homeBody() {
 
   return `
   ${notifCard()}
+  ${birthdayCard()}
   <div class="section-head"><h2>${homeView === "calendar" ? "Calendar" : "Upcoming"}</h2><span class="btnrow" style="gap:8px"><button class="btn small" id="viewToggle" title="Switch view">${homeView === "calendar" ? "🗂 Cards" : "📅 Calendar"}</button><button class="btn primary small" data-go="#/new">＋ New event</button></span></div>
   ${filterBar}
   ${homeView === "calendar" ? calendarBody([...upcoming, ...past]) : `<div class="ev-grid">${upcoming.length ? upcoming.map(eventCard).join("") : emptyState("🗓️", "No plans yet", "Create your first event: pick a theme and invite the crew.")}</div>
@@ -562,6 +613,8 @@ function eventCard(ev) {
 function wireHome() {
   document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
   document.querySelectorAll("[data-filter]").forEach(b => b.onclick = () => { homeFilter = b.dataset.filter; calDay = null; render(); });
+  document.querySelectorAll("[data-bplan]").forEach(b => b.onclick = () => { const x = upcomingBirthdays(400).find(y => y.uid === b.dataset.bplan); if (x) planBirthday(x); });
+  document.querySelectorAll("[data-bdismiss]").forEach(b => b.onclick = () => { try { const d = JSON.parse(localStorage.getItem("friendlyBdayDismissed") || "[]"); d.push(b.dataset.bdismiss); localStorage.setItem("friendlyBdayDismissed", JSON.stringify(d.slice(-40))); } catch {} render(); });
   if (el("viewToggle")) el("viewToggle").onclick = () => { homeView = homeView === "calendar" ? "cards" : "calendar"; try { localStorage.setItem("friendlyHomeView", homeView); } catch {} render(); };
   if (el("calPrev")) el("calPrev").onclick = () => { calYM = { y: calYM.m === 0 ? calYM.y - 1 : calYM.y, m: (calYM.m + 11) % 12 }; calDay = null; render(); };
   if (el("calNext")) el("calNext").onclick = () => { calYM = { y: calYM.m === 11 ? calYM.y + 1 : calYM.y, m: (calYM.m + 1) % 12 }; calDay = null; render(); };
@@ -603,9 +656,10 @@ function groupPageBody(gid) {
   <button class="link-back" data-go="#/groups">‹ Groups</button>
   <div class="group-hero"><span class="ge xl" style="background:${g.color || "#FFE0B2"}">${esc(g.emoji || "🎉")}</span>
     <div><h1>${esc(g.name)}</h1><div class="muted">${members.length} member${members.length === 1 ? "" : "s"}</div></div></div>
+  ${g.note || host ? `<div class="card pinned"><span class="pin">📌</span><div style="flex:1;min-width:0;white-space:pre-wrap">${g.note ? esc(g.note) : `<span class="muted">Pin a note for the group: the door code, the address, the standing rules.</span>`}</div>${host ? `<button class="btn ghost small" id="editNote">${g.note ? "Edit" : "Pin a note"}</button>` : ""}</div>` : ""}
   <div class="btnrow">
     <button class="btn primary" data-go="#/new">＋ Plan for this group</button>
-    ${host ? `<button class="btn" id="inviteBtn">Invite by email</button>` : ""}
+    ${host ? `<button class="btn" id="inviteBtn">＋ Add people</button>` : ""}
   </div>
   ${(() => { const t = todayStr(); const evs = myEvents().filter(e => e.groupId === g.id);
     const up = evs.filter(e => e.date >= t).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
@@ -613,6 +667,8 @@ function groupPageBody(gid) {
     return `<div class="section-head" style="margin-top:22px"><h2>Plans</h2>${evs.length ? `<button class="btn small" data-homefilter="${g.id}">Open in Events</button>` : ""}</div>
     <div class="card">${up.length ? up.map(planRow).join("") : `<p class="muted" style="padding:14px 16px;margin:0">Nothing planned yet. Tap “Plan for this group” to start one.</p>`}</div>
     ${past.length ? `<details class="adv" style="margin-top:8px"><summary>${past.length} past</summary><div class="card" style="margin-top:8px">${past.slice(0, 20).map(planRow).join("")}</div></details>` : ""}`; })()}
+  ${(() => { const bs = upcomingBirthdays(90, g.id); const anySet = members.some(m => m.birthday); return `<div class="section-head" style="margin-top:22px"><h2>Birthdays</h2></div>
+    <div class="card">${bs.length ? bs.map(b => `<div class="member-row">${avatar(b.uid, "lg")}<div style="flex:1;min-width:0"><b>${esc(first(b.name))}</b><div class="muted sm">${esc(fmtDay({ date: b.date }))} · ${b.days === 0 ? "today 🎉" : b.days === 1 ? "tomorrow" : "in " + b.days + " days"}</div></div>${b.days <= 45 ? `<button class="btn small ${b.days <= 30 ? "primary" : ""}" data-bplan="${b.uid}">Plan something</button>` : ""}</div>`).join("") : `<p class="muted sm" style="padding:14px 16px;margin:0">${anySet ? "No birthdays in the next 90 days." : "Nobody has added a birthday yet. Add yours on your profile and the group gets a heads-up a month before."}</p>`}</div>`; })()}
   <div class="section-head" style="margin-top:22px"><h2>Members</h2></div>
   <div class="card">${members.map(m => `<div class="member-row">${avatar(m.uid, "lg")}
     <div style="flex:1;min-width:0"><b>${esc(m.name || "Member")}${m.uid === myUid() ? " (you)" : ""}${hostUids.includes(m.uid) ? " · host" : ""}</b>
@@ -632,6 +688,10 @@ function wireGroupPage() {
   if (el("inviteBtn")) el("inviteBtn").onclick = () => openInviteDialog(g);
   document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
   document.querySelectorAll("[data-homefilter]").forEach(b => b.onclick = () => { homeFilter = b.dataset.homefilter; go("#/"); });
+  document.querySelectorAll("[data-bplan]").forEach(b => b.onclick = () => { const x = upcomingBirthdays(400, g.id).find(y => y.uid === b.dataset.bplan); if (x) planBirthday(x); });
+  if (el("editNote")) el("editNote").onclick = () => dialog(`<h3>Pinned note</h3><label class="field"><span>Shown at the top of the group for everyone</span><textarea id="gNote" maxlength="600" style="min-height:110px">${esc(g.note || "")}</textarea></label>`, "Save", async () => {
+    try { await updateDoc(doc(db, "groups", g.id), { note: el("gNote").value.trim() }); closeDialog(); toast("Note pinned"); } catch (e) { toast(e.message); }
+  });
   document.querySelectorAll("[data-mkhost]").forEach(b => b.onclick = async () => {
     const [uid, add] = b.dataset.mkhost.split("|");
     try { await updateDoc(doc(db, "groups", g.id), { hostUids: add === "1" ? arrayUnion(uid) : arrayRemove(uid) }); toast(add === "1" ? first(nameOf(uid)) + " is now a host" : first(nameOf(uid)) + " is no longer a host"); }
@@ -678,73 +738,65 @@ function openGroupDialog() {
   document.querySelectorAll("#gEmoji button").forEach(b => b.onclick = () => { document.querySelectorAll("#gEmoji button").forEach(x => x.classList.remove("on")); b.classList.add("on"); });
 }
 function openInviteDialog(g) {
-  const chosen = new Set(); // uids of known contacts to add directly
-  const phones = [];        // numbers picked from the phone, to text an invite to
+  const me = myUid(); const picked = [];   // { name, phone, e164, emails[], uid|null }
   const nativeContacts = plugin("Contacts");
-  const hasPicker = nativeContacts || ("contacts" in navigator && "ContactsManager" in window);
-  dialog(`<h3>Invite to ${esc(g.name)}</h3>
-    <span class="field-label">Add from your friends</span>
-    <input class="inv-search" id="invSearch" placeholder="Search by name or phone…" autocomplete="off">
-    <div class="inv-chosen" id="invChosen"></div>
-    <div class="inv-results" id="invResults"></div>
-    ${hasPicker ? `<button type="button" class="btn small" id="invPick" style="margin-bottom:12px">📇 Pick from phone contacts</button>` : ""}
-    <label class="field"><span>Or invite by email</span><input id="invEmails" placeholder="alex@example.com, jo@example.com"></label>
-    <p class="muted sm" style="margin-top:-4px">Emailed folks connect automatically when they sign in with that address.${!hasPicker ? " (Reading your phone's contacts isn't available in this browser; on iPhone that needs the native app.)" : ""}</p>
-    <button type="button" class="btn small" id="invText">💬 Text someone an invite</button>
-    <p class="muted sm" style="margin-top:6px">Opens Messages with an invite written for you. It comes from your own number.</p>`,
-    "Send invites", async () => {
-      const emails = el("invEmails").value.split(",").map(s => s.trim().toLowerCase()).filter(x => x.includes("@"));
-      const existingE = new Set([...(g.invitedEmails || [])]);
-      const addE = emails.filter(e => !existingE.has(e));
+  const webPicker = !nativeContacts && ("contacts" in navigator && "ContactsManager" in window);
+  const known = [...S.contacts.entries()].filter(([u]) => u !== me && !(g.memberUids || []).includes(u));
+  const byPhone = e164 => e164 && known.find(([, i]) => toE164(i.phone) === e164);
+  const addPicked = (name, phone, emails) => {
+    const e164 = toE164(phone); if (!e164 && !(emails || []).length) return toast("That contact has no phone number or email.");
+    if (picked.some(p => (e164 && p.e164 === e164))) return;
+    const hit = byPhone(e164); picked.push({ name: name || (hit ? hit[1].name : "") || e164, phone, e164, emails: emails || [], uid: hit ? hit[0] : null }); renderPicked();
+  };
+  const renderPicked = () => { const box = el("invChosen"); if (box) box.innerHTML = picked.map((p, i) => `<div class="inv-hit"><div style="flex:1;min-width:0"><b>${esc(p.name)}</b><div class="muted sm">${p.uid ? "On Friendly · added right away" : "Gets a text with the join link"}${p.e164 ? " · " + esc(p.e164) : ""}</div></div><button type="button" class="btn ghost small" data-unpick="${i}">✕</button></div>`).join("") || `<p class="muted sm">Nobody picked yet.</p>`; box.querySelectorAll("[data-unpick]").forEach(b => b.onclick = () => { picked.splice(+b.dataset.unpick, 1); renderPicked(); }); };
+  dialog(`<h3>Add people to ${esc(g.name)}</h3>
+    <p class="muted" style="margin-top:-6px">Pick them from your contacts. Friends already on Friendly are added on the spot; everyone else gets a text from you with a join link.</p>
+    ${nativeContacts || webPicker ? `<button type="button" class="btn primary" id="invPick" style="width:100%">📇 Choose from contacts</button>` : `<p class="muted sm">Picking from your address book works in the Friendly iPhone app. Here, type a name and number:</p>`}
+    <div class="two" style="margin-top:10px"><label class="field"><span>Name</span><input id="invName" placeholder="Jo Park" maxlength="40" autocomplete="off"></label><label class="field"><span>Phone</span><input id="invPhone" inputmode="tel" placeholder="+1 555 123 4567" autocomplete="off"></label></div>
+    <button type="button" class="btn small" id="invAddManual">＋ Add to the list</button>
+    <div class="inv-chosen" id="invChosen" style="margin-top:12px"></div>
+    ${known.length ? `<details class="adv" style="margin-top:12px"><summary>Friends from your other groups</summary><input class="inv-search" id="invSearch" placeholder="Search by name…" autocomplete="off" style="margin-top:8px"><div class="inv-results" id="invResults"></div></details>` : ""}
+    <details class="adv"><summary>Invite by email instead</summary><label class="field" style="margin-top:8px"><span>Emails, comma separated</span><input id="invEmails" placeholder="alex@example.com, jo@example.com"></label><p class="muted sm">They connect automatically when they sign in with that address.</p></details>`,
+    "Add & send", async () => {
+      const emails = [...new Set([...(el("invEmails") ? el("invEmails").value.split(",") : []), ...picked.flatMap(p => p.uid ? [] : p.emails)].map(x => String(x).trim().toLowerCase()).filter(x => x.includes("@")))];
+      const direct = picked.filter(p => p.uid); const texted = picked.filter(p => !p.uid && p.e164);
+      if (!direct.length && !texted.length && !emails.length) return toast("Pick someone first.");
       const updates = {};
-      if (addE.length) updates.invitedEmails = [...(g.invitedEmails || []), ...addE];
-      if (chosen.size) {
-        updates.memberUids = [...new Set([...(g.memberUids || []), ...chosen])];
-        for (const uid of chosen) { const info = S.contacts.get(uid) || {}; updates[`members.${uid}`] = { name: info.name || "Friend", venmo: info.venmo || "", phone: info.phone || "" }; }
-      }
-      if (!Object.keys(updates).length) return toast("Pick someone or add an email.");
+      if (direct.length) { updates.memberUids = [...new Set([...(g.memberUids || []), ...direct.map(p => p.uid)])]; for (const p of direct) { const info = S.contacts.get(p.uid) || {}; updates[`members.${p.uid}`] = { name: info.name || p.name || "Friend", venmo: info.venmo || "", phone: info.phone || "", photo: info.photo || "", birthday: info.birthday || "" }; } }
+      const addE = emails.filter(e => !(g.invitedEmails || []).includes(e)); if (addE.length) updates.invitedEmails = [...(g.invitedEmails || []), ...addE];
+      const addP = texted.map(p => p.e164).filter(n => !(g.invitedPhones || []).includes(n)); if (addP.length) updates.invitedPhones = [...(g.invitedPhones || []), ...addP];
       try {
-        await updateDoc(doc(db, "groups", g.id), updates); closeDialog(); toast("Invites sent");
-        // Anyone picked from the phone gets a text too, from the inviter's own number.
-        if (phones.length) location.href = smsLink(phones, inviteText(g));
+        if (Object.keys(updates).length) await updateDoc(doc(db, "groups", g.id), updates);
+        closeDialog(); toast(direct.length ? direct.length + " added" + (texted.length ? ", texting the rest" : "") : texted.length ? "Opening Messages…" : "Invites sent");
+        const numbers = picked.map(p => p.e164).filter(Boolean);
+        if (numbers.length) setTimeout(() => { location.href = smsLink(numbers, groupInviteText(g)); }, 400);
       } catch (e) { toast(e.message); }
     });
-  el("invText").onclick = () => { location.href = smsLink([], inviteText(g)); };
-  const known = [...S.contacts.entries()].filter(([u]) => u !== myUid() && !(g.memberUids || []).includes(u));
-  const renderChosen = () => el("invChosen").innerHTML = [...chosen].map(u => `<span class="inv-tag">${avatar(u, "sm")}${esc(first(nameOf(u)))}<button data-unchoose="${u}">✕</button></span>`).join("");
-  const renderResults = q => {
-    const ql = q.toLowerCase();
-    const hits = known.filter(([u, i]) => !chosen.has(u) && ((i.name || "").toLowerCase().includes(ql) || (i.phone || "").replace(/\D/g, "").includes(ql.replace(/\D/g, "")) && ql.replace(/\D/g, "")));
-    el("invResults").innerHTML = hits.slice(0, 8).map(([u, i]) => `<div class="inv-hit" data-choose="${u}">${avatar(u)}<div><b>${esc(i.name || "Friend")}</b>${i.phone ? `<div class="muted sm mono">${esc(i.phone)}</div>` : ""}</div><span class="add">Add</span></div>`).join("") || (q ? `<p class="muted sm">No matches among your friends. Invite them by email below.</p>` : "");
-  };
-  renderResults("");
-  el("invSearch").oninput = e => renderResults(e.target.value);
-  el("invResults").onclick = e => { const h = e.target.closest("[data-choose]"); if (h) { chosen.add(h.dataset.choose); renderChosen(); renderResults(el("invSearch").value); } };
-  el("invChosen").onclick = e => { const b = e.target.closest("[data-unchoose]"); if (b) { chosen.delete(b.dataset.unchoose); renderChosen(); renderResults(el("invSearch").value); } };
+  renderPicked();
+  if (el("invAddManual")) el("invAddManual").onclick = () => { addPicked(el("invName").value.trim(), el("invPhone").value.trim(), []); el("invName").value = ""; el("invPhone").value = ""; };
   if (el("invPick")) el("invPick").onclick = async () => {
     try {
-      let emails = [];
-      if (nativeContacts) {
-        const r = await nativeContacts.pickContact({ projection: { name: true, emails: true, phones: true } });
-        const c = r && r.contact; if (c) { emails = (c.emails || []).map(e => e.address).filter(Boolean); (c.phones || []).map(p => p.number).filter(Boolean).slice(0, 1).forEach(n => phones.push(n)); }
-      } else {
-        const picked = await navigator.contacts.select(["name", "email"], { multiple: true });
-        emails = picked.flatMap(p => p.email || []).filter(Boolean);
-      }
-      if (emails.length) { el("invEmails").value = [el("invEmails").value, ...emails].filter(Boolean).join(", "); toast(emails.length + " added from contacts" + (phones.length ? ", they'll get a text too" : "")); }
-      else if (phones.length) toast("No email on that contact, so they'll get a text with the invite instead.");
-      else toast("No email or number on that contact.");
+      if (nativeContacts) { const r = await nativeContacts.pickContact({ projection: { name: true, emails: true, phones: true } }); const c = r && r.contact; if (!c) return; const nm = c.name ? (c.name.display || [c.name.given, c.name.family].filter(Boolean).join(" ")) : ""; addPicked(nm, ((c.phones || [])[0] || {}).number || "", (c.emails || []).map(e => e.address).filter(Boolean)); }
+      else { const rows = await navigator.contacts.select(["name", "tel", "email"], { multiple: true }); rows.forEach(r => addPicked((r.name || [])[0] || "", (r.tel || [])[0] || "", r.email || [])); }
     } catch { toast("Contact picking was cancelled."); }
   };
+  if (el("invSearch")) {
+    const renderResults = q => { const ql = q.toLowerCase(); const hits = known.filter(([u, i]) => !picked.some(p => p.uid === u) && (i.name || "").toLowerCase().includes(ql)); el("invResults").innerHTML = hits.slice(0, 8).map(([u, i]) => `<div class="inv-hit" data-choose="${u}">${avatar(u)}<div><b>${esc(i.name || "Friend")}</b></div><span class="add">Add</span></div>`).join("") || `<p class="muted sm">No one else to add.</p>`; };
+    renderResults(""); el("invSearch").oninput = e => renderResults(e.target.value);
+    el("invResults").onclick = e => { const h = e.target.closest("[data-choose]"); if (h) { const i = S.contacts.get(h.dataset.choose) || {}; picked.push({ name: i.name || "Friend", phone: i.phone || "", e164: toE164(i.phone), emails: [], uid: h.dataset.choose }); renderPicked(); renderResults(el("invSearch").value); } };
+  }
 }
+// The text an invitee gets. It comes from the inviter's own number via Messages.
+const groupInviteText = g => `Hey! I added you to our group "${g.name}" on Friendly, our crew's home base for plans, invites, photos, and settling up. Join here: https://officialfriendly.com/#/join/${g.id} (free). If you're new, sign up with this phone number and you're in.`;
 async function acceptInvite(gid, btn) {
-  const g = S.pendingInvites.get(gid); if (!g) return;
+  const g = S.pendingInvites.get(gid) || (S.pendingInvitesPhone && S.pendingInvitesPhone.get(gid)); if (!g) return;
   if (btn) { btn.disabled = true; btn.textContent = "Joining…"; }
   try {
     await updateDoc(doc(db, "groups", gid), {
       memberUids: [...(g.memberUids || []), myUid()],
       invitedEmails: (g.invitedEmails || []).filter(e => e !== (S.user.email || "").toLowerCase()),
-      [`members.${myUid()}`]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "" }
+      invitedPhones: (g.invitedPhones || []).filter(p => p !== (S.profile.phoneE164 || "-")),
+      [`members.${myUid()}`]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "", photo: S.profile.photo || "", birthday: S.profile.birthday || "" }
     });
     toast("You're in! Welcome to " + g.name);
     go("#/groups");
@@ -1266,7 +1318,7 @@ async function loadWeather(ev) {
 function eventIcs(ev) {
   const dt = (d, t) => d.replace(/-/g, "") + "T" + (t || "09:00").replace(":", "") + "00";
   const end = () => { if (ev.endTime) return dt(ev.date, ev.endTime); const [h, m] = (ev.time || "09:00").split(":").map(Number); const e = new Date(2000, 0, 1, h + 2, m); return dt(ev.date, String(e.getHours()).padStart(2, "0") + ":" + String(e.getMinutes()).padStart(2, "0")); };
-  const escI = v => String(v || "").replace(/\\/g, "\\\\").replace(/;/g, "\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+  const escI = v => String(v || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
   return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Friendly//officialfriendly.com//EN", "BEGIN:VEVENT", "UID:" + ev.id + "@officialfriendly.com", "DTSTAMP:" + new Date().toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z", "DTSTART:" + dt(ev.date, ev.time), "DTEND:" + end(), "SUMMARY:" + escI((ev.emoji ? ev.emoji + " " : "") + ev.title), ev.location ? "LOCATION:" + escI(ev.location) : "", "DESCRIPTION:" + escI((ev.notes ? ev.notes + "\n\n" : "") + "https://officialfriendly.com/#/e/" + ev.id), "END:VEVENT", "END:VCALENDAR"].filter(Boolean).join("\r\n");
 }
 function openCalendarDialog(ev) {
@@ -1750,6 +1802,7 @@ function profileBody() {
     <label class="field"><span>Name</span><input id="pName" value="${esc(p.name)}" maxlength="40"></label>
     <div class="two"><label class="field"><span>Venmo</span><input id="pVenmo" value="${esc(p.venmo || "")}" placeholder="@sam-rivera"></label>
     <label class="field"><span>Phone (Apple Cash)</span><input id="pPhone" value="${esc(p.phone || "")}" placeholder="+1 555 123 4567"></label></div>
+    <label class="field"><span>Birthday <span class="muted">(so your groups can plan something)</span></span><input id="pBday" type="date" value="${esc(p.birthday || "")}"></label>
     <p class="muted sm">Your Venmo and phone are shared only with people in your groups, so they can pay you back.</p>
     <button class="btn primary" id="saveProfile">Save profile</button>
   </div>`}
@@ -1790,9 +1843,10 @@ function wireProfile() {
     const name = el("pName").value.trim(); if (!name) return toast("Name can't be empty.");
     const venmo = el("pVenmo").value.trim(), phone = el("pPhone").value.trim();
     try {
-      await updateDoc(doc(db, "users", myUid()), { name, venmo, phone });
+      const birthday = (el("pBday") || {}).value || "";
+      await updateDoc(doc(db, "users", myUid()), { name, venmo, phone, phoneE164: toE164(phone), birthday });
       // propagate name/contact into each group's denormalized members map
-      for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}`]: { name, venmo, phone, photo: S.profile.photo || "" } }).catch(() => {});
+      for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}`]: { name, venmo, phone, photo: S.profile.photo || "", birthday } }).catch(() => {});
       toast("Profile saved");
     } catch (e) { toast(e.message); }
   };
