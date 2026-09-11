@@ -5,13 +5,11 @@ Everything App Store Connect asks for, in the order it asks. Items marked
 
 ## App record (App Store Connect → My Apps → +)
 - **Platform:** iOS
-- **Name:** `Friendly` **[you]**: names must be unique on the App Store and
-  "Friendly" alone may be taken. Fallbacks, in order: `Friendly: Plans & Splits`,
-  `Friendly: Hangouts & Bills`, `Official Friendly`.
+- **Name:** `Friendly: Plans & More` (chosen Sept 10 2026; plain "Friendly" was taken.
+  The icon label on the phone is still "Friendly".)
 - **Primary language:** English (U.S.)
-- **Bundle ID:** `com.officialfriendly.app` (appears after Xcode's first
-  signed build registers it)
-- **SKU:** `friendly-ios-001`
+- **Bundle ID:** `com.officialfriendly.app` (registered, push enabled)
+- **SKU:** `friendly-ios-1`
 - **User access:** Full Access
 
 ## Version information (1.0)
