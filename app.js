@@ -1279,7 +1279,7 @@ function dayInner(ev) {
     ${statuses.length ? `<div class="chipwrap">${statuses.map(c => `<span class="day-chip">${c.status === "late" ? "⏰" : "🚗"} ${esc(first(c.authorName || nameOf(c.authorId)))} ${c.status === "late" ? "is running late" : "is on the way"} <i>${ago(c.createdAt)}</i></span>`).join("")}</div>` : ""}
     <div class="btnrow" style="margin:4px 0 10px">
       ${soon || mine ? `<button type="button" class="btn-th small ${mine === "omw" ? "accent" : ""}" data-status="omw">🚗 On my way</button><button type="button" class="btn-th small ${mine === "late" ? "accent" : ""}" data-status="late">⏰ Running late</button>` : ""}
-      <button type="button" class="btn-th small" id="addCal">📆 Add to calendar</button>
+      ${S.profile && S.profile.calToken ? "" : `<button type="button" class="btn-th small" id="addCal">📆 Add to calendar</button>`}
     </div>
     <div class="glass-sub">Bring list <button type="button" class="btn-th ghost small" id="addBring">＋ Add</button></div>
     ${items.length ? items.map(c => { const who = ((c.reactions || {}).claim || []); return `<div class="day-row"><span style="flex:1;min-width:0"><b>${esc(c.item)}</b>${c.qty ? ` <span class="muted-th sm">× ${esc(c.qty)}</span>` : ""}${who.length ? `<div class="muted-th sm">${who.map(u => esc(first(nameOf(u)))).join(", ")} ${who.length === 1 ? "has" : "have"} it</div>` : ""}</span>

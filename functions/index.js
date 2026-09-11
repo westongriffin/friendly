@@ -214,7 +214,7 @@ async function sendInviteEmails(id, ev, method, onlyUids) {
     ${ev.location ? `<p style="margin:0 0 6px"><b>Where:</b> ${esc(ev.location)}</p>` : ""}
     ${ev.notes ? `<p style="margin:12px 0;white-space:pre-wrap">${esc(ev.notes)}</p>` : ""}
     ${method === "CANCEL" ? "" : `<p style="margin:20px 0"><a href="${SITE}/#/e/${id}" style="background:#FF6B57;color:#fff;text-decoration:none;padding:12px 18px;border-radius:12px;font-weight:600;display:inline-block">RSVP in Friendly</a></p>
-    <p style="color:#8C7C70;font-size:13px">The attached invite adds this to your calendar. Accept or decline there, or RSVP in Friendly.</p>`}
+    <p style="color:#8C7C70;font-size:13px">Optional: the attached invite adds this one event to your calendar. Skip it if you already use Calendar sync in Friendly, so it doesn't show up twice.</p>`}
   </div>`;
   let sent = 0;
   for (const a of targets) {
