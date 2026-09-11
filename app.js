@@ -656,7 +656,6 @@ function groupPageBody(gid) {
   <button class="link-back" data-go="#/groups">‹ Groups</button>
   <div class="group-hero"><span class="ge xl" style="background:${g.color || "#FFE0B2"}">${esc(g.emoji || "🎉")}</span>
     <div><h1>${esc(g.name)}</h1><div class="muted">${members.length} member${members.length === 1 ? "" : "s"}</div></div></div>
-  ${g.note || host ? `<div class="card pinned"><span class="pin">📌</span><div style="flex:1;min-width:0;white-space:pre-wrap">${g.note ? esc(g.note) : `<span class="muted">Pin a note for the group: the door code, the address, the standing rules.</span>`}</div>${host ? `<button class="btn ghost small" id="editNote">${g.note ? "Edit" : "Pin a note"}</button>` : ""}</div>` : ""}
   <div class="btnrow">
     <button class="btn primary" data-go="#/new">＋ Plan for this group</button>
     ${host ? `<button class="btn" id="inviteBtn">＋ Add people</button>` : ""}
@@ -689,9 +688,6 @@ function wireGroupPage() {
   document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
   document.querySelectorAll("[data-homefilter]").forEach(b => b.onclick = () => { homeFilter = b.dataset.homefilter; go("#/"); });
   document.querySelectorAll("[data-bplan]").forEach(b => b.onclick = () => { const x = upcomingBirthdays(400, g.id).find(y => y.uid === b.dataset.bplan); if (x) planBirthday(x); });
-  if (el("editNote")) el("editNote").onclick = () => dialog(`<h3>Pinned note</h3><label class="field"><span>Shown at the top of the group for everyone</span><textarea id="gNote" maxlength="600" style="min-height:110px">${esc(g.note || "")}</textarea></label>`, "Save", async () => {
-    try { await updateDoc(doc(db, "groups", g.id), { note: el("gNote").value.trim() }); closeDialog(); toast("Note pinned"); } catch (e) { toast(e.message); }
-  });
   document.querySelectorAll("[data-mkhost]").forEach(b => b.onclick = async () => {
     const [uid, add] = b.dataset.mkhost.split("|");
     try { await updateDoc(doc(db, "groups", g.id), { hostUids: add === "1" ? arrayUnion(uid) : arrayRemove(uid) }); toast(add === "1" ? first(nameOf(uid)) + " is now a host" : first(nameOf(uid)) + " is no longer a host"); }
