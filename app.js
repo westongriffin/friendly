@@ -464,6 +464,35 @@ function myEvents() {
 
 // ---------- HOME ----------
 let homeFilter = "all";
+let homeView = localStorage.getItem("friendlyHomeView") || "cards";   // "cards" | "calendar"
+let calYM = null, calDay = null;   // month shown in the calendar, and a tapped day
+const fmtDay = ev => evDate(ev).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+const RSVP_LABEL = { going: "You're going", maybe: "Maybe", no: "Can't go", waitlist: "Waitlisted", pending: "Pending" };
+// One-line event row used by the timeline and by group pages.
+function planRow(e) {
+  const myR = (e.rsvps || {})[myUid()]; const n = goingCount(e);
+  return `<a class="member-row plan-row" data-ev="${e.id}"><span class="li plan-emoji">${esc(e.kind === "meeting" ? "📅" : e.emoji || "🎉")}</span>
+    <div style="flex:1;min-width:0"><b>${esc(e.title)}</b><div class="muted sm">${esc(fmtDay(e))}${e.time ? " · " + fmtTime(e.time) : ""}${e.location ? " · " + esc(e.location) : ""}</div></div>
+    <span class="muted sm" style="white-space:nowrap">${myR ? RSVP_LABEL[myR] || "" : n + " going"}</span></a>`;
+}
+function calendarBody(evs) {
+  const t = todayStr(); const now = new Date();
+  if (!calYM) calYM = { y: now.getFullYear(), m: now.getMonth() };
+  const { y, m } = calYM; const first = new Date(y, m, 1); const startDow = first.getDay(); const days = new Date(y, m + 1, 0).getDate();
+  const byDay = {}; evs.forEach(e => (byDay[e.date] = byDay[e.date] || []).push(e));
+  const key = d => y + "-" + String(m + 1).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+  let cells = ""; for (let i = 0; i < startDow; i++) cells += `<div class="cal-cell blank"></div>`;
+  for (let d = 1; d <= days; d++) { const k = key(d); const list = byDay[k] || []; cells += `<div class="cal-cell${k === t ? " today" : ""}${list.length ? " has" : ""}${k === calDay ? " sel" : ""}"${list.length ? ` data-calday="${k}"` : ""}><span class="cal-n">${d}</span><span class="cal-dots">${list.slice(0, 3).map(e => esc(e.kind === "meeting" ? "📅" : e.emoji || "🎉")).join("")}</span></div>`; }
+  const monthName = first.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const sel = calDay && byDay[calDay] ? byDay[calDay] : null;
+  const agenda = sel || evs.filter(e => e.date >= t).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || ""))).slice(0, 40);
+  let list = "", last = "";
+  for (const e of agenda) { if (e.date !== last) { last = e.date; list += `<div class="tl-date">${esc(fmtDay(e))}${e.date === t ? " · Today" : ""}</div>`; } list += planRow(e); }
+  return `<div class="card cal"><div class="cal-head"><button class="btn ghost small" id="calPrev" aria-label="Previous month">‹</button><b>${esc(monthName)}</b><button class="btn ghost small" id="calNext" aria-label="Next month">›</button></div>
+    <div class="cal-dow">${["S", "M", "T", "W", "T", "F", "S"].map(d => `<span>${d}</span>`).join("")}</div><div class="cal-grid">${cells}</div></div>
+    <div class="section-head" style="margin-top:18px"><h2>${sel ? esc(fmtDay(sel[0])) : "Timeline"}</h2>${sel ? `<button class="btn small" id="calClear">All upcoming</button>` : ""}</div>
+    <div class="card">${list || `<p class="muted" style="padding:14px 16px;margin:0">Nothing scheduled yet.</p>`}</div>`;
+}
 function homeBody() {
   const evs = myEvents();
   const t = todayStr();
@@ -481,10 +510,10 @@ function homeBody() {
 
   return `
   ${notifCard()}
-  <div class="section-head"><h2>Upcoming</h2><button class="btn primary small" data-go="#/new">＋ New event</button></div>
+  <div class="section-head"><h2>${homeView === "calendar" ? "Calendar" : "Upcoming"}</h2><span class="btnrow" style="gap:8px"><button class="btn small" id="viewToggle" title="Switch view">${homeView === "calendar" ? "🗂 Cards" : "📅 Calendar"}</button><button class="btn primary small" data-go="#/new">＋ New event</button></span></div>
   ${filterBar}
-  <div class="ev-grid">${upcoming.length ? upcoming.map(eventCard).join("") : emptyState("🗓️", "No plans yet", "Create your first event: pick a theme and invite the crew.")}</div>
-  ${past.length ? `<div class="section-head" style="margin-top:26px"><h2>Past</h2></div><div class="ev-grid dim">${past.map(eventCard).join("")}</div>` : ""}`;
+  ${homeView === "calendar" ? calendarBody([...upcoming, ...past]) : `<div class="ev-grid">${upcoming.length ? upcoming.map(eventCard).join("") : emptyState("🗓️", "No plans yet", "Create your first event: pick a theme and invite the crew.")}</div>
+  ${past.length ? `<div class="section-head" style="margin-top:26px"><h2>Past</h2></div><div class="ev-grid dim">${past.map(eventCard).join("")}</div>` : ""}`}`;
 }
 function emptyState(emoji, title, sub) { return `<div class="card empty"><div class="big">${emoji}</div><b>${esc(title)}</b><p class="muted">${esc(sub)}</p></div>`; }
 
@@ -514,7 +543,12 @@ function eventCard(ev) {
 }
 function wireHome() {
   document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
-  document.querySelectorAll("[data-filter]").forEach(b => b.onclick = () => { homeFilter = b.dataset.filter; render(); });
+  document.querySelectorAll("[data-filter]").forEach(b => b.onclick = () => { homeFilter = b.dataset.filter; calDay = null; render(); });
+  if (el("viewToggle")) el("viewToggle").onclick = () => { homeView = homeView === "calendar" ? "cards" : "calendar"; try { localStorage.setItem("friendlyHomeView", homeView); } catch {} render(); };
+  if (el("calPrev")) el("calPrev").onclick = () => { calYM = { y: calYM.m === 0 ? calYM.y - 1 : calYM.y, m: (calYM.m + 11) % 12 }; calDay = null; render(); };
+  if (el("calNext")) el("calNext").onclick = () => { calYM = { y: calYM.m === 11 ? calYM.y + 1 : calYM.y, m: (calYM.m + 1) % 12 }; calDay = null; render(); };
+  if (el("calClear")) el("calClear").onclick = () => { calDay = null; render(); };
+  document.querySelectorAll("[data-calday]").forEach(c => c.onclick = () => { calDay = calDay === c.dataset.calday ? null : c.dataset.calday; render(); });
   if (el("pushOn")) el("pushOn").onclick = enableWebPush;
   if (el("pushLater")) el("pushLater").onclick = () => { localStorage.setItem("friendlyPushDismissed", "1"); render(); };
 }
@@ -555,6 +589,12 @@ function groupPageBody(gid) {
     <button class="btn primary" data-go="#/new">＋ Plan for this group</button>
     ${host ? `<button class="btn" id="inviteBtn">Invite by email</button>` : ""}
   </div>
+  ${(() => { const t = todayStr(); const evs = myEvents().filter(e => e.groupId === g.id);
+    const up = evs.filter(e => e.date >= t).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
+    const past = evs.filter(e => e.date < t).sort((a, b) => b.date.localeCompare(a.date));
+    return `<div class="section-head" style="margin-top:22px"><h2>Plans</h2>${evs.length ? `<button class="btn small" data-homefilter="${g.id}">Open in Events</button>` : ""}</div>
+    <div class="card">${up.length ? up.map(planRow).join("") : `<p class="muted" style="padding:14px 16px;margin:0">Nothing planned yet. Tap “Plan for this group” to start one.</p>`}</div>
+    ${past.length ? `<details class="adv" style="margin-top:8px"><summary>${past.length} past</summary><div class="card" style="margin-top:8px">${past.slice(0, 20).map(planRow).join("")}</div></details>` : ""}`; })()}
   <div class="section-head" style="margin-top:22px"><h2>Members</h2></div>
   <div class="card">${members.map(m => `<div class="member-row">${avatar(m.uid, "lg")}
     <div style="flex:1;min-width:0"><b>${esc(m.name || "Member")}${m.uid === myUid() ? " (you)" : ""}${hostUids.includes(m.uid) ? " · host" : ""}</b>
@@ -572,6 +612,8 @@ function groupPageBody(gid) {
 function wireGroupPage() {
   const g = S.groups.get(S.route.id); if (!g) { document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go)); return; }
   if (el("inviteBtn")) el("inviteBtn").onclick = () => openInviteDialog(g);
+  document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
+  document.querySelectorAll("[data-homefilter]").forEach(b => b.onclick = () => { homeFilter = b.dataset.homefilter; go("#/"); });
   document.querySelectorAll("[data-mkhost]").forEach(b => b.onclick = async () => {
     const [uid, add] = b.dataset.mkhost.split("|");
     try { await updateDoc(doc(db, "groups", g.id), { hostUids: add === "1" ? arrayUnion(uid) : arrayRemove(uid) }); toast(add === "1" ? first(nameOf(uid)) + " is now a host" : first(nameOf(uid)) + " is no longer a host"); }
