@@ -362,9 +362,9 @@ function avatar(uid, cls = "") { const info = S.contacts.get(uid) || {}; const n
 // ---------- render root ----------
 function render() {
   const root = el("app");
-  if (!S.ready) { root.innerHTML = `<div class="splash"><div class="logo-mark"></div><p>Loading…</p></div>`; return; }
+  if (!S.ready) { root.innerHTML = `<div class="splash"><div class="brand splash-brand">Friend<span class="tilt">l</span>y</div><div class="splash-row"><span class="splash-av" style="background:#F08A4B">SR</span><span class="splash-av" style="background:#3B82F6">AK</span><span class="splash-av" style="background:#25A56A">JP</span><span class="splash-av" style="background:#C84B7A">MT</span></div><p>Getting everyone here…</p></div>`; return; }
   if (!S.user) { if (S.route.name === "event") { renderPreview(root, S.route.id); return; } if (S.route.name === "join") { try { localStorage.setItem("friendlyJoin", S.route.id); } catch {} } renderAuth(root); return; }
-  if (!S.profile) { root.innerHTML = `<div class="splash"><div class="logo-mark"></div><p>Setting up your profile…</p></div>`; return; }
+  if (!S.profile) { root.innerHTML = `<div class="splash"><div class="brand splash-brand">Friend<span class="tilt">l</span>y</div><div class="splash-row"><span class="splash-av" style="background:#F08A4B">SR</span><span class="splash-av" style="background:#3B82F6">AK</span><span class="splash-av" style="background:#25A56A">JP</span><span class="splash-av" style="background:#C84B7A">MT</span></div><p>Setting up your profile…</p></div>`; return; }
   const r = S.route;
   if (r.name === "event") return renderEventPage(root, r.id);
   cleanupEvent();
