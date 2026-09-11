@@ -18,6 +18,17 @@ const fb = initializeApp(firebaseConfig);
 const auth = getAuth(fb);
 const db = getFirestore(fb);
 
+// Shared demo account (the App Review login): one tap, no sign-up. While signed
+// in as it, profile edits and destructive actions are turned off so the sample
+// group stays intact for the next visitor. ?demo=1 in the URL opens it directly.
+const DEMO = { email: "reviewer@officialfriendly.com", password: "FriendlyReview2026!" };
+const isDemo = () => !!(S.user && S.user.email === DEMO.email);
+let demoAutoTried = false;
+async function demoSignIn() {
+  try { await signInWithEmailAndPassword(auth, DEMO.email, DEMO.password); }
+  catch (e) { S.ready = true; render(); toast("Couldn't open the demo here. Open officialfriendly.com in a new tab and tap Try the demo."); }
+}
+
 // Native bridge (present only inside the Capacitor iOS/Android app). All of
 // this degrades to web behavior when window.Capacitor is absent.
 const CAP = window.Capacitor || null;
@@ -220,7 +231,11 @@ window.go = path => { location.hash = path; };
 onAuthStateChanged(auth, async u => {
   S.subs.forEach(fn => fn()); S.subs = [];
   S.user = u;
-  if (!u) { S.profile = null; S.ready = true; render(); return; }
+  if (!u) {
+    S.profile = null;
+    if (!demoAutoTried && new URLSearchParams(location.search).get("demo")) { demoAutoTried = true; demoSignIn(); return; }
+    S.ready = true; render(); return;
+  }
   const uref = doc(db, "users", u.uid);
   // Ensure a profile doc exists (created at sign-up; guard for older accounts).
   const snap = await getDoc(uref);
@@ -341,6 +356,7 @@ function renderAuth(root) {
         <button id="segIn" class="${authMode === "in" ? "on" : ""}">Sign in</button>
         <button id="segUp" class="${authMode === "up" ? "on" : ""}">Create account</button>
       </div>
+      <button type="button" class="btn lg demo-btn" id="demoBtn">Try the demo · no account needed</button>
       <form id="authForm" class="stack">
         <label class="field ${authMode === "in" ? "hidden" : ""}" id="nameField"><span>Your name</span>
           <input id="aName" maxlength="40" placeholder="Sam Rivera" autocomplete="name"></label>
@@ -365,6 +381,7 @@ function renderAuth(root) {
   startParticles(el("authbg"), "confetti");
   el("segIn").onclick = () => { authMode = "in"; renderAuth(root); };
   el("segUp").onclick = () => { authMode = "up"; renderAuth(root); };
+  el("demoBtn").onclick = () => { el("demoBtn").disabled = true; el("demoBtn").textContent = "Opening the demo…"; demoSignIn(); };
   el("authSwap").onclick = () => { authMode = authMode === "in" ? "up" : "in"; renderAuth(root); };
   if (el("magicLink")) el("magicLink").onclick = sendMagicLink;
   el("authForm").onsubmit = async e => {
@@ -411,6 +428,7 @@ function shell(body) {
   const tab = S.route.name;
   const T = (name, label, path) => `<button class="tab ${tab === name ? "on" : ""}" data-go="${path}">${label}</button>`;
   return `
+  ${isDemo() ? `<div class="demo-bar">Demo mode: this is the shared sample account. Explore freely; what you add is visible to other visitors.</div>` : ""}
   <header class="topbar">
     <div class="brand" data-go="#/">Friend<span class="tilt">l</span>y</div>
     <div class="topbar-right"><button class="bell" data-go="#/search" title="Search">🔍</button><button class="bell" data-go="#/activity" title="Activity">🔔${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ""}</button>
@@ -606,7 +624,7 @@ function groupPageBody(gid) {
   <div class="card th-plain" id="wall" style="margin-top:22px"><p class="muted">Loading…</p></div>
   <div class="card th-plain" id="pollsCard" style="margin-top:14px"><p class="muted">Loading…</p></div>
   <div class="btnrow" style="margin-top:20px">
-    ${owner ? `<button class="btn danger-ghost" id="delGroup">Delete group</button>` : `<button class="btn danger-ghost" id="leaveGroup">Leave group</button>`}
+    ${isDemo() ? "" : owner ? `<button class="btn danger-ghost" id="delGroup">Delete group</button>` : `<button class="btn danger-ghost" id="leaveGroup">Leave group</button>`}
   </div>`;
 }
 function wireGroupPage() {
@@ -743,8 +761,9 @@ async function acceptInvite(gid, btn) {
 }
 function inviteText(g) { return `Hey! I set up "${g.name}" on Friendly. It's where our group plans hangouts, RSVPs, and splits costs. Grab it at https://officialfriendly.com, sign up with your email, and send me that email so I can add you 🎉`; }
 async function uninvite(g, email) { try { await updateDoc(doc(db, "groups", g.id), { invitedEmails: (g.invitedEmails || []).filter(e => e !== email) }); } catch (e) { toast(e.message); } }
-async function deleteGroup(g) { if (!confirm(`Delete “${g.name}”? Its events stay, but the group is removed.`)) return; try { await deleteDoc(doc(db, "groups", g.id)); go("#/groups"); toast("Group deleted"); } catch (e) { toast(e.message); } }
+async function deleteGroup(g) { if (isDemo()) return toast("Deleting groups is off in demo mode."); if (!confirm(`Delete “${g.name}”? Its events stay, but the group is removed.`)) return; try { await deleteDoc(doc(db, "groups", g.id)); go("#/groups"); toast("Group deleted"); } catch (e) { toast(e.message); } }
 async function leaveGroup(g) {
+  if (isDemo()) return toast("Leaving groups is off in demo mode.");
   if (!confirm(`Leave “${g.name}”?`)) return;
   try {
     const members = { ...(g.members || {}) }; delete members[myUid()];
@@ -969,7 +988,7 @@ function renderEventPage(root, id) {
   S.evSubs.forEach(fn => fn()); S.evSubs = [];
   S.comments = []; S.photos = []; S.polls = []; S.songs = [];
   const sub = (name, fn) => S.evSubs.push(onSnapshot(collection(db, "events", id, name), snap => fn(snap.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.warn("listener event/" + name + ":", err.code || err.message)));
-  sub("comments", rows => { S.comments = rows.sort((a, b) => a.createdAt - b.createdAt); const b = el("wall"); if (b) { b.innerHTML = wallInner(ev); wireWall(ev); } });
+  sub("comments", rows => { S.comments = rows.sort((a, b) => a.createdAt - b.createdAt); const b = el("wall"); if (b) { b.innerHTML = wallInner(ev); wireWall(ev); } const dc = el("dayCard"); if (dc) { dc.innerHTML = dayInner(ev); wireDay(ev); } });
   sub("photos", rows => { S.photos = rows.sort((a, b) => b.createdAt - a.createdAt); const b = el("photosCard"); if (b) { b.innerHTML = photosInner(ev); wirePhotos(ev); } });
   sub("polls", rows => { S.polls = rows.sort((a, b) => a.createdAt - b.createdAt); const b = el("pollsCard"); if (b) { b.innerHTML = pollsInner(ev); wirePolls(ev); } });
   sub("songs", rows => { S.songs = rows.sort((a, b) => (Object.keys(b.votes || {}).length - Object.keys(a.votes || {}).length) || a.createdAt - b.createdAt); const b = el("playlistCard"); if (b) { b.innerHTML = playlistInner(ev); wirePlaylist(ev); } });
@@ -1047,6 +1066,7 @@ function eventInner(ev) {
     ${manage && (ev.invitedUids || []).filter(u => u !== me && !(ev.rsvps || {})[u]).length ? `<button class="btn-th ghost small" id="nudgeBtn">Nudge ${(ev.invitedUids || []).filter(u => u !== me && !(ev.rsvps || {})[u]).length} who haven't answered</button>` : ""}
   </div>
 
+  <div class="ev-card-glass" id="dayCard">${dayInner(ev)}</div>
   <div class="ev-card-glass" id="pollsCard">${pollsInner(ev)}</div>
   <div class="ev-card-glass" id="playlistCard">${playlistInner(ev)}</div>
   <div class="ev-card-glass" id="photosCard">${photosInner(ev)}</div>
@@ -1091,7 +1111,7 @@ function wallParticipants(ev) {
 }
 function lightbox(src) { const box = document.createElement("div"); box.className = "lightbox"; box.innerHTML = `<img src="${src}" alt="">`; box.onclick = () => box.remove(); document.body.appendChild(box); }
 function wallInner(ev, title = "Party wall") {
-  const all = S.comments.filter(visibleContent); const me = myUid();
+  const all = S.comments.filter(c => !c.kind && visibleContent(c)); const me = myUid();
   if (replyTo && replyTo.ctx !== ev.id) replyTo = null;
   const ids = new Set(all.map(c => c.id));
   const kids = {}; all.forEach(c => { if (c.parentId && ids.has(c.parentId)) (kids[c.parentId] = kids[c.parentId] || []).push(c); });
@@ -1170,8 +1190,108 @@ async function toggleReaction(ev, cid, k) {
   try { await updateDoc(doc(subCol(ev, "comments"), cid), { [`reactions.${k}`]: has ? arrayRemove(myUid()) : arrayUnion(myUid()) }); } catch (e) { toast(e.message); }
 }
 
+// ---------- DAY-OF CARD: weather, "on my way", calendar, bring list, carpool ----------
+// Typed entries live in the event's comments collection (kind: status | bring | ride),
+// and claims/seats are stored as reactions, so the existing rules cover them.
+const typed = (kind, filter = visibleContent) => S.comments.filter(c => c.kind === kind && filter(c));
+const daysUntil = ev => Math.round((evDate(ev) - new Date(todayStr() + "T00:00")) / 86400000);
+function dayInner(ev) {
+  const me = myUid(); const du = daysUntil(ev); const soon = du >= 0 && du <= 1;
+  const latest = {}; typed("status").forEach(c => { if (!latest[c.authorId] || latest[c.authorId].createdAt < c.createdAt) latest[c.authorId] = c; });
+  const statuses = Object.values(latest).filter(c => c.status !== "clear" && Date.now() - c.createdAt < 36e5 * 18).sort((a, b) => b.createdAt - a.createdAt);
+  const mine = latest[me] && latest[me].status !== "clear" ? latest[me].status : "";
+  const items = typed("bring"); const rides = typed("ride");
+  return `<div class="glass-head">Day of <span>${esc(fmtDay(ev))}</span></div>
+    <div id="wx" class="muted-th sm" style="margin:-4px 0 8px">${ev._wx || ""}</div>
+    ${statuses.length ? `<div class="chipwrap">${statuses.map(c => `<span class="day-chip">${c.status === "late" ? "⏰" : "🚗"} ${esc(first(c.authorName || nameOf(c.authorId)))} ${c.status === "late" ? "is running late" : "is on the way"} <i>${ago(c.createdAt)}</i></span>`).join("")}</div>` : ""}
+    <div class="btnrow" style="margin:4px 0 10px">
+      ${soon || mine ? `<button type="button" class="btn-th small ${mine === "omw" ? "accent" : ""}" data-status="omw">🚗 On my way</button><button type="button" class="btn-th small ${mine === "late" ? "accent" : ""}" data-status="late">⏰ Running late</button>` : ""}
+      <button type="button" class="btn-th small" id="addCal">📆 Add to calendar</button>
+    </div>
+    <div class="glass-sub">Bring list <button type="button" class="btn-th ghost small" id="addBring">＋ Add</button></div>
+    ${items.length ? items.map(c => { const who = ((c.reactions || {}).claim || []); return `<div class="day-row"><span style="flex:1;min-width:0"><b>${esc(c.item)}</b>${c.qty ? ` <span class="muted-th sm">× ${esc(c.qty)}</span>` : ""}${who.length ? `<div class="muted-th sm">${who.map(u => esc(first(nameOf(u)))).join(", ")} ${who.length === 1 ? "has" : "have"} it</div>` : ""}</span>
+        <button type="button" class="btn-th small ${who.includes(me) ? "accent" : ""}" data-claim="${c.id}">${who.includes(me) ? "✓ Bringing it" : "I'll bring it"}</button>${c.authorId === me || canManage(ev) ? `<button type="button" class="wall-del" data-delc="${c.id}" title="Remove">✕</button>` : ""}</div>`; }).join("") : `<p class="muted-th sm" style="margin:2px 0 8px">Nothing on the list yet. Add what's needed and people claim it.</p>`}
+    <div class="glass-sub">Carpool <button type="button" class="btn-th ghost small" id="addRide">🚗 Offer a ride</button></div>
+    ${rides.length ? rides.map(c => { const riders = ((c.reactions || {}).ride || []); const left = Math.max(0, (c.seats || 0) - riders.length); const inCar = riders.includes(me); const driver = c.authorId === me; return `<div class="day-row"><span style="flex:1;min-width:0"><b>${esc(first(c.authorName || nameOf(c.authorId)))} is driving</b>${c.from ? ` <span class="muted-th sm">from ${esc(c.from)}</span>` : ""}<div class="muted-th sm">${left} seat${left === 1 ? "" : "s"} left${riders.length ? " · " + riders.map(u => esc(first(nameOf(u)))).join(", ") : ""}${c.note ? " · " + esc(c.note) : ""}</div></span>
+        ${driver ? `<button type="button" class="wall-del" data-delc="${c.id}" title="Remove">✕</button>` : `<button type="button" class="btn-th small ${inCar ? "accent" : ""}" data-ride="${c.id}" ${!inCar && !left ? "disabled" : ""}>${inCar ? "✓ Riding" : left ? "Need a seat" : "Full"}</button>`}</div>`; }).join("") : `<p class="muted-th sm" style="margin:2px 0 4px">No rides offered yet.</p>`}`;
+}
+function wireDay(ev) {
+  const me = myUid();
+  document.querySelectorAll("[data-status]").forEach(b => b.onclick = async () => {
+    const latest = typed("status").filter(c => c.authorId === me).sort((a, b) => b.createdAt - a.createdAt)[0];
+    const status = latest && latest.status === b.dataset.status ? "clear" : b.dataset.status;
+    try { await addDoc(subCol(ev, "comments"), { kind: "status", status, authorId: me, authorName: S.profile.name, text: "", createdAt: Date.now() }); toast(status === "clear" ? "Status cleared" : status === "late" ? "Everyone can see you're running late" : "Everyone can see you're on the way"); }
+    catch (e) { toast(e.message); }
+  });
+  if (el("addCal")) el("addCal").onclick = () => openCalendarDialog(ev);
+  if (el("addBring")) el("addBring").onclick = () => dialog(`<h3>Add to the bring list</h3><label class="field"><span>What</span><input id="bItem" placeholder="Ice, cups, a dessert…" maxlength="60"></label><label class="field"><span>How many <span class="muted">(optional)</span></span><input id="bQty" placeholder="2 bags" maxlength="20"></label>`, "Add", async () => {
+    const item = el("bItem").value.trim(); if (!item) return toast("Say what's needed.");
+    try { await addDoc(subCol(ev, "comments"), { kind: "bring", item, qty: el("bQty").value.trim(), authorId: me, authorName: S.profile.name, text: "", createdAt: Date.now() }); closeDialog(); } catch (e) { toast(e.message); }
+  });
+  document.querySelectorAll("[data-claim]").forEach(b => b.onclick = async () => {
+    const c = S.comments.find(x => x.id === b.dataset.claim); const has = c && ((c.reactions || {}).claim || []).includes(me);
+    try { await updateDoc(doc(subCol(ev, "comments"), b.dataset.claim), { "reactions.claim": has ? arrayRemove(me) : arrayUnion(me) }); } catch (e) { toast(e.message); }
+  });
+  if (el("addRide")) el("addRide").onclick = () => dialog(`<h3>Offer a ride</h3><div class="two"><label class="field"><span>Seats</span><input id="rSeats" inputmode="numeric" value="3"></label><label class="field"><span>Leaving from</span><input id="rFrom" placeholder="Downtown, 6:30" maxlength="60"></label></div><label class="field"><span>Note <span class="muted">(optional)</span></span><input id="rNote" placeholder="Back by 11, no smoking" maxlength="80"></label>`, "Offer", async () => {
+    const seats = Math.max(1, Math.min(8, parseInt(el("rSeats").value, 10) || 1));
+    try { await addDoc(subCol(ev, "comments"), { kind: "ride", seats, from: el("rFrom").value.trim(), note: el("rNote").value.trim(), authorId: me, authorName: S.profile.name, text: "", createdAt: Date.now() }); closeDialog(); } catch (e) { toast(e.message); }
+  });
+  document.querySelectorAll("[data-ride]").forEach(b => b.onclick = async () => {
+    const c = S.comments.find(x => x.id === b.dataset.ride); const has = c && ((c.reactions || {}).ride || []).includes(me);
+    try { await updateDoc(doc(subCol(ev, "comments"), b.dataset.ride), { "reactions.ride": has ? arrayRemove(me) : arrayUnion(me) }); } catch (e) { toast(e.message); }
+  });
+  document.querySelectorAll("#dayCard [data-delc]").forEach(b => b.onclick = () => deleteComment(ev, b.dataset.delc));
+}
+// Weather from Open-Meteo (no key). Geocodes the location text, falling back to its last parts (city, state).
+const WX = { 0: "☀️ Clear", 1: "🌤 Mostly clear", 2: "⛅ Partly cloudy", 3: "☁️ Cloudy", 45: "🌫 Fog", 48: "🌫 Fog", 51: "🌦 Drizzle", 53: "🌦 Drizzle", 55: "🌧 Drizzle", 61: "🌧 Light rain", 63: "🌧 Rain", 65: "🌧 Heavy rain", 71: "🌨 Snow", 73: "🌨 Snow", 75: "❄️ Heavy snow", 80: "🌦 Showers", 81: "🌧 Showers", 82: "⛈ Heavy showers", 95: "⛈ Thunderstorms", 96: "⛈ Storms w/ hail", 99: "⛈ Storms w/ hail" };
+async function loadWeather(ev) {
+  const box = el("wx"); if (!box || !ev.location || /zoom|meet\.google|teams|http|online|call/i.test(ev.location)) return;
+  const du = daysUntil(ev); if (du < 0 || du > 15) return;
+  const key = "wx:" + ev.date + ":" + ev.location; let cached = null; try { cached = JSON.parse(sessionStorage.getItem(key) || "null"); } catch {}
+  const show = txt => { ev._wx = txt; const b = el("wx"); if (b) b.textContent = txt; };
+  if (cached && Date.now() - cached.at < 36e5) return show(cached.txt);
+  try {
+    const parts = ev.location.split(",").map(p => p.trim()).filter(Boolean);
+    const tries = [parts.slice(-2).join(", "), parts.slice(-1)[0], parts.slice(-3, -1).join(", ")].filter(Boolean);
+    let hit = null; for (const q of tries) { const g = await (await fetch("https://geocoding-api.open-meteo.com/v1/search?name=" + encodeURIComponent(q.replace(/\b\d{5}(-\d{4})?\b/g, "").trim()) + "&count=1&language=en")).json(); if (g.results && g.results[0]) { hit = g.results[0]; break; } }
+    if (!hit) return;
+    const f = await (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${hit.latitude}&longitude=${hit.longitude}&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&temperature_unit=fahrenheit&timezone=auto&start_date=${ev.date}&end_date=${ev.date}`)).json();
+    const d = f.daily; if (!d || !d.weather_code) return;
+    const txt = `${WX[d.weather_code[0]] || "🌡"} · ${Math.round(d.temperature_2m_max[0])}° / ${Math.round(d.temperature_2m_min[0])}°${d.precipitation_probability_max && d.precipitation_probability_max[0] != null ? " · " + d.precipitation_probability_max[0] + "% rain" : ""} · ${esc(hit.name)}`;
+    try { sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), txt })); } catch {}
+    show(txt);
+  } catch {}
+}
+// Add one event to a calendar: an .ics file (Apple, Outlook) or a Google Calendar link.
+function eventIcs(ev) {
+  const dt = (d, t) => d.replace(/-/g, "") + "T" + (t || "09:00").replace(":", "") + "00";
+  const end = () => { if (ev.endTime) return dt(ev.date, ev.endTime); const [h, m] = (ev.time || "09:00").split(":").map(Number); const e = new Date(2000, 0, 1, h + 2, m); return dt(ev.date, String(e.getHours()).padStart(2, "0") + ":" + String(e.getMinutes()).padStart(2, "0")); };
+  const escI = v => String(v || "").replace(/\\/g, "\\\\").replace(/;/g, "\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+  return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Friendly//officialfriendly.com//EN", "BEGIN:VEVENT", "UID:" + ev.id + "@officialfriendly.com", "DTSTAMP:" + new Date().toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z", "DTSTART:" + dt(ev.date, ev.time), "DTEND:" + end(), "SUMMARY:" + escI((ev.emoji ? ev.emoji + " " : "") + ev.title), ev.location ? "LOCATION:" + escI(ev.location) : "", "DESCRIPTION:" + escI((ev.notes ? ev.notes + "\n\n" : "") + "https://officialfriendly.com/#/e/" + ev.id), "END:VEVENT", "END:VCALENDAR"].filter(Boolean).join("\r\n");
+}
+function openCalendarDialog(ev) {
+  const dt = (d, t) => d.replace(/-/g, "") + "T" + (t || "09:00").replace(":", "") + "00";
+  const [h, m] = (ev.time || "09:00").split(":").map(Number); const e = new Date(2000, 0, 1, h + 2, m);
+  const g = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent((ev.emoji ? ev.emoji + " " : "") + ev.title)}&dates=${dt(ev.date, ev.time)}/${ev.endTime ? dt(ev.date, ev.endTime) : dt(ev.date, String(e.getHours()).padStart(2, "0") + ":" + String(e.getMinutes()).padStart(2, "0"))}&location=${encodeURIComponent(ev.location || "")}&details=${encodeURIComponent("https://officialfriendly.com/#/e/" + ev.id)}`;
+  dialog(`<h3>Add to calendar</h3><p class="muted" style="margin-top:-6px">Just this event. To keep every Friendly plan in your calendar automatically, use Calendar sync on your profile.</p>
+    <div class="stack"><button type="button" class="btn primary" id="calApple">📆 Apple / iPhone Calendar</button><a class="btn" href="${g}" target="_blank" rel="noopener">Google Calendar</a><button type="button" class="btn" data-go="#/profile">Calendar sync (all events)</button></div>`, null, null);
+  el("calApple").onclick = () => { const blob = new Blob([eventIcs(ev)], { type: "text/calendar;charset=utf-8" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = (ev.title || "event").replace(/[^\w]+/g, "-") + ".ics"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000); toast("Open the downloaded file to add it to your calendar."); };
+  document.querySelectorAll("#appDialog [data-go]").forEach(b => b.onclick = () => { closeDialog(); go(b.dataset.go); });
+}
+// The morning after, the host's app posts a recap on the wall once.
+async function maybePostRecap(ev) {
+  if (!canManage(ev) || ev.recapPosted || ev._recapTried || ev.kind === "meeting") return;
+  const du = daysUntil(ev); if (du >= 0 || du < -7) return; ev._recapTried = true;
+  await new Promise(r => setTimeout(r, 4000)); if (!S.route || S.route.id !== ev.id) return;
+  const going = goingCount(ev); const photos = S.photos.length; const spent = [...S.expenses.values()].filter(x => x.eventId === ev.id).reduce((t, x) => t + x.amountCents, 0);
+  const polls = S.polls.map(p => { const counts = {}; Object.values(p.votes || {}).forEach(i => counts[i] = (counts[i] || 0) + 1); const top = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0]; return top != null && p.options ? p.q + ": " + p.options[top] : ""; }).filter(Boolean);
+  const text = `🎉 That's a wrap on ${ev.title}! ${going} went${photos ? `, ${photos} photo${photos === 1 ? "" : "s"} in the album` : ""}${polls.length ? ". " + polls.join("; ") : ""}${spent ? `. ${fmt$(spent)} on the tab, settle up on Money` : ""}. Thanks for coming!`;
+  try { await addDoc(subCol(ev, "comments"), { recap: true, authorId: myUid(), authorName: S.profile.name, text, createdAt: Date.now() }); await updateDoc(doc(db, "events", ev.id), { recapPosted: true }); } catch {}
+}
+
 function wireEventPage(ev) {
   const id = ev.id;
+  wireDay(ev); loadWeather(ev); maybePostRecap(ev);
   const dup = $("[data-dup]"); if (dup) dup.onclick = () => duplicateEvent(ev);
   // Group members who joined after the event was created aren't in invitedUids
   // yet (it's snapshotted at creation); add them quietly so they can RSVP.
@@ -1382,7 +1502,7 @@ function downloadIcs(ev) {
   const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Friendly//EN", "BEGIN:VEVENT", "UID:" + ev.id + "@officialfriendly.com", "DTSTAMP:" + new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z", dts, dte, "SUMMARY:" + esc2(ev.emoji + " " + ev.title), ev.location ? "LOCATION:" + esc2(ev.location) : "", "DESCRIPTION:" + esc2((ev.notes || "") + "\nRSVP: " + location.origin + location.pathname + "#/e/" + ev.id), "END:VEVENT", "END:VCALENDAR"].filter(Boolean).join("\r\n");
   const a = document.createElement("a"); a.href = "data:text/calendar;charset=utf-8," + encodeURIComponent(ics); a.download = ev.title.replace(/[^a-z0-9]+/gi, "-") + ".ics"; a.click();
 }
-async function delEvent(ev) { if (!confirm(`Delete “${ev.title}”?`)) return; try { await deleteDoc(doc(db, "events", ev.id)); go("#/"); toast("Event deleted"); } catch (e) { toast(e.message); } }
+async function delEvent(ev) { if (isDemo()) return toast("Deleting events is off in demo mode."); if (!confirm(`Delete “${ev.title}”?`)) return; try { await deleteDoc(doc(db, "events", ev.id)); go("#/"); toast("Event deleted"); } catch (e) { toast(e.message); } }
 function editEvent(ev) {
   dialog(`<h3>Edit event</h3>
     <label class="field"><span>Title</span><input id="eTitle" value="${esc(ev.title)}"></label>
@@ -1626,13 +1746,13 @@ function profileBody() {
   return `
   <button class="link-back" data-go="#/">‹ Back</button>
   <div class="profile-hero"><button type="button" class="avatar-edit" id="photoBtn" title="Change photo">${avatar(myUid(), "xxl")}<span class="cam">📷</span></button><div><h1>${esc(p.name)}</h1><div class="muted mono">${esc(p.email || "")}</div></div></div>
-  <div class="form-card card">
+  ${isDemo() ? `<div class="card" style="padding:14px 16px"><b>Shared demo account</b><p class="muted sm" style="margin:6px 0 0">Profile changes are off in demo mode. Create your own account to set up a profile, Venmo, and phone.</p></div>` : `<div class="form-card card">
     <label class="field"><span>Name</span><input id="pName" value="${esc(p.name)}" maxlength="40"></label>
     <div class="two"><label class="field"><span>Venmo</span><input id="pVenmo" value="${esc(p.venmo || "")}" placeholder="@sam-rivera"></label>
     <label class="field"><span>Phone (Apple Cash)</span><input id="pPhone" value="${esc(p.phone || "")}" placeholder="+1 555 123 4567"></label></div>
     <p class="muted sm">Your Venmo and phone are shared only with people in your groups, so they can pay you back.</p>
     <button class="btn primary" id="saveProfile">Save profile</button>
-  </div>
+  </div>`}
   <button class="btn" id="memoriesBtn" style="margin-top:14px">📸 Memories: photos from all your events</button>
   <div class="section-head" style="margin-top:22px"><h2>Notifications</h2></div>
   <div class="card member-row"><span class="li">🔔</span><div style="flex:1;min-width:0"><b>${({ on: "On for this device", off: "Off", denied: "Blocked in your browser settings", unsupported: "Not available in this browser", native: "Managed in iPhone Settings" })[pushState()]}</b><div class="muted sm">${IOS && !STANDALONE && pushState() === "off" ? "Add Friendly to your Home Screen first (Share → Add to Home Screen)." : "Invites, comments, RSVPs, and day-of reminders."}</div></div>${pushState() === "off" ? `<button class="btn small primary" id="pushToggle">Turn on</button>` : pushState() === "on" ? `<button class="btn small" id="pushToggle">Turn off</button>` : ""}</div>
@@ -1641,7 +1761,7 @@ function profileBody() {
     <div class="btnrow"><button class="btn primary small" id="calSubscribe">Add to iPhone / Apple Calendar</button><button class="btn small" id="calCopy">Copy link for Google Calendar</button></div>
     <p class="muted sm" style="margin:8px 0 0">Google Calendar: Other calendars → ＋ → From URL → paste the link. Calendars refresh on their own schedule (usually within a few hours).</p></div>
   <button class="btn danger-ghost" id="signOut" style="margin-top:20px">Sign out</button>
-  <button class="btn ghost small" id="deleteAccount" style="margin-top:28px;opacity:.7">Delete my account</button>
+  ${isDemo() ? "" : `<button class="btn ghost small" id="deleteAccount" style="margin-top:28px;opacity:.7">Delete my account</button>`}
   ${isAdmin() ? `<div class="section-head" style="margin-top:28px"><h2>Reports <span class="muted sm">moderation</span></h2></div>
   <div class="card" id="reportsCard"><p class="muted" style="padding:14px 16px;margin:0">Loading…</p></div>` : ""}`;
 }
@@ -1666,7 +1786,7 @@ function wireReports() {
 }
 function wireProfile() {
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
-  el("saveProfile").onclick = async () => {
+  if (el("saveProfile")) el("saveProfile").onclick = async () => {
     const name = el("pName").value.trim(); if (!name) return toast("Name can't be empty.");
     const venmo = el("pVenmo").value.trim(), phone = el("pPhone").value.trim();
     try {
@@ -1679,6 +1799,7 @@ function wireProfile() {
   el("signOut").onclick = () => { stopListening(); signOut(auth); };
   const pt = el("pushToggle"); if (pt) pt.onclick = () => pushState() === "on" ? disableWebPush() : enableWebPush();
   el("photoBtn").onclick = async () => {
+    if (isDemo()) return toast("Photo changes are off in demo mode.");
     const f = await pickFile(); if (!f) return; toast("Updating photo…");
     try {
       const photo = await compressImage(f, 320, 0.82);
@@ -1699,7 +1820,7 @@ function wireProfile() {
   wireReports();
   // App Store requires in-app account deletion (guideline 5.1.1). Re-auth first:
   // Firebase refuses to delete a user without a recent sign-in.
-  el("deleteAccount").onclick = () => dialog(`
+  if (el("deleteAccount")) el("deleteAccount").onclick = () => dialog(`
     <h2>Delete your account?</h2>
     <p class="muted">This removes your profile, sign-in, and notifications, and takes you out of your groups. Events and expenses you were part of stay visible to the other people involved.</p>
     <label class="field"><span>Confirm your password</span><input type="password" id="delPw" autocomplete="current-password"></label>`,

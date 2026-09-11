@@ -432,3 +432,15 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .tl-date{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding:12px 15px 0}
 .plan-row{cursor:pointer;color:inherit} .plan-row:hover{background:var(--surface2)}
 .plan-emoji{width:40px;height:40px;font-size:20px;display:inline-flex;align-items:center;justify-content:center;border-radius:12px;background:var(--surface2);flex:none}
+/* Day-of card */
+.glass-sub{display:flex;align-items:center;justify-content:space-between;font-weight:700;font-size:14px;margin:12px 0 4px}
+.day-row{display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid rgba(255,255,255,.14)}
+.th-plain .day-row{border-top-color:var(--line)}
+.chipwrap{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}
+.day-chip{font-size:13px;font-weight:600;background:rgba(255,255,255,.16);border-radius:999px;padding:5px 11px} .day-chip i{font-style:normal;opacity:.7;font-weight:500}
+.th-plain .day-chip{background:var(--surface2)}
+
+/* Demo mode (shared sample account) */
+.demo-bar{background:#1c1b22;color:#fff;font-size:13px;line-height:1.4;text-align:center;padding:8px 14px}
+.demo-btn{width:100%;margin:12px 0 6px;background:#1c1b22;color:#fff;border:none}
+.demo-btn:disabled{opacity:.6}
