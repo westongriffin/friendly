@@ -22,6 +22,9 @@ const db = getFirestore(fb);
 // this degrades to web behavior when window.Capacitor is absent.
 const CAP = window.Capacitor || null;
 const NATIVE = !!(CAP && CAP.isNativePlatform && CAP.isNativePlatform());
+// The iOS shell already keeps the web view below the status bar and above the
+// home indicator, so the CSS safe-area padding would double up there.
+if (NATIVE) document.documentElement.classList.add("native");
 const plugin = n => (CAP && CAP.Plugins && CAP.Plugins[n]) || null;
 async function registerPush(uid) {
   const Push = plugin("PushNotifications"); if (!Push) return;

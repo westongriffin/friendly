@@ -1,7 +1,7 @@
 // Friendly service worker: cache the app shell so the installed PWA opens
 // instantly. Firebase (Firestore/Auth) traffic and fonts always hit the
 // network. Bump CACHE to invalidate old shells on deploy.
-const CACHE = "friendly-fb-v29";
+const CACHE = "friendly-fb-v30";
 const SHELL = [
   "./", "./index.html", "./styles.css", "./app.js", "./themes.js",
   "./firebase-config.js", "./manifest.webmanifest",

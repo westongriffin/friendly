@@ -418,3 +418,4 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 #toast.show{pointer-events:auto}
 .toast-act{margin-left:14px;font-weight:700;color:#FFB4A8;background:none;padding:0;text-decoration:underline}
 .reply-chip[hidden],.react-pick[hidden]{display:none}
+.native .topbar{padding-top:14px} .native .fab{bottom:22px}
