@@ -679,7 +679,7 @@ function groupPageBody(gid) {
   <div class="section-head" style="margin-top:22px"><h2>Members</h2></div>
   <div class="card">${members.map(m => `<div class="member-row">${avatar(m.uid, "lg")}
     <div style="flex:1;min-width:0"><b>${esc(m.name || "Member")}${m.uid === myUid() ? " (you)" : ""}${hostUids.includes(m.uid) ? " · host" : ""}</b>
-    ${m.venmo ? `<div class="muted sm mono">${esc(m.venmo)}</div>` : ""}</div>${host && m.uid !== g.ownerId && m.uid !== myUid() ? `<button class="btn ghost small" data-mkhost="${m.uid}|${hostUids.includes(m.uid) ? 0 : 1}">${hostUids.includes(m.uid) ? "Remove host" : "Make host"}</button>` : ""}</div>`).join("")}</div>
+    ${m.venmo ? `<div class="muted sm mono">${esc(m.venmo)}</div>` : ""}</div>${host && m.uid !== g.ownerId && m.uid !== myUid() ? `<span class="btnrow" style="gap:6px"><button class="btn ghost small" data-mkhost="${m.uid}|${hostUids.includes(m.uid) ? 0 : 1}">${hostUids.includes(m.uid) ? "Remove host" : "Make host"}</button><button class="btn ghost small" data-kick="${m.uid}" title="Remove from group">✕</button></span>` : ""}</div>`).join("")}</div>
   <div class="section-head" style="margin-top:22px"><h2>Crew tab</h2><button class="btn small" id="gExpense">＋ Expense</button></div>
   ${groupTab(g)}
   ${(g.invitedEmails || []).length ? `<div class="section-head" style="margin-top:18px"><h2>Invited</h2></div>
@@ -687,7 +687,7 @@ function groupPageBody(gid) {
   <div class="card th-plain" id="wall" style="margin-top:22px"><p class="muted">Loading…</p></div>
   <div class="card th-plain" id="pollsCard" style="margin-top:14px"><p class="muted">Loading…</p></div>
   <div class="btnrow" style="margin-top:20px">
-    ${isDemo() ? "" : owner ? `<button class="btn danger-ghost" id="delGroup">Delete group</button>` : `<button class="btn danger-ghost" id="leaveGroup">Leave group</button>`}
+    ${isDemo() ? "" : `<button class="btn danger-ghost" id="leaveGroup">Leave group</button>${owner ? `<button class="btn danger-ghost" id="delGroup">Delete group</button>` : ""}`}
   </div>`;
 }
 function wireGroupPage() {
@@ -696,6 +696,11 @@ function wireGroupPage() {
   document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
   document.querySelectorAll("[data-homefilter]").forEach(b => b.onclick = () => { homeFilter = b.dataset.homefilter; go("#/"); });
   document.querySelectorAll("[data-bplan]").forEach(b => b.onclick = () => { const x = upcomingBirthdays(400, g.id).find(y => y.uid === b.dataset.bplan); if (x) planBirthday(x); });
+  document.querySelectorAll("[data-kick]").forEach(b => b.onclick = async () => {
+    const uid = b.dataset.kick; if (!confirm(`Remove ${first(nameOf(uid))} from ${g.name}?`)) return;
+    try { await updateDoc(doc(db, "groups", g.id), { memberUids: arrayRemove(uid), hostUids: arrayRemove(uid), [`members.${uid}`]: deleteField() }); toast(first(nameOf(uid)) + " removed"); }
+    catch (e) { toast(e.message); }
+  });
   document.querySelectorAll("[data-mkhost]").forEach(b => b.onclick = async () => {
     const [uid, add] = b.dataset.mkhost.split("|");
     try { await updateDoc(doc(db, "groups", g.id), { hostUids: add === "1" ? arrayUnion(uid) : arrayRemove(uid) }); toast(add === "1" ? first(nameOf(uid)) + " is now a host" : first(nameOf(uid)) + " is no longer a host"); }
@@ -831,7 +836,11 @@ async function leaveGroup(g) {
   if (!confirm(`Leave “${g.name}”?`)) return;
   try {
     const members = { ...(g.members || {}) }; delete members[myUid()];
-    await updateDoc(doc(db, "groups", g.id), { memberUids: (g.memberUids || []).filter(u => u !== myUid()), hostUids: arrayRemove(myUid()), members });
+    const rest = (g.memberUids || []).filter(u => u !== myUid());
+    if (g.ownerId === myUid() && !rest.length) { await deleteDoc(doc(db, "groups", g.id)); go("#/groups"); toast("Group deleted"); return; }
+    const up = { memberUids: rest, hostUids: arrayRemove(myUid()), members };
+    if (g.ownerId === myUid()) up.ownerId = (g.hostUids || []).find(u => rest.includes(u)) || rest[0];
+    await updateDoc(doc(db, "groups", g.id), up);
     go("#/groups"); toast("You left " + g.name);
   } catch (e) { toast(e.message); }
 }
