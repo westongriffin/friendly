@@ -464,3 +464,5 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .meet-card .you-pill.no{background:#FBE7EC;color:var(--bad)} .meet-card .you-pill.maybe{background:var(--surface2);color:var(--ink)}
 /* Demo banner: clear the status bar in the iPhone shell */
 .demo-bar{padding-top:calc(8px + env(safe-area-inset-top))}
+/* With the demo banner on top, it carries the status-bar inset; the header doesn't need it too */
+.demo-bar + .topbar{padding-top:14px}
