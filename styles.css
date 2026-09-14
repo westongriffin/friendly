@@ -457,3 +457,10 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .ev-back{margin-top:env(safe-area-inset-top)}
 /* Reports: long content paths wrap instead of running off the card */
 .member-row .mono,.member-row .muted.sm{overflow-wrap:anywhere;min-width:0}
+/* Meetings in the events grid: one full-width row, not a tall narrow card */
+.ev-grid .meet-card{grid-column:1/-1;position:relative}
+.meet-card .muted.sm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.meet-card .you-pill{position:static;flex:none;background:var(--good-bg);color:var(--good)}
+.meet-card .you-pill.no{background:#FBE7EC;color:var(--bad)} .meet-card .you-pill.maybe{background:var(--surface2);color:var(--ink)}
+/* Demo banner: clear the status bar in the iPhone shell */
+.demo-bar{padding-top:calc(8px + env(safe-area-inset-top))}
