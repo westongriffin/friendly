@@ -377,6 +377,7 @@ function render() {
   if (r.name === "event") return renderEventPage(root, r.id);
   cleanupEvent();
   root.innerHTML = shell(routeBody(r));
+  watchTabs();
   wireShell();
 }
 
@@ -460,6 +461,15 @@ function inviteBanner() {
       <button class="btn small primary" data-accept="${g.id}">Join</button>
     </div>`; }).join("")}</div>`;
 }
+// The tab bar only needs its status-bar backdrop while it's pinned; a sentinel
+// just above it tells us when that is (CSS has no "stuck" state).
+let tabsObserver = null;
+function watchTabs() {
+  if (tabsObserver) { tabsObserver.disconnect(); tabsObserver = null; }
+  const sentinel = $(".tabs-sentinel"), tabs = $(".tabs"); if (!sentinel || !tabs || !("IntersectionObserver" in window)) return;
+  tabsObserver = new IntersectionObserver(([en]) => tabs.classList.toggle("stuck", !en.isIntersecting && en.boundingClientRect.top < 0), { threshold: 0 });
+  tabsObserver.observe(sentinel);
+}
 function shell(body) {
   const p = S.profile;
   const tab = S.route.name;
@@ -471,6 +481,7 @@ function shell(body) {
     <div class="topbar-right"><button class="bell" data-go="#/search" title="Search">🔍</button><button class="bell" data-go="#/activity" title="Activity">🔔${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ""}</button>
     <button class="me-chip" data-go="#/profile">${avatar(S.user.uid)}<span>${esc(first(p.name))}</span></button></div>
   </header>
+  <div class="tabs-sentinel"></div>
   <nav class="tabs">
     ${T("home", "Events", "#/")}
     ${T("groups", "Groups", "#/groups")}

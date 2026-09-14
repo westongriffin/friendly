@@ -468,4 +468,5 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .demo-bar + .topbar{padding-top:14px}
 /* Tab bar stays pinned while the page scrolls (clip on #app keeps sticky working) */
 .tabs{position:sticky;top:calc(env(safe-area-inset-top) + 6px);z-index:25}
-.tabs::before{content:"";position:absolute;left:-18px;right:-18px;top:calc(-6px - env(safe-area-inset-top));bottom:-8px;background:var(--bg);z-index:-1}
+.tabs-sentinel{height:1px;margin-top:-1px}
+.tabs.stuck::before{content:"";position:absolute;left:-18px;right:-18px;top:calc(-6px - env(safe-area-inset-top));bottom:-8px;background:var(--bg);z-index:-1}
