@@ -404,9 +404,9 @@ function renderAuth(root) {
             <input id="aPhone" type="tel" placeholder="+1 555 123 4567" autocomplete="tel"></label>
         </div>
         <label class="field"><span>Email</span>
-          <input id="aEmail" type="email" required placeholder="sam@example.com" autocomplete="email"></label>
+          <input id="aEmail" name="username" type="email" required placeholder="sam@example.com" autocomplete="username"></label>
         <label class="field"><span>Password</span>
-          <input id="aPass" type="password" required minlength="6" placeholder="At least 6 characters" autocomplete="${authMode === "in" ? "current-password" : "new-password"}"></label>
+          <input id="aPass" name="password" type="password" required minlength="6" placeholder="At least 6 characters" autocomplete="${authMode === "in" ? "current-password" : "new-password"}"></label>
         <button class="btn primary lg" type="submit">${authMode === "in" ? "Sign in" : "Create account"}</button>
         ${authMode === "up" ? `<p class="muted sm" style="margin:10px 0 0;text-align:center">By creating an account you agree to the <a href="./terms.html" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">Terms</a>: no harassment or objectionable content, and accounts that post it are removed.</p>` : ""}
       </form>
