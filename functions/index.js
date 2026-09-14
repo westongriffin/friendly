@@ -227,6 +227,16 @@ async function sendInviteEmails(id, ev, method, onlyUids) {
     if (!r.ok) logger.warn("mailgun " + r.status + ": " + (await r.text()).slice(0, 200)); else sent++;
     await new Promise(res => setTimeout(res, 150));
   }
+  // The host gets their own copy on creation, so the plan lands in their calendar too.
+  if (method === "REQUEST" && !onlyUids && !seq && host.email) {
+    const form = new FormData();
+    form.append("from", MAIL_FROM("Friendly")); form.append("to", host.email);
+    form.append("subject", "You're hosting: " + (kind === "event" && ev.emoji ? ev.emoji + " " : "") + ev.title);
+    form.append("html", html.replace("invited you to a " + kind, "you're hosting this " + kind).replace(/Optional: the attached invite[^<]*/, "The attached invite adds it to your calendar (skip it if you use Calendar sync in Friendly)."));
+    form.append("attachment", new Blob([ics], { type: "text/calendar; method=" + method }), "invite.ics");
+    const r = await fetch(MAILGUN_API + "/messages", { method: "POST", headers: { Authorization: "Basic " + Buffer.from("api:" + key).toString("base64") }, body: form });
+    if (!r.ok) logger.warn("mailgun host copy " + r.status);
+  }
   logger.info(`invite emails (${method}) sent: ${sent}/${targets.length} for ${id}`);
 }
 

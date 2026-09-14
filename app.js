@@ -1036,7 +1036,10 @@ async function createEvent(thenText) {
     el("createEventBtn").disabled = true; el("createEventBtn").textContent = "Creating…";
     await setDoc(doc(db, "events", id), ev);
     composeStop(); resetCompose(); localStorage.removeItem("friendlyDraft");
-    go("#/e/" + id); toast((ev.kind === "meeting" ? "Meeting" : "Event") + " created, invites are on their way");
+    go("#/e/" + id);
+    const made = (ev.kind === "meeting" ? "Meeting" : "Event") + " created, invites are on their way";
+    // Hosts with Calendar sync get it automatically; everyone else gets a one-tap add.
+    if (S.profile && S.profile.calToken) toast(made); else toast(made, "Add to my calendar", () => openCalendarDialog({ ...ev, id }));
     // "Create & text": hand off to Messages once the event page is up.
     if (thenText) setTimeout(() => textEventInvite({ id, ...ev }), 400);
   } catch (e) { toast("Couldn't create: " + e.message); el("createEventBtn").disabled = false; el("createEventBtn").textContent = "Create event & send invites"; }
@@ -1962,7 +1965,7 @@ function meetingBody(ev) {
     <button class="btn ${myR === "going" ? "primary" : ""}" data-rsvp="going">${myR === "going" ? "✓ Accepted" : "Accept"}</button>
     <button class="btn ${myR === "maybe" ? "primary" : ""}" data-rsvp="maybe">${myR === "maybe" ? "✓ Maybe" : "Maybe"}</button>
     <button class="btn ${myR === "no" ? "primary" : ""}" data-rsvp="no">${myR === "no" ? "✓ Declined" : "Decline"}</button>
-  </div>` : ev.openLink ? `<div class="btnrow" style="margin-top:14px"><button class="btn primary" data-join>Join this meeting</button></div>` : `<p class="muted" style="margin-top:12px">You're viewing this meeting but aren't on the invite list.</p>`}
+  </div>` : ev.groupId && S.groups.has(ev.groupId) ? `<p class="muted" style="margin-top:12px">Adding you to this meeting…</p>` : ev.openLink ? `<div class="btnrow" style="margin-top:14px"><button class="btn primary" data-join>I'll be there</button></div>` : `<p class="muted" style="margin-top:12px">You're viewing this meeting but aren't on the invite list.</p>`}
   <div class="btnrow" style="margin-top:10px">
     <button class="btn small" data-cal>Add to calendar</button>
     ${manage ? `<button class="btn small" data-text>Text invite</button><button class="btn small" data-nudge>Nudge non-responders</button><button class="btn small" data-edit>Edit</button><button class="btn small" data-dup>Duplicate</button><button class="btn small danger-ghost" data-del>Delete</button>` : ""}
