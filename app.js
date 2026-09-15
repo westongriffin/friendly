@@ -22,7 +22,7 @@ const db = getFirestore(fb);
 // in as it, profile edits and destructive actions are turned off so the sample
 // group stays intact for the next visitor. ?demo=1 in the URL opens it directly.
 const DEMO = { email: "reviewer@officialfriendly.com", password: "FriendlyReview2026!" };
-const isDemo = () => !!(S.user && S.user.email === DEMO.email);
+const isDemo = () => false;   // demo restrictions retired: App Review needs every feature, including account deletion, to work on the demo account
 let demoAutoTried = false;
 async function demoSignIn() {
   try { await signInWithEmailAndPassword(auth, DEMO.email, DEMO.password); }
@@ -409,7 +409,7 @@ function renderAuth(root) {
         <label class="field"><span>Password</span>
           <input id="aPass" name="password" type="password" required minlength="6" placeholder="At least 6 characters" autocomplete="${authMode === "in" ? "current-password" : "new-password"}"></label>
         <button class="btn primary lg" type="submit">${authMode === "in" ? "Sign in" : "Create account"}</button>
-        ${authMode === "up" ? `<p class="muted sm" style="margin:10px 0 0;text-align:center">By creating an account you agree to the <a href="./terms.html" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">Terms</a>: no harassment or objectionable content, and accounts that post it are removed.</p>` : ""}
+        ${authMode === "up" ? `<label class="cbox" style="margin:12px 0 0;align-items:flex-start"><input type="checkbox" id="aTerms" style="margin-top:3px"><span class="sm">I agree to the <a href="./terms.html" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">Terms of Use</a> and <a href="./privacy.html" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">Privacy Policy</a>. No harassment or objectionable content; accounts that post it are removed.</span></label>` : ""}
       </form>
       ${authMode === "in" ? `<p class="auth-foot"><a id="magicLink">Email me a sign-in link instead</a></p>` : ""}
       <p class="auth-foot">${authMode === "in" ? "New here?" : "Already have an account?"}
@@ -429,6 +429,7 @@ function renderAuth(root) {
     try {
       if (authMode === "up") {
         if (!name) return toast("Add your name so friends recognize you.");
+        if (!el("aTerms") || !el("aTerms").checked) return toast("Please agree to the Terms of Use to create an account.");
         const cred = await createUserWithEmailAndPassword(auth, email, pass);
         await setDoc(doc(db, "users", cred.user.uid), { name, email: email.toLowerCase(), venmo, phone, phoneE164: toE164(phone), createdAt: Date.now() });
       } else {
@@ -1210,7 +1211,7 @@ function wallInner(ev, title = "Party wall") {
       ${c.gif ? `<img class="wall-img wall-gif" src="${esc(c.gif)}" alt="GIF">` : ""}${c.img ? `<img class="wall-img" src="${c.img}" alt="">` : ""}${c.text ? `<div class="wall-text">${renderText(c.text, c.mentions)}</div>` : ""}
       <div class="react-row">${rx.map(([k, us]) => `<button type="button" class="react ${us.includes(me) ? "on" : ""}" data-react="${c.id}|${k}">${rshow(k)} ${us.length}</button>`).join("")}<button type="button" class="react add" data-reactpick="${c.id}" title="React">＋</button><button type="button" class="react add" data-reply="${topId || c.id}|${esc(who)}">↩ Reply</button></div>
       ${(kids[c.id] || []).map(r => msg(r, c.id)).join("")}</div>
-      ${c.authorId === me || isAdmin() ? `<button class="wall-del" data-delc="${c.id}" title="Delete">✕</button>` : `<button class="wall-del" data-report="comment|${c.id}" title="Report">⚑</button>`}</div>`;
+      ${c.authorId === me || isAdmin() ? `<button class="wall-del" data-delc="${c.id}" title="Delete">✕</button>` : `<button class="wall-del" data-more="comment|${c.id}" title="Report or block">⋯</button>`}</div>`;
   };
   return `<div class="glass-head">${esc(title)} <span>${all.length}</span></div>
     <div class="wall-list scroll-cap" id="wallList">${tops.length ? tops.map(c => msg(c, "")).join("") : `<p class="muted-th">Be the first to say something 👋</p>`}</div>
@@ -1224,7 +1225,7 @@ function wireWall(ev) {
   const bindReacts = () => document.querySelectorAll("[data-react]").forEach(b => b.onclick = () => { const [cid, k] = b.dataset.react.split("|"); toggleReaction(ev, cid, k); });
   bindReacts();
   document.querySelectorAll("[data-delc]").forEach(b => b.onclick = () => deleteComment(ev, b.dataset.delc));
-  document.querySelectorAll("[data-report]").forEach(b => b.onclick = () => { const [kind, id] = b.dataset.report.split("|"); reportContent(ev, kind, id); });
+  document.querySelectorAll("[data-more]").forEach(b => b.onclick = () => { const [kind, id] = b.dataset.more.split("|"); moderationMenu(ev, kind, id); });
   // "＋" opens a row of common emoji plus a tiny box that accepts any emoji from the keyboard.
   document.querySelectorAll("[data-reactpick]").forEach(b => b.onclick = () => {
     const cid = b.dataset.reactpick; const box = document.createElement("span"); box.className = "react-pick";
@@ -1490,7 +1491,7 @@ function addSongDialog(ev) {
 // ----- Photo wall -----
 function photosInner(ev) {
   const ps = S.photos.filter(visibleContent);
-  const tiles = ps.map(p => `<div class="photo-tile"><img src="${p.img}" data-photo="${p.id}" alt="" loading="lazy">${p.addedBy === myUid() || isAdmin() ? `<button class="photo-act" data-delphoto="${p.id}" title="Remove">✕</button>` : `<button class="photo-act" data-report="photo|${p.id}" title="Report">⚑</button>`}</div>`).join("");
+  const tiles = ps.map(p => `<div class="photo-tile"><img src="${p.img}" data-photo="${p.id}" alt="" loading="lazy">${p.addedBy === myUid() || isAdmin() ? `<button class="photo-act" data-delphoto="${p.id}" title="Remove">✕</button>` : `<button class="photo-act" data-more="photo|${p.id}" title="Report">⚑</button>`}</div>`).join("");
   return `<div class="glass-head">Photos <span>${ps.length}</span></div><div class="photo-grid"><button class="photo-add" id="addPhoto">＋</button>${tiles || ""}</div>${ps.length ? "" : `<p class="muted-th" style="margin-top:8px">Share pics from the night.</p>`}`;
 }
 function wirePhotos(ev) {
@@ -1501,7 +1502,7 @@ function wirePhotos(ev) {
   };
   document.querySelectorAll("[data-photo]").forEach(im => im.onclick = () => lightbox(im.src));
   document.querySelectorAll("[data-delphoto]").forEach(b => b.onclick = () => { if (confirm("Remove this photo?")) deleteDoc(doc(subCol(ev, "photos"), b.dataset.delphoto)).catch(e => toast(e.message)); });
-  document.querySelectorAll("#photosCard [data-report]").forEach(b => b.onclick = () => { const [kind, id] = b.dataset.report.split("|"); reportContent(ev, kind, id); });
+  document.querySelectorAll("#photosCard [data-more]").forEach(b => b.onclick = () => { const [kind, id] = b.dataset.more.split("|"); moderationMenu(ev, kind, id); });
 }
 async function setRsvp(ev, status) {
   const me = myUid();
@@ -1540,6 +1541,27 @@ const isAdmin = () => adminUids.includes(myUid());
 const REPORT_REASONS = ["Spam", "Harassment or bullying", "Hate or violence", "Nudity or sexual content", "Something else"];
 // Hide anything I reported and everything from people I blocked.
 const visibleContent = item => !(S.profile.blockedUids || []).includes(item.authorId || item.addedBy) && !(S.profile.hiddenIds || []).includes(item.id);
+// "⋯" on someone else's message or photo: report it, or block the person outright.
+function moderationMenu(ev, kind, id) {
+  const item = (kind === "photo" ? S.photos : S.comments).find(x => x.id === id); if (!item) return;
+  const who = item.authorId || item.addedBy; const name = first(nameOf(who));
+  dialog(`<h3>${kind === "photo" ? "This photo" : "This message"}</h3>
+    <div class="stack"><button type="button" class="btn" id="modReport">⚑ Report ${kind === "photo" ? "this photo" : "this message"}</button>
+    <button type="button" class="btn danger-ghost" id="modBlock">🚫 Block ${esc(name)}</button></div>
+    <p class="muted sm" style="margin:10px 0 0">Reports go to the Friendly team within 24 hours. Blocking hides everything ${esc(name)} posts from you, instantly, and tells us.</p>`, null, null);
+  el("modReport").onclick = () => { closeDialog(); reportContent(ev, kind, id); };
+  el("modBlock").onclick = () => blockUser(who, ev, kind, id);
+}
+async function blockUser(who, ev, kind, id) {
+  const name = first(nameOf(who));
+  if (!confirm(`Block ${name}? You won't see anything they post, and we'll be notified.`)) return;
+  try {
+    const path = ev ? doc(subCol(ev, kind === "photo" ? "photos" : "comments"), id).path : "";
+    await addDoc(collection(db, "reports"), { reporterId: myUid(), reporterName: S.profile.name, targetUid: who, kind: kind || "user", path, snippet: "(user blocked)", reason: "Blocked user", status: "open", createdAt: Date.now() });
+    await updateDoc(doc(db, "users", myUid()), { blockedUids: arrayUnion(who) });
+    closeDialog(); toast(name + " is blocked");
+  } catch (e) { toast(e.message); }
+}
 function reportContent(ev, kind, id) {
   const item = (kind === "photo" ? S.photos : S.comments).find(x => x.id === id); if (!item) return;
   const who = item.authorId || item.addedBy;
@@ -1849,7 +1871,10 @@ function profileBody() {
     <div class="btnrow"><button class="btn primary small" id="calSubscribe">Add to iPhone / Apple Calendar</button><button class="btn small" id="calCopy">Copy link for Google Calendar</button></div>
     <p class="muted sm" style="margin:8px 0 0">Google Calendar: Other calendars → ＋ → From URL → paste the link. Calendars refresh on their own schedule (usually within a few hours).</p></div>
   <button class="btn danger-ghost" id="signOut" style="margin-top:20px">Sign out</button>
-  ${isDemo() ? "" : `<button class="btn ghost small" id="deleteAccount" style="margin-top:28px;opacity:.7">Delete my account</button>`}
+  <div class="section-head" style="margin-top:22px"><h2>Blocked people</h2></div>
+  <div class="card">${(p.blockedUids || []).length ? p.blockedUids.map(u => `<div class="member-row">${avatar(u, "lg")}<div style="flex:1;min-width:0"><b>${esc(nameOf(u))}</b><div class="muted sm">You don't see anything they post.</div></div><button class="btn small" data-unblock="${u}">Unblock</button></div>`).join("") : `<p class="muted sm" style="padding:14px 16px;margin:0">Nobody blocked. Use ⋯ on a message or photo to report it or block the person.</p>`}</div>
+  <div class="section-head" style="margin-top:22px"><h2>Delete account</h2></div>
+  <div class="card" style="padding:14px 16px"><p class="muted sm" style="margin:0 0 10px">Deleting removes your profile and sign-in permanently. Groups you own pass to another member.</p><button class="btn danger-ghost" id="deleteAccount">Delete my account</button></div>
   ${isAdmin() ? `<div class="section-head" style="margin-top:28px"><h2>Reports <span class="muted sm">moderation</span></h2></div>
   <div class="card" id="reportsCard"><p class="muted" style="padding:14px 16px;margin:0">Loading…</p></div>` : ""}`;
 }
@@ -1909,6 +1934,7 @@ function wireProfile() {
   wireReports();
   // App Store requires in-app account deletion (guideline 5.1.1). Re-auth first:
   // Firebase refuses to delete a user without a recent sign-in.
+  document.querySelectorAll("[data-unblock]").forEach(b => b.onclick = async () => { try { await updateDoc(doc(db, "users", myUid()), { blockedUids: arrayRemove(b.dataset.unblock) }); toast("Unblocked"); } catch (e) { toast(e.message); } });
   if (el("deleteAccount")) el("deleteAccount").onclick = () => dialog(`
     <h2>Delete your account?</h2>
     <p class="muted">This removes your profile, sign-in, and notifications, and takes you out of your groups. Events and expenses you were part of stay visible to the other people involved.</p>
