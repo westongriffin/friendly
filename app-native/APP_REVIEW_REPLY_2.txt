@@ -1,0 +1,11 @@
+Thank you for the review. Both capabilities are in the app; the demo account previously had a "demo mode" that hid the Delete option, which is why it wasn't found. That restriction is removed and everything below works on the demo account and on any new account. The app loads its screens from our servers, so the reviewed build (1.0, build 1) already shows all of this. A screen recording from a physical iPhone is attached.
+
+ACCOUNT DELETION (Guideline 5.1.1(v)): tap your avatar in the top-right corner → the profile page → "Delete account" section at the bottom → "Delete my account" → enter your password → confirm. The account, its sign-in, and its profile are deleted immediately and permanently, in the app, with no website or customer service step. Groups the person owned pass to another member.
+
+TERMS BEFORE REGISTRATION (Guideline 1.2): the Create account form requires ticking "I agree to the Terms of Use and Privacy Policy" (links open the full documents) before an account can be created. The Terms prohibit harassment and objectionable content and state that offending accounts are removed.
+
+FLAGGING CONTENT (Guideline 1.2): every message and photo posted by someone else has a "⋯" button. Tap it → "Report this message/photo" → choose a reason → Report. The item is hidden from the reporter immediately and the report is sent to our moderation queue, where we review within 24 hours and can remove the content.
+
+BLOCKING USERS (Guideline 1.2): the same "⋯" button offers "Block <name>". Blocking hides everything that person has posted or will post from the blocker instantly, and notifies us (a report is filed for our team). Blocked people are listed on the profile page with an Unblock option.
+
+DEMO LOGIN: reviewer@officialfriendly.com / FriendlyReview2026! (a member of the group "Weekend Crew"; the second sample member Alex Kim has posted messages you can report or block).
