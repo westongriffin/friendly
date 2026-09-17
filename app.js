@@ -222,6 +222,7 @@ function attachPlaces(input) {
 }
 
 // ---------- state ----------
+const BOOT_AT = Date.now(), SPLASH_MIN = 2000; let splashTimer = null;
 const S = {
   user: null, profile: null, ready: false,
   groups: new Map(), pendingInvites: new Map(), events: new Map(),
@@ -370,7 +371,11 @@ function avatar(uid, cls = "") { const info = S.contacts.get(uid) || {}; const n
 // ---------- render root ----------
 function render() {
   const root = el("app");
-  if (!S.ready) { root.innerHTML = `<div class="splash"><div class="brand splash-brand">Friend<span class="tilt">l</span>y</div><div class="splash-row"><span class="splash-av" style="background:#F08A4B">SR</span><span class="splash-av" style="background:#3B82F6">AK</span><span class="splash-av" style="background:#25A56A">JP</span><span class="splash-av" style="background:#C84B7A">MT</span></div><p>Getting everyone here…</p></div>`; return; }
+  // The loading screen stays up for at least two seconds so it never flashes.
+  if (!S.ready || Date.now() - BOOT_AT < SPLASH_MIN) {
+    if (S.ready && !splashTimer) splashTimer = setTimeout(() => { splashTimer = null; render(); }, SPLASH_MIN - (Date.now() - BOOT_AT) + 20);
+    if (root.querySelector(".splash")) return;
+    root.innerHTML = `<div class="splash"><div class="brand splash-brand">Friend<span class="tilt">l</span>y</div><div class="splash-row"><span class="splash-av" style="background:#F08A4B">SR</span><span class="splash-av" style="background:#3B82F6">AK</span><span class="splash-av" style="background:#25A56A">JP</span><span class="splash-av" style="background:#C84B7A">MT</span></div><p>Getting everyone here…</p></div>`; return; }
   if (!S.user) { if (S.route.name === "event") { renderPreview(root, S.route.id); return; } if (S.route.name === "join") { try { localStorage.setItem("friendlyJoin", S.route.id); } catch {} } renderAuth(root); return; }
   if (!S.profile) { root.innerHTML = `<div class="splash"><div class="brand splash-brand">Friend<span class="tilt">l</span>y</div><div class="splash-row"><span class="splash-av" style="background:#F08A4B">SR</span><span class="splash-av" style="background:#3B82F6">AK</span><span class="splash-av" style="background:#25A56A">JP</span><span class="splash-av" style="background:#C84B7A">MT</span></div><p>Setting up your profile…</p></div>`; return; }
   const r = S.route;
