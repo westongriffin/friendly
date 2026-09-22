@@ -13,3 +13,8 @@ app-native/ios/App/CapApp-SPM/.build/
 *.xcuserstate
 app-native/ios/DerivedData/
 .claude/
+
+# Local video exports never belong in the site
+*.mp4
+*.m4v
+*.mov

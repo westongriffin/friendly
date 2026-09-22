@@ -190,6 +190,7 @@ function birthdayCard() {
   const b = list.find(x => !dismissed.includes(x.uid + ":" + x.date)); if (!b) return "";
   return `<div class="card notif-card"><span class="notif-ico">🎂</span><div style="flex:1"><b>${esc(first(b.name))}'s birthday is ${b.days === 0 ? "today" : b.days === 1 ? "tomorrow" : "in " + b.days + " days"}</b><div class="muted sm">${esc(fmtDay({ date: b.date }))}. A month out is the sweet spot to plan something.</div></div><span class="btnrow" style="gap:6px"><button class="btn primary small" data-bplan="${b.uid}">Plan something</button><button class="btn ghost small" data-bdismiss="${b.uid}:${b.date}">Later</button></span></div>`;
 }
+const APP_STORE_URL = "https://apps.apple.com/app/id6810875052";
 function smsLink(numbers, body) { const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?"; return "sms:" + numbers.map(n => n.replace(/[^+\d]/g, "")).join(",") + sep + "body=" + encodeURIComponent(body); }
 // Address autocomplete via Google Places (New). Active only once `mapsKey` is
 // set in firebase-config.js; without it the field stays a plain text box.
@@ -794,8 +795,8 @@ function openInviteDialog(g) {
       try {
         if (Object.keys(updates).length) await updateDoc(doc(db, "groups", g.id), updates);
         closeDialog(); toast(direct.length ? direct.length + " added" + (texted.length ? ", texting the rest" : "") : texted.length ? "Opening Messages…" : "Invites sent");
-        const numbers = picked.map(p => p.e164).filter(Boolean);
-        if (numbers.length) setTimeout(() => { location.href = smsLink(numbers, groupInviteText(g)); }, 400);
+        if (texted.length === 1) setTimeout(() => { location.href = smsLink([texted[0].e164], groupInviteText(g)); }, 400);
+        else if (texted.length > 1) setTimeout(() => openTextInviteDialog(texted, groupInviteText(g)), 400);
       } catch (e) { toast(e.message); }
     });
   renderPicked();
@@ -821,7 +822,18 @@ function openInviteDialog(g) {
   }
 }
 // The text an invitee gets. It comes from the inviter's own number via Messages.
-const groupInviteText = g => `Hey! I added you to our group "${g.name}" on Friendly, our crew's home base for plans, invites, photos, and settling up. Join here: https://officialfriendly.com/#/join/${g.id} (free). If you're new, sign up with this phone number and you're in.`;
+const groupInviteText = g => `Hey! I added you to our group "${g.name}" on Friendly, our crew's home base for plans, invites, photos, and settling up. Get the app: ${APP_STORE_URL} (free). Sign up with this phone number and you're in.`;
+// iOS sometimes narrows a multi-recipient sms: link to an existing thread with just the
+// first person, so with more than one new guest we let the host pick: one group text, or
+// tap through each person.
+function openTextInviteDialog(texted, text) {
+  dialog(`<h3>Text your invite</h3>
+    <p class="muted" style="margin-top:-6px">Group texts don't always land the same way on iPhone. Send it as one message, or text each person one at a time.</p>
+    <button type="button" class="btn primary" id="textAll" style="width:100%;margin-bottom:12px">💬 Text all ${texted.length} at once</button>
+    <div class="stack">${texted.map((p, i) => `<div class="member-row"><div style="flex:1;min-width:0"><b>${esc(p.name)}</b><div class="muted sm mono">${esc(p.e164)}</div></div><button type="button" class="btn small" data-textone="${i}">Text</button></div>`).join("")}</div>`, null, null);
+  el("textAll").onclick = () => { location.href = smsLink(texted.map(p => p.e164), text); };
+  document.querySelectorAll("[data-textone]").forEach(b => b.onclick = () => { const p = texted[+b.dataset.textone]; location.href = smsLink([p.e164], text); });
+}
 async function acceptInvite(gid, btn) {
   const g = S.pendingInvites.get(gid) || (S.pendingInvitesPhone && S.pendingInvitesPhone.get(gid)); if (!g) return;
   if (btn) { btn.disabled = true; btn.textContent = "Joining…"; }
