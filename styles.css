@@ -449,9 +449,6 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .th-plain .day-chip{background:var(--surface2)}
 
 /* Demo mode (shared sample account) */
-.demo-bar{background:#1c1b22;color:#fff;font-size:13px;line-height:1.4;text-align:center;padding:8px 14px}
-.demo-btn{width:100%;margin:12px 0 6px;background:#1c1b22;color:#fff;border:none}
-.demo-btn:disabled{opacity:.6}
 .inv-hit .muted.sm{overflow-wrap:anywhere}
 /* Event page: keep the back button below the status bar in the iPhone shell */
 .ev-back{margin-top:env(safe-area-inset-top)}
@@ -463,9 +460,6 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .meet-card .you-pill{position:static;flex:none;background:var(--good-bg);color:var(--good)}
 .meet-card .you-pill.no{background:#FBE7EC;color:var(--bad)} .meet-card .you-pill.maybe{background:var(--surface2);color:var(--ink)}
 /* Demo banner: clear the status bar in the iPhone shell */
-.demo-bar{padding-top:calc(8px + env(safe-area-inset-top))}
-/* With the demo banner on top, it carries the status-bar inset; the header doesn't need it too */
-.demo-bar + .topbar{padding-top:14px}
 /* Tab bar stays pinned while the page scrolls (clip on #app keeps sticky working) */
 .tabs{position:sticky;top:calc(env(safe-area-inset-top) + 6px);z-index:25}
 .tabs-sentinel{height:1px;margin-top:-1px}

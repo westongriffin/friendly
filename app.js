@@ -18,16 +18,7 @@ const fb = initializeApp(firebaseConfig);
 const auth = getAuth(fb);
 const db = getFirestore(fb);
 
-// Shared demo account (the App Review login): one tap, no sign-up. While signed
-// in as it, profile edits and destructive actions are turned off so the sample
-// group stays intact for the next visitor. ?demo=1 in the URL opens it directly.
-const DEMO = { email: "reviewer@officialfriendly.com", password: "FriendlyReview2026!" };
-const isDemo = () => false;   // demo restrictions retired: App Review needs every feature, including account deletion, to work on the demo account
-let demoAutoTried = false;
-async function demoSignIn() {
-  try { await signInWithEmailAndPassword(auth, DEMO.email, DEMO.password); }
-  catch (e) { S.ready = true; render(); toast("Couldn't open the demo here. Open officialfriendly.com in a new tab and tap Try the demo."); }
-}
+
 
 // Native bridge (present only inside the Capacitor iOS/Android app). All of
 // this degrades to web behavior when window.Capacitor is absent.
@@ -262,7 +253,6 @@ onAuthStateChanged(auth, async u => {
   S.user = u;
   if (!u) {
     S.profile = null;
-    if (!demoAutoTried && new URLSearchParams(location.search).get("demo")) { demoAutoTried = true; demoSignIn(); return; }
     S.ready = true; render(); return;
   }
   const uref = doc(db, "users", u.uid);
@@ -400,7 +390,6 @@ function renderAuth(root) {
         <button id="segIn" class="${authMode === "in" ? "on" : ""}">Sign in</button>
         <button id="segUp" class="${authMode === "up" ? "on" : ""}">Create account</button>
       </div>
-      <button type="button" class="btn lg demo-btn" id="demoBtn">Try the demo · no account needed</button>
       <form id="authForm" class="stack">
         <label class="field ${authMode === "in" ? "hidden" : ""}" id="nameField"><span>Your name</span>
           <input id="aName" maxlength="40" placeholder="Sam Rivera" autocomplete="name"></label>
@@ -425,7 +414,6 @@ function renderAuth(root) {
   startParticles(el("authbg"), "confetti");
   el("segIn").onclick = () => { authMode = "in"; renderAuth(root); };
   el("segUp").onclick = () => { authMode = "up"; renderAuth(root); };
-  el("demoBtn").onclick = () => { el("demoBtn").disabled = true; el("demoBtn").textContent = "Opening the demo…"; demoSignIn(); };
   el("authSwap").onclick = () => { authMode = authMode === "in" ? "up" : "in"; renderAuth(root); };
   if (el("magicLink")) el("magicLink").onclick = sendMagicLink;
   el("authForm").onsubmit = async e => {
@@ -482,7 +470,6 @@ function shell(body) {
   const tab = S.route.name;
   const T = (name, label, path) => `<button class="tab ${tab === name ? "on" : ""}" data-go="${path}">${label}</button>`;
   return `
-  ${isDemo() ? `<div class="demo-bar">Demo mode: this is the shared sample account. Explore freely; what you add is visible to other visitors.</div>` : ""}
   <header class="topbar">
     <div class="brand" data-go="#/">Friend<span class="tilt">l</span>y</div>
     <div class="topbar-right"><button class="bell" data-go="#/search" title="Search">🔍</button><button class="bell" data-go="#/activity" title="Activity">🔔${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ""}</button>
@@ -705,7 +692,7 @@ function groupPageBody(gid) {
   <div class="card th-plain" id="wall" style="margin-top:22px"><p class="muted">Loading…</p></div>
   <div class="card th-plain" id="pollsCard" style="margin-top:14px"><p class="muted">Loading…</p></div>
   <div class="btnrow" style="margin-top:20px">
-    ${isDemo() ? "" : `<button class="btn danger-ghost" id="leaveGroup">Leave group</button>${owner ? `<button class="btn danger-ghost" id="delGroup">Delete group</button>` : ""}`}
+    <button class="btn danger-ghost" id="leaveGroup">Leave group</button>${owner ? `<button class="btn danger-ghost" id="delGroup">Delete group</button>` : ""}
   </div>`;
 }
 function wireGroupPage() {
@@ -859,9 +846,8 @@ async function acceptInvite(gid, btn) {
 }
 function inviteText(g) { return `Hey! I set up "${g.name}" on Friendly. It's where our group plans hangouts, RSVPs, and splits costs. Grab it at https://officialfriendly.com, sign up with your email, and send me that email so I can add you 🎉`; }
 async function uninvite(g, email) { try { await updateDoc(doc(db, "groups", g.id), { invitedEmails: (g.invitedEmails || []).filter(e => e !== email) }); } catch (e) { toast(e.message); } }
-async function deleteGroup(g) { if (isDemo()) return toast("Deleting groups is off in demo mode."); if (!confirm(`Delete “${g.name}”? Its events stay, but the group is removed.`)) return; try { await deleteDoc(doc(db, "groups", g.id)); go("#/groups"); toast("Group deleted"); } catch (e) { toast(e.message); } }
+async function deleteGroup(g) { if (!confirm(`Delete “${g.name}”? Its events stay, but the group is removed.`)) return; try { await deleteDoc(doc(db, "groups", g.id)); go("#/groups"); toast("Group deleted"); } catch (e) { toast(e.message); } }
 async function leaveGroup(g) {
-  if (isDemo()) return toast("Leaving groups is off in demo mode.");
   if (!confirm(`Leave “${g.name}”?`)) return;
   try {
     const members = { ...(g.members || {}) }; delete members[myUid()];
@@ -1628,7 +1614,7 @@ function downloadIcs(ev) {
   const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Friendly//EN", "BEGIN:VEVENT", "UID:" + ev.id + "@officialfriendly.com", "DTSTAMP:" + new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z", dts, dte, "SUMMARY:" + esc2(ev.emoji + " " + ev.title), ev.location ? "LOCATION:" + esc2(ev.location) : "", "DESCRIPTION:" + esc2((ev.notes || "") + "\nRSVP: " + location.origin + location.pathname + "#/e/" + ev.id), "END:VEVENT", "END:VCALENDAR"].filter(Boolean).join("\r\n");
   const a = document.createElement("a"); a.href = "data:text/calendar;charset=utf-8," + encodeURIComponent(ics); a.download = ev.title.replace(/[^a-z0-9]+/gi, "-") + ".ics"; a.click();
 }
-async function delEvent(ev) { if (isDemo()) return toast("Deleting events is off in demo mode."); if (!confirm(`Delete “${ev.title}”?`)) return; try { await deleteDoc(doc(db, "events", ev.id)); go("#/"); toast("Event deleted"); } catch (e) { toast(e.message); } }
+async function delEvent(ev) { if (!confirm(`Delete “${ev.title}”?`)) return; try { await deleteDoc(doc(db, "events", ev.id)); go("#/"); toast("Event deleted"); } catch (e) { toast(e.message); } }
 function editEvent(ev) {
   dialog(`<h3>Edit event</h3>
     <label class="field"><span>Title</span><input id="eTitle" value="${esc(ev.title)}"></label>
@@ -1872,14 +1858,14 @@ function profileBody() {
   return `
   <button class="link-back" data-go="#/">‹ Back</button>
   <div class="profile-hero"><button type="button" class="avatar-edit" id="photoBtn" title="Change photo">${avatar(myUid(), "xxl")}<span class="cam">📷</span></button><div><h1>${esc(p.name)}</h1><div class="muted mono">${esc(p.email || "")}</div></div></div>
-  ${isDemo() ? `<div class="card" style="padding:14px 16px"><b>Shared demo account</b><p class="muted sm" style="margin:6px 0 0">Profile changes are off in demo mode. Create your own account to set up a profile, Venmo, and phone.</p></div>` : `<div class="form-card card">
+  <div class="form-card card">
     <label class="field"><span>Name</span><input id="pName" value="${esc(p.name)}" maxlength="40"></label>
     <div class="two"><label class="field"><span>Venmo</span><input id="pVenmo" value="${esc(p.venmo || "")}" placeholder="@sam-rivera"></label>
     <label class="field"><span>Phone (Apple Cash)</span><input id="pPhone" value="${esc(p.phone || "")}" placeholder="+1 555 123 4567"></label></div>
     <label class="field"><span>Birthday <span class="muted">(so your groups can plan something)</span></span><input id="pBday" type="date" value="${esc(p.birthday || "")}"></label>
     <p class="muted sm">Your Venmo and phone are shared only with people in your groups, so they can pay you back.</p>
     <button class="btn primary" id="saveProfile">Save profile</button>
-  </div>`}
+  </div>
   <button class="btn" id="memoriesBtn" style="margin-top:14px">📸 Memories: photos from all your events</button>
   <div class="section-head" style="margin-top:22px"><h2>Notifications</h2></div>
   <div class="card member-row"><span class="li">🔔</span><div style="flex:1;min-width:0"><b>${({ on: "On for this device", off: "Off", denied: "Blocked in your browser settings", unsupported: "Not available in this browser", native: "Managed in iPhone Settings" })[pushState()]}</b><div class="muted sm">${IOS && !STANDALONE && pushState() === "off" ? "Add Friendly to your Home Screen first (Share → Add to Home Screen)." : "Invites, comments, RSVPs, and day-of reminders."}</div></div>${pushState() === "off" ? `<button class="btn small primary" id="pushToggle">Turn on</button>` : pushState() === "on" ? `<button class="btn small" id="pushToggle">Turn off</button>` : ""}</div>
@@ -1930,7 +1916,6 @@ function wireProfile() {
   el("signOut").onclick = () => { stopListening(); signOut(auth); };
   const pt = el("pushToggle"); if (pt) pt.onclick = () => pushState() === "on" ? disableWebPush() : enableWebPush();
   el("photoBtn").onclick = async () => {
-    if (isDemo()) return toast("Photo changes are off in demo mode.");
     const f = await pickFile(); if (!f) return; toast("Updating photo…");
     try {
       const photo = await compressImage(f, 320, 0.82);
