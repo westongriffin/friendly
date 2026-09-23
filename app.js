@@ -318,7 +318,26 @@ function subscribeAll(u) {
   // Every core listener gets a named error handler, so a denied query shows
   // in the console as what it is instead of an "uncaught" mystery.
   const on = (name, q, cb) => onSnapshot(q, cb, err => console.warn("listener " + name + ":", err.code || err.message));
-  add(on("profile", doc(db, "users", u.uid), d => { S.profile = d.data(); rebuildContacts(); S.ready = true; render(); }));
+  // Groups that invited this phone number. S.profile (and its phoneE164) isn't known
+  // until this very listener's first snapshot arrives, so the invitesPhone query has to
+  // be (re)started reactively from here rather than read once when subscribeAll runs --
+  // reading it once always saw an empty phoneE164 and silently never subscribed, which
+  // meant a freshly texted invitee could sign up and never see their group invite.
+  S.pendingInvitesPhone = new Map();
+  let invitesPhoneUnsub = null, invitesPhoneKey = null;
+  add(on("profile", doc(db, "users", u.uid), d => {
+    S.profile = d.data(); rebuildContacts(); S.ready = true;
+    const pk = (S.profile && S.profile.phoneE164) || "";
+    if (pk && pk !== invitesPhoneKey) {
+      invitesPhoneKey = pk;
+      if (invitesPhoneUnsub) invitesPhoneUnsub();
+      invitesPhoneUnsub = on("invitesPhone", query(collection(db, "groups"), where("invitedPhones", "array-contains", pk)), snap => {
+        S.pendingInvitesPhone = new Map(snap.docs.map(d2 => ({ id: d2.id, ...d2.data() })).filter(g => !(g.memberUids || []).includes(u.uid)).map(g => [g.id, g])); render();
+      });
+      add(invitesPhoneUnsub);
+    }
+    render();
+  }));
 
   add(on("groups", query(collection(db, "groups"), where("memberUids", "array-contains", u.uid)), snap => {
     S.groups = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }]));
@@ -331,14 +350,6 @@ function subscribeAll(u) {
     // Join looked up an undefined key: the "Join does nothing" bug.)
     S.pendingInvites = new Map(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(g => !(g.memberUids || []).includes(u.uid)).map(g => [g.id, g]));
     render();
-  }));
-
-  // Groups that invited this phone number. Until the matching rule is live the query is
-  // denied and simply logs; once deployed, texted invitees see the Join banner too.
-  S.pendingInvitesPhone = new Map();
-  const phoneKey = (S.profile && S.profile.phoneE164) || "";
-  if (phoneKey) add(on("invitesPhone", query(collection(db, "groups"), where("invitedPhones", "array-contains", phoneKey)), snap => {
-    S.pendingInvitesPhone = new Map(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(g => !(g.memberUids || []).includes(u.uid)).map(g => [g.id, g])); render();
   }));
 
   add(on("expenses", query(collection(db, "expenses"), where("involved", "array-contains", u.uid)), snap => {
@@ -734,7 +745,7 @@ function groupsBody() {
   return `
   <div class="section-head"><h2>Your groups</h2><button class="btn primary small" id="newGroupBtn">＋ New group</button></div>
   <p class="muted" style="margin:0 0 14px">Groups are your circles. Invite people once, then plan with them again and again. Everything in a group stays private to its members.</p>
-  <div class="stack">${groups.length ? groups.map(groupRow).join("") : emptyState("👥", "No groups yet", "Create a group and invite friends by email.")}</div>`;
+  <div class="stack">${groups.length ? groups.map(groupRow).join("") : emptyState("👥", "No groups yet", "Create a group and invite friends by phone.")}</div>`;
 }
 function groupRow(g) {
   const n = (g.memberUids || []).length;
@@ -778,8 +789,9 @@ function groupPageBody(gid) {
     ${m.venmo ? `<div class="muted sm mono">${esc(m.venmo)}</div>` : ""}</div>${host && m.uid !== g.ownerId && m.uid !== myUid() ? `<span class="btnrow" style="gap:6px"><button class="btn ghost small" data-mkhost="${m.uid}|${hostUids.includes(m.uid) ? 0 : 1}">${hostUids.includes(m.uid) ? "Remove host" : "Make host"}</button><button class="btn ghost small" data-kick="${m.uid}" title="Remove from group">✕</button></span>` : ""}</div>`).join("")}</div>
   <div class="section-head" style="margin-top:22px"><h2>Crew tab</h2><button class="btn small" id="gExpense">＋ Expense</button></div>
   ${groupTab(g)}
-  ${(g.invitedEmails || []).length ? `<div class="section-head" style="margin-top:18px"><h2>Invited</h2></div>
-    <div class="card">${g.invitedEmails.map(e => `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">✉︎</span><div style="flex:1"><b class="mono sm">${esc(e)}</b><div class="muted sm">Hasn't joined yet</div></div>${host ? `<button class="btn ghost small" data-uninvite="${esc(e)}">✕</button>` : ""}</div>`).join("")}</div>` : ""}
+  ${((g.invitedEmails || []).length || (g.invitedPhones || []).length) ? `<div class="section-head" style="margin-top:18px"><h2>Invited</h2></div>
+    <div class="card">${(g.invitedEmails || []).map(e => `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">✉︎</span><div style="flex:1"><b class="mono sm">${esc(e)}</b><div class="muted sm">Hasn't joined yet</div></div>${host ? `<button class="btn ghost small" data-uninvite="${esc(e)}">✕</button>` : ""}</div>`).join("")}
+    ${(g.invitedPhones || []).map(p => { const nm = (g.invitedPhoneNames || {})[p]; return `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">💬</span><div style="flex:1;min-width:0"><b>${esc(nm || p)}</b><div class="muted sm">${nm ? esc(p) + " · " : ""}Hasn't joined yet</div></div>${host ? `<span class="btnrow" style="gap:6px"><button class="btn ghost small" data-textinvite="${esc(p)}">Text</button><button class="btn ghost small" data-uninvitephone="${esc(p)}">✕</button></span>` : ""}</div>`; }).join("")}</div>` : ""}
   <div class="card th-plain" id="wall" style="margin-top:22px"><p class="muted">Loading…</p></div>
   <div class="card th-plain" id="pollsCard" style="margin-top:14px"><p class="muted">Loading…</p></div>
   <div class="btnrow" style="margin-top:20px">
@@ -808,6 +820,8 @@ function wireGroupPage() {
   if (el("delGroup")) el("delGroup").onclick = () => deleteGroup(g);
   if (el("leaveGroup")) el("leaveGroup").onclick = () => leaveGroup(g);
   document.querySelectorAll("[data-uninvite]").forEach(b => b.onclick = () => uninvite(g, b.dataset.uninvite));
+  document.querySelectorAll("[data-uninvitephone]").forEach(b => b.onclick = () => uninvitePhone(g, b.dataset.uninvitephone));
+  document.querySelectorAll("[data-textinvite]").forEach(b => b.onclick = () => { location.href = smsLink([b.dataset.textinvite], groupInviteText(g)); });
   // Live group chat + polls, using the event-page components against groups/{id}/…
   // (S.evSubs is cleared on every render, so these never leak across pages.)
   const pseudo = { id: g.id, _col: ["groups", g.id], _manage: true, title: g.name };
@@ -869,6 +883,7 @@ function openInviteDialog(g) {
       const updates = {};
       if (direct.length) { updates.memberUids = [...new Set([...(g.memberUids || []), ...direct.map(p => p.uid)])]; for (const p of direct) { const info = S.contacts.get(p.uid) || {}; updates[`members.${p.uid}`] = { name: info.name || p.name || "Friend", venmo: info.venmo || "", phone: info.phone || "", photo: info.photo || "", birthday: info.birthday || "" }; } }
       const addP = texted.map(p => p.e164).filter(n => !(g.invitedPhones || []).includes(n)); if (addP.length) updates.invitedPhones = [...(g.invitedPhones || []), ...addP];
+      for (const p of texted) if (p.e164) updates[`invitedPhoneNames.${p.e164}`] = p.name || "";
       try {
         if (Object.keys(updates).length) await updateDoc(doc(db, "groups", g.id), updates);
         closeDialog(); toast(direct.length ? direct.length + " added" + (texted.length ? ", texting the rest" : "") : texted.length ? "Opening Messages…" : "Invites sent");
@@ -905,9 +920,10 @@ const groupInviteText = g => `Hey! I added you to our group "${g.name}" on Frien
 // tap through each person.
 function openTextInviteDialog(texted, text) {
   dialog(`<h3>Text your invite</h3>
-    <p class="muted" style="margin-top:-6px">Group texts don't always land the same way on iPhone. Send it as one message, or text each person one at a time.</p>
+    <p class="muted" style="margin-top:-6px">iPhone's Messages app doesn't always open a new group text with everyone — if it lands in an existing conversation with just one person, check the "To:" field and add the rest before sending. Texting people one at a time is more reliable.</p>
     <button type="button" class="btn primary" id="textAll" style="width:100%;margin-bottom:12px">💬 Text all ${texted.length} at once</button>
-    <div class="stack">${texted.map((p, i) => `<div class="member-row"><div style="flex:1;min-width:0"><b>${esc(p.name)}</b><div class="muted sm mono">${esc(p.e164)}</div></div><button type="button" class="btn small" data-textone="${i}">Text</button></div>`).join("")}</div>`, null, null);
+    <div class="stack">${texted.map((p, i) => `<div class="member-row"><div style="flex:1;min-width:0"><b>${esc(p.name)}</b><div class="muted sm mono">${esc(p.e164)}</div></div><button type="button" class="btn small" data-textone="${i}">Text</button></div>`).join("")}</div>
+    <p class="muted sm" style="margin:10px 0 0">You can always come back and text stragglers from the group's "Invited" list.</p>`, null, null);
   el("textAll").onclick = () => { location.href = smsLink(texted.map(p => p.e164), text); };
   document.querySelectorAll("[data-textone]").forEach(b => b.onclick = () => { const p = texted[+b.dataset.textone]; location.href = smsLink([p.e164], text); });
 }
@@ -919,6 +935,7 @@ async function acceptInvite(gid, btn) {
       memberUids: [...(g.memberUids || []), myUid()],
       invitedEmails: (g.invitedEmails || []).filter(e => e !== (S.user.email || "").toLowerCase()),
       invitedPhones: (g.invitedPhones || []).filter(p => p !== (S.profile.phoneE164 || "-")),
+      [`invitedPhoneNames.${S.profile.phoneE164 || "-"}`]: deleteField(),
       [`members.${myUid()}`]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "", photo: S.profile.photo || "", birthday: S.profile.birthday || "" }
     });
     toast("You're in! Welcome to " + g.name);
@@ -934,8 +951,8 @@ async function acceptInvite(gid, btn) {
     toast(msg);
   }
 }
-function inviteText(g) { return `Hey! I set up "${g.name}" on Friendly. It's where our group plans hangouts, RSVPs, and splits costs. Grab it at https://officialfriendly.com, sign up with your email, and send me that email so I can add you 🎉`; }
 async function uninvite(g, email) { try { await updateDoc(doc(db, "groups", g.id), { invitedEmails: (g.invitedEmails || []).filter(e => e !== email) }); } catch (e) { toast(e.message); } }
+async function uninvitePhone(g, e164) { try { await updateDoc(doc(db, "groups", g.id), { invitedPhones: (g.invitedPhones || []).filter(p => p !== e164), [`invitedPhoneNames.${e164}`]: deleteField() }); } catch (e) { toast(e.message); } }
 async function deleteGroup(g) { if (!confirm(`Delete “${g.name}”? Its events stay, but the group is removed.`)) return; try { await deleteDoc(doc(db, "groups", g.id)); go("#/groups"); toast("Group deleted"); } catch (e) { toast(e.message); } }
 async function leaveGroup(g) {
   if (!confirm(`Leave “${g.name}”?`)) return;

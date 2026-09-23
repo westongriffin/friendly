@@ -21,7 +21,7 @@
 // Load the app at the version named in version.json, fetched fresh every open.
 // The page itself may sit in a 10-minute CDN or WebView cache; the versioned
 // asset URLs never do, so this keeps every device on the newest build.
-(function(){var v="53";try{var x=new XMLHttpRequest();x.open("GET","./version.json?t="+Date.now(),false);x.send();var j=JSON.parse(x.responseText);if(j&&j.v)v=String(j.v);}catch(e){}
+(function(){var v="54";try{var x=new XMLHttpRequest();x.open("GET","./version.json?t="+Date.now(),false);x.send();var j=JSON.parse(x.responseText);if(j&&j.v)v=String(j.v);}catch(e){}
 document.write('<link rel="stylesheet" href="./styles.css?v='+v+'"><script type="module" src="./app.js?v='+v+'"><\/script>');})();
 </script>
 </head>
