@@ -1338,12 +1338,17 @@ function eventInner(ev) {
   </div>
   <div class="ev-foot">Friendly</div>`;
 }
+// Shown to any invited guest once there are questions, whether or not they've
+// RSVP'd yet -- Going/Maybe now save these answers and require them all filled
+// in before the RSVP itself goes through (see attemptRsvp). Already-RSVP'd
+// guests can still come back and edit their answers with "Save answers".
 function questionsBlock(ev, me, myR) {
-  if (!(ev.questions || []).length || !(myR === "going" || myR === "maybe" || myR === "waitlist")) return "";
+  if (!(ev.questions || []).length) return "";
+  const answered = myR === "going" || myR === "maybe" || myR === "waitlist" || myR === "pending";
   const mine = (ev.answers || {})[me] || {};
-  return `<div class="q-answers"><div class="glass-head sm">A few questions from the host</div>
+  return `<div class="q-answers" id="qAnswers"><div class="glass-head sm">${answered ? "A few questions from the host" : "Answer before you RSVP"}</div>
     ${ev.questions.map(q => `<label class="qa"><span>${esc(q.q)}</span><input data-answer="${q.id}" value="${esc(mine[q.id] || "")}" placeholder="Your answer"></label>`).join("")}
-    <button class="btn-th ghost small" id="saveAnswers">Save answers</button></div>`;
+    ${answered ? `<button class="btn-th ghost small" id="saveAnswers">Save answers</button>` : ""}</div>`;
 }
 // Reactions: the five original short names plus any emoji from the keyboard,
 // stored as "e<hex>_<hex>" so the key is a plain field name (Firestore field
@@ -1559,7 +1564,7 @@ function wireEventPage(ev) {
     updateDoc(doc(db, "events", id), { invitedUids: arrayUnion(myUid()), [`names.${myUid()}`]: S.profile.name }).catch(e => console.warn("auto-join failed:", e.message));
   }
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
-  document.querySelectorAll("[data-rsvp]").forEach(b => b.onclick = () => setRsvp(ev, b.dataset.rsvp));
+  document.querySelectorAll("[data-rsvp]").forEach(b => b.onclick = () => attemptRsvp(ev, b.dataset.rsvp));
   document.querySelectorAll("[data-plus]").forEach(b => b.onclick = () => setPlus(ev, Number(b.dataset.plus)));
   document.querySelectorAll("[data-hype]").forEach(b => b.onclick = () => setHype(ev, b.dataset.hype));
   document.querySelectorAll("[data-approve]").forEach(b => b.onclick = () => hostSetRsvp(ev, b.dataset.approve, "going"));
@@ -1683,6 +1688,24 @@ async function setRsvp(ev, status) {
   try { await updateDoc(doc(db, "events", ev.id), { [`rsvps.${me}`]: status }); }
   catch (e) { toast("Couldn't RSVP: " + e.message); }
 }
+// Going/Maybe with unanswered host questions saves the answers first (as their
+// own write -- the security rules don't allow rsvps and answers to change in the
+// same update) and only then sets the RSVP; declining skips the questions.
+async function attemptRsvp(ev, status) {
+  if (status !== "no" && (ev.questions || []).length) {
+    const inputs = [...document.querySelectorAll("[data-answer]")];
+    const empty = inputs.filter(i => !i.value.trim());
+    if (empty.length) {
+      toast("Answer the host's questions first.");
+      empty[0].focus(); const box = el("qAnswers"); if (box) box.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    const a = {}; inputs.forEach(i => a[i.dataset.answer] = i.value.trim());
+    try { await updateDoc(doc(db, "events", ev.id), { [`answers.${myUid()}`]: a }); }
+    catch (e) { return toast(e.message); }
+  }
+  setRsvp(ev, status);
+}
 async function setPlus(ev, delta) {
   const me = myUid(); const cur = ((ev.plusOnes || {})[me]) || 0; const n = Math.max(0, cur + delta);
   try { await updateDoc(doc(db, "events", ev.id), { [`plusOnes.${me}`]: n }); } catch (e) { toast(e.message); }
@@ -1793,10 +1816,12 @@ function openEventInviteDialog(ev) {
 async function uninviteEventPhone(ev, e164) { try { await updateDoc(doc(db, "events", ev.id), { invitedPhones: (ev.invitedPhones || []).filter(p => p !== e164), [`invitedPhoneNames.${e164}`]: deleteField() }); } catch (e) { toast(e.message); } }
 async function joinViaLink(ev, btn) {
   if (btn) { btn.disabled = true; btn.textContent = "Joining…"; }
-  // Security rules only let a self-joiner touch invitedUids/names (see selfJoin()
-  // in firestore.rules) -- clearing their own entry from the host's invitedPhones
-  // tracking list needs the host to do it (the "✕" on the "Invited" list).
-  try { await updateDoc(doc(db, "events", ev.id), { invitedUids: arrayUnion(myUid()), [`names.${myUid()}`]: S.profile.name }); toast("You're on the list! RSVP below."); }
+  const patch = { invitedUids: arrayUnion(myUid()), [`names.${myUid()}`]: S.profile.name };
+  // selfJoin() in firestore.rules lets a joiner also clear their own entry from
+  // the host's invitedPhones tracking list, but only their own -- never anyone else's.
+  const myPhone = S.profile.phoneE164;
+  if (myPhone && (ev.invitedPhones || []).includes(myPhone)) { patch.invitedPhones = arrayRemove(myPhone); patch[`invitedPhoneNames.${myPhone}`] = deleteField(); }
+  try { await updateDoc(doc(db, "events", ev.id), patch); toast("You're on the list! RSVP below."); }
   catch (e) { if (btn) { btn.disabled = false; btn.textContent = "Join this event"; } toast("Couldn't join: " + e.message); }
 }
 function shareEvent(ev) {

@@ -124,14 +124,29 @@ service cloud.firestore {
 
       // "Anyone with the link can join": the event id is the unguessable secret.
       function openLink() { return signedIn() && 'openLink' in resource.data && resource.data.openLink == true; }
+      // The joiner's own phoneE164, for clearing their entry from the host's
+      // invitedPhones tracking list on the way in (see selfJoin below).
+      function myPhone() {
+        return exists(/databases/$(database)/documents/users/$(uid()))
+          ? get(/databases/$(database)/documents/users/$(uid())).data.get('phoneE164', '-')
+          : '-';
+      }
       function selfJoin() {
         let keys = request.resource.data.diff(resource.data).affectedKeys();
-        return keys.hasOnly(['invitedUids', 'names'])
+        return keys.hasOnly(['invitedUids', 'names', 'invitedPhones', 'invitedPhoneNames'])
           && request.resource.data.invitedUids.hasAll(resource.data.invitedUids)
           && request.resource.data.invitedUids.size() == resource.data.invitedUids.size() + 1
           && uid() in request.resource.data.invitedUids
           // may add only their own name
-          && (!('names' in keys) || request.resource.data.names.diff(resource.data.get('names', {})).affectedKeys().hasOnly([uid()]));
+          && (!('names' in keys) || request.resource.data.names.diff(resource.data.get('names', {})).affectedKeys().hasOnly([uid()]))
+          // may remove only their own number from the pending-invite tracking list, never anyone else's
+          && (!('invitedPhones' in keys) || (
+               resource.data.get('invitedPhones', []).hasAll(request.resource.data.get('invitedPhones', []))
+               && resource.data.get('invitedPhones', []).size() == request.resource.data.get('invitedPhones', []).size() + 1
+               && myPhone() in resource.data.get('invitedPhones', [])
+               && !(myPhone() in request.resource.data.get('invitedPhones', []))
+             ))
+          && (!('invitedPhoneNames' in keys) || request.resource.data.get('invitedPhoneNames', {}).diff(resource.data.get('invitedPhoneNames', {})).affectedKeys().hasOnly([myPhone()]));
       }
 
       allow read: if isHost() || isInvited() || viaGroup() || openLink();
