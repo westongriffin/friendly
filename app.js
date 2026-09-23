@@ -111,6 +111,46 @@ function parseAmount(v) { const n = Number(String(v).replace(/[$,\s]/g, "")); re
 // photo-wall shots at ~900px. Keeps the app on the free plan (no Storage).
 function loadImg(src) { return new Promise((res, rej) => { const i = new Image(); i.crossOrigin = "anonymous"; i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
 function blobToURL(b) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(b); }); }
+// Square crop for a profile photo: drag to pan, slider to zoom, "cover" fit
+// so there's never empty space around the frame. Resolves to a data URL, or
+// null if the person cancels.
+function openCropDialog(file) {
+  return new Promise(async resolve => {
+    let img; try { img = await loadImg(await blobToURL(file)); } catch { toast("Couldn't read that image."); return resolve(null); }
+    const SIZE = 280;
+    dialog(`<h3>Crop your photo</h3>
+      <p class="muted" style="margin-top:-6px">Drag to reposition, use the slider to zoom.</p>
+      <div class="crop-wrap"><canvas id="cropCanvas" width="${SIZE}" height="${SIZE}"></canvas></div>
+      <input type="range" id="cropZoom" min="100" max="320" value="100" style="width:100%;margin-top:10px">`,
+      "Use photo", () => { const out = finish(); closeDialog(); resolve(out); });
+    let cancelled = true;
+    const cancelBtn = el("dlgCancel"); if (cancelBtn) cancelBtn.addEventListener("click", () => { if (cancelled) resolve(null); }, { once: true });
+    const canvas = el("cropCanvas"); const ctx = canvas.getContext("2d");
+    const cover = Math.max(SIZE / img.width, SIZE / img.height);
+    let scale = cover; const minScale = cover;
+    let ox = (SIZE - img.width * scale) / 2, oy = (SIZE - img.height * scale) / 2;
+    const clamp = () => { const w = img.width * scale, h = img.height * scale; ox = Math.min(0, Math.max(SIZE - w, ox)); oy = Math.min(0, Math.max(SIZE - h, oy)); };
+    const draw = () => { ctx.clearRect(0, 0, SIZE, SIZE); ctx.drawImage(img, ox, oy, img.width * scale, img.height * scale); };
+    clamp(); draw();
+    let dragging = false, lastX = 0, lastY = 0;
+    canvas.style.touchAction = "none";
+    canvas.onpointerdown = e => { dragging = true; lastX = e.offsetX; lastY = e.offsetY; canvas.setPointerCapture(e.pointerId); };
+    canvas.onpointermove = e => { if (!dragging) return; ox += e.offsetX - lastX; oy += e.offsetY - lastY; lastX = e.offsetX; lastY = e.offsetY; clamp(); draw(); };
+    canvas.onpointerup = () => { dragging = false; }; canvas.onpointerleave = () => { dragging = false; };
+    el("cropZoom").oninput = e => {
+      const cx = SIZE / 2, cy = SIZE / 2, imgX = (cx - ox) / scale, imgY = (cy - oy) / scale;
+      scale = minScale * (e.target.value / 100);
+      ox = cx - imgX * scale; oy = cy - imgY * scale; clamp(); draw();
+    };
+    function finish() {
+      cancelled = false;
+      const out = document.createElement("canvas"); out.width = 600; out.height = 600;
+      const k = 600 / SIZE;
+      out.getContext("2d").drawImage(img, ox * k, oy * k, img.width * scale * k, img.height * scale * k);
+      return out.toDataURL("image/jpeg", 0.92);
+    }
+  });
+}
 async function compressImage(src, maxDim = 1400, quality = 0.8, maxBytes = 720000) {
   const img = await loadImg(typeof src === "string" ? src : await blobToURL(src));
   let w = img.width, h = img.height;
@@ -697,6 +737,7 @@ function groupPageBody(gid) {
 }
 function wireGroupPage() {
   const g = S.groups.get(S.route.id); if (!g) { document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go)); return; }
+  markPeeked("#/g/" + g.id);
   if (el("inviteBtn")) el("inviteBtn").onclick = () => openInviteDialog(g);
   document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
   document.querySelectorAll("[data-homefilter]").forEach(b => b.onclick = () => { homeFilter = b.dataset.homefilter; go("#/"); });
@@ -731,36 +772,37 @@ function openGroupDialog() {
   dialog(`<h3>New group</h3>
     <label class="field"><span>Group name</span><input id="gName" maxlength="40" placeholder="Roommates, Book Club, The Crew"></label>
     <label class="field"><span>Icon</span><div class="emoji-pick" id="gEmoji">${emojis.map((e, i) => `<button type="button" class="${i === 0 ? "on" : ""}" data-e="${e}">${e}</button>`).join("")}</div></label>
-    <label class="field"><span>Invite by email (optional, comma-separated)</span><input id="gInvite" placeholder="alex@example.com, jo@example.com"></label>`,
+    <p class="muted sm" style="margin:0">You'll add people by phone number right after, from the group page.</p>`,
     "Create group", async () => {
       const name = el("gName").value.trim(); if (!name) return toast("Give the group a name.");
       const emoji = $("#gEmoji .on")?.dataset.e || "🎉";
-      const emails = el("gInvite").value.split(",").map(s => s.trim().toLowerCase()).filter(x => x.includes("@"));
       const memberUids = [myUid()];
       // dedup: block a group whose member set already exists among mine
       const mySet = JSON.stringify([...memberUids].sort());
-      for (const g of S.groups.values()) if (JSON.stringify([...(g.memberUids || [])].sort()) === mySet && !(g.invitedEmails || []).length && !emails.length)
+      for (const g of S.groups.values()) if (JSON.stringify([...(g.memberUids || [])].sort()) === mySet && !(g.invitedPhones || []).length)
         return toast("You already have a group with exactly these members.");
       const id = newId();
       await setDoc(doc(db, "groups", id), {
         name, emoji, color: "#FFE0B2", ownerId: myUid(), memberUids,
         members: { [myUid()]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "" } },
-        invitedEmails: emails, createdAt: Date.now()
+        createdAt: Date.now()
       });
-      closeDialog(); go("#/g/" + id); toast("Group created" + (emails.length ? ", invites sent" : ""));
+      closeDialog(); go("#/g/" + id); toast("Group created");
     });
   document.querySelectorAll("#gEmoji button").forEach(b => b.onclick = () => { document.querySelectorAll("#gEmoji button").forEach(x => x.classList.remove("on")); b.classList.add("on"); });
 }
 function openInviteDialog(g) {
-  const me = myUid(); const picked = [];   // { name, phone, e164, emails[], uid|null }
+  const me = myUid(); const picked = [];   // { name, phone, e164, uid|null }
   const nativeContacts = plugin("Contacts");
   const webPicker = !nativeContacts && ("contacts" in navigator && "ContactsManager" in window);
   const known = [...S.contacts.entries()].filter(([u]) => u !== me && !(g.memberUids || []).includes(u));
   const byPhone = e164 => e164 && known.find(([, i]) => toE164(i.phone) === e164);
-  const addPicked = (name, phone, emails) => {
-    const e164 = toE164(phone); if (!e164 && !(emails || []).length) return toast("That contact has no phone number or email.");
-    if (picked.some(p => (e164 && p.e164 === e164))) return;
-    const hit = byPhone(e164); picked.push({ name: name || (hit ? hit[1].name : "") || e164, phone, e164, emails: emails || [], uid: hit ? hit[0] : null }); renderPicked();
+  // Phone number only -- that's the one thing every contact reliably has, and
+  // the one thing the join and auto-add mechanisms actually match on.
+  const addPicked = (name, phone) => {
+    const e164 = toE164(phone); if (!e164) return toast(`Couldn't read a phone number for ${name || "that contact"}.`);
+    if (picked.some(p => p.e164 === e164)) return;
+    const hit = byPhone(e164); picked.push({ name: name || (hit ? hit[1].name : "") || e164, phone, e164, uid: hit ? hit[0] : null }); renderPicked();
   };
   const renderPicked = () => { const box = el("invChosen"); if (box) box.innerHTML = picked.map((p, i) => `<div class="inv-hit"><div style="flex:1;min-width:0"><b>${esc(p.name)}</b><div class="muted sm">${p.uid ? "On Friendly · added right away" : "Gets a text with the join link"}${p.e164 ? " · " + esc(p.e164) : ""}</div></div><button type="button" class="btn ghost small" data-unpick="${i}">✕</button></div>`).join("") || `<p class="muted sm">Nobody picked yet.</p>`; box.querySelectorAll("[data-unpick]").forEach(b => b.onclick = () => { picked.splice(+b.dataset.unpick, 1); renderPicked(); }); };
   dialog(`<h3>Add people to ${esc(g.name)}</h3>
@@ -769,15 +811,12 @@ function openInviteDialog(g) {
     <div class="two" style="margin-top:10px"><label class="field"><span>Name</span><input id="invName" placeholder="Jo Park" maxlength="40" autocomplete="off"></label><label class="field"><span>Phone</span><input id="invPhone" inputmode="tel" placeholder="+1 555 123 4567" autocomplete="off"></label></div>
     <button type="button" class="btn small" id="invAddManual">＋ Add to the list</button>
     <div class="inv-chosen" id="invChosen" style="margin-top:12px"></div>
-    ${known.length ? `<details class="adv" style="margin-top:12px"><summary>Friends from your other groups</summary><input class="inv-search" id="invSearch" placeholder="Search by name…" autocomplete="off" style="margin-top:8px"><div class="inv-results" id="invResults"></div></details>` : ""}
-    <details class="adv"><summary>Invite by email instead</summary><label class="field" style="margin-top:8px"><span>Emails, comma separated</span><input id="invEmails" placeholder="alex@example.com, jo@example.com"></label><p class="muted sm">They connect automatically when they sign in with that address.</p></details>`,
+    ${known.length ? `<details class="adv" style="margin-top:12px"><summary>Friends from your other groups</summary><input class="inv-search" id="invSearch" placeholder="Search by name…" autocomplete="off" style="margin-top:8px"><div class="inv-results" id="invResults"></div></details>` : ""}`,
     "Add & send", async () => {
-      const emails = [...new Set([...(el("invEmails") ? el("invEmails").value.split(",") : []), ...picked.flatMap(p => p.uid ? [] : p.emails)].map(x => String(x).trim().toLowerCase()).filter(x => x.includes("@")))];
-      const direct = picked.filter(p => p.uid); const texted = picked.filter(p => !p.uid && p.e164);
-      if (!direct.length && !texted.length && !emails.length) return toast("Pick someone first.");
+      const direct = picked.filter(p => p.uid); const texted = picked.filter(p => !p.uid);
+      if (!direct.length && !texted.length) return toast("Pick someone first.");
       const updates = {};
       if (direct.length) { updates.memberUids = [...new Set([...(g.memberUids || []), ...direct.map(p => p.uid)])]; for (const p of direct) { const info = S.contacts.get(p.uid) || {}; updates[`members.${p.uid}`] = { name: info.name || p.name || "Friend", venmo: info.venmo || "", phone: info.phone || "", photo: info.photo || "", birthday: info.birthday || "" }; } }
-      const addE = emails.filter(e => !(g.invitedEmails || []).includes(e)); if (addE.length) updates.invitedEmails = [...(g.invitedEmails || []), ...addE];
       const addP = texted.map(p => p.e164).filter(n => !(g.invitedPhones || []).includes(n)); if (addP.length) updates.invitedPhones = [...(g.invitedPhones || []), ...addP];
       try {
         if (Object.keys(updates).length) await updateDoc(doc(db, "groups", g.id), updates);
@@ -787,7 +826,7 @@ function openInviteDialog(g) {
       } catch (e) { toast(e.message); }
     });
   renderPicked();
-  if (el("invAddManual")) el("invAddManual").onclick = () => { addPicked(el("invName").value.trim(), el("invPhone").value.trim(), []); el("invName").value = ""; el("invPhone").value = ""; };
+  if (el("invAddManual")) el("invAddManual").onclick = () => { addPicked(el("invName").value.trim(), el("invPhone").value.trim()); el("invName").value = ""; el("invPhone").value = ""; };
   if (el("invPick")) el("invPick").onclick = async () => {
     try {
       if (nativeContacts) {
@@ -795,17 +834,17 @@ function openInviteDialog(g) {
         const c = (r && (r.contact || (r.contacts && r.contacts[0]))) || (r && r.name ? r : null);
         if (!c) return toast("No contact came back from the picker.");
         const nm = c.name ? (c.name.display || [c.name.given, c.name.family].filter(Boolean).join(" ")) : (c.displayName || "");
-        const phone = ((c.phones || c.phoneNumbers || [])[0] || {}).number || ((c.phones || [])[0] && typeof c.phones[0] === "string" ? c.phones[0] : "");
-        const emails = (c.emails || []).map(e => (e && e.address) || (typeof e === "string" ? e : "")).filter(Boolean);
-        addPicked(nm, phone, emails);
+        const rawPhones = (c.phones || c.phoneNumbers || []).map(p => (p && p.number) || (typeof p === "string" ? p : "")).filter(Boolean);
+        const phone = rawPhones.find(p => toE164(p)) || rawPhones[0] || "";
+        addPicked(nm, phone);
       }
-      else { const rows = await navigator.contacts.select(["name", "tel", "email"], { multiple: true }); rows.forEach(r => addPicked((r.name || [])[0] || "", (r.tel || [])[0] || "", r.email || [])); }
+      else { const rows = await navigator.contacts.select(["name", "tel"], { multiple: true }); rows.forEach(r => addPicked((r.name || [])[0] || "", (r.tel || [])[0] || "")); }
     } catch (e) { const m = String((e && e.message) || e || ""); toast(/cancel/i.test(m) || !m ? "Contact picking was cancelled." : "Couldn't read that contact: " + m); }
   };
   if (el("invSearch")) {
     const renderResults = q => { const ql = q.toLowerCase(); const hits = known.filter(([u, i]) => !picked.some(p => p.uid === u) && (i.name || "").toLowerCase().includes(ql)); el("invResults").innerHTML = hits.slice(0, 8).map(([u, i]) => `<div class="inv-hit" data-choose="${u}">${avatar(u)}<div><b>${esc(i.name || "Friend")}</b></div><span class="add">Add</span></div>`).join("") || `<p class="muted sm">No one else to add.</p>`; };
     renderResults(""); el("invSearch").oninput = e => renderResults(e.target.value);
-    el("invResults").onclick = e => { const h = e.target.closest("[data-choose]"); if (h) { const i = S.contacts.get(h.dataset.choose) || {}; picked.push({ name: i.name || "Friend", phone: i.phone || "", e164: toE164(i.phone), emails: [], uid: h.dataset.choose }); renderPicked(); renderResults(el("invSearch").value); } };
+    el("invResults").onclick = e => { const h = e.target.closest("[data-choose]"); if (h) { const i = S.contacts.get(h.dataset.choose) || {}; picked.push({ name: i.name || "Friend", phone: i.phone || "", e164: toE164(i.phone), uid: h.dataset.choose }); renderPicked(); renderResults(el("invSearch").value); } };
   }
 }
 // The text an invitee gets. It comes from the inviter's own number via Messages.
@@ -1382,6 +1421,7 @@ async function maybePostRecap(ev) {
 
 function wireEventPage(ev) {
   const id = ev.id;
+  markPeeked("#/e/" + ev.id);
   wireDay(ev); loadWeather(ev); maybePostRecap(ev);
   const dup = $("[data-dup]"); if (dup) dup.onclick = () => duplicateEvent(ev);
   // Group members who joined after the event was created aren't in invitedUids
@@ -1868,7 +1908,7 @@ function profileBody() {
   </div>
   <button class="btn" id="memoriesBtn" style="margin-top:14px">📸 Memories: photos from all your events</button>
   <div class="section-head" style="margin-top:22px"><h2>Notifications</h2></div>
-  <div class="card member-row"><span class="li">🔔</span><div style="flex:1;min-width:0"><b>${({ on: "On for this device", off: "Off", denied: "Blocked in your browser settings", unsupported: "Not available in this browser", native: "Managed in iPhone Settings" })[pushState()]}</b><div class="muted sm">${IOS && !STANDALONE && pushState() === "off" ? "Add Friendly to your Home Screen first (Share → Add to Home Screen)." : "Invites, comments, RSVPs, and day-of reminders."}</div></div>${pushState() === "off" ? `<button class="btn small primary" id="pushToggle">Turn on</button>` : pushState() === "on" ? `<button class="btn small" id="pushToggle">Turn off</button>` : ""}</div>
+  <div class="card member-row"${NATIVE ? ' id="notifRow" style="cursor:pointer"' : ""}><span class="li">🔔</span><div style="flex:1;min-width:0"><b>${({ on: "On for this device", off: "Off", denied: "Blocked in your browser settings", unsupported: "Not available in this browser", native: "Managed in iPhone Settings" })[pushState()]}</b><div class="muted sm">${IOS && !STANDALONE && pushState() === "off" ? "Add Friendly to your Home Screen first (Share → Add to Home Screen)." : NATIVE ? "Tap to open Notification settings." : "Invites, comments, RSVPs, and day-of reminders."}</div></div>${NATIVE ? `<span class="chev">›</span>` : pushState() === "off" ? `<button class="btn small primary" id="pushToggle">Turn on</button>` : pushState() === "on" ? `<button class="btn small" id="pushToggle">Turn off</button>` : ""}</div>
   <div class="section-head" style="margin-top:22px"><h2>Calendar sync</h2></div>
   <div class="card" style="padding:14px 16px"><p class="muted sm" style="margin:0 0 10px">Subscribe once and every event you're invited to appears in your calendar and stays up to date when plans change.</p>
     <div class="btnrow"><button class="btn primary small" id="calSubscribe">Add to iPhone / Apple Calendar</button><button class="btn small" id="calCopy">Copy link for Google Calendar</button></div>
@@ -1915,10 +1955,13 @@ function wireProfile() {
   };
   el("signOut").onclick = () => { stopListening(); signOut(auth); };
   const pt = el("pushToggle"); if (pt) pt.onclick = () => pushState() === "on" ? disableWebPush() : enableWebPush();
+  const nr = el("notifRow"); if (nr) nr.onclick = () => { location.href = "app-settings:"; };
   el("photoBtn").onclick = async () => {
-    const f = await pickFile(); if (!f) return; toast("Updating photo…");
+    const f = await pickFile(); if (!f) return;
+    const cropped = await openCropDialog(f); if (!cropped) return;
+    toast("Updating photo…");
     try {
-      const photo = await compressImage(f, 320, 0.82);
+      const photo = await compressImage(cropped, 320, 0.82);
       await updateDoc(doc(db, "users", myUid()), { photo });
       for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}.photo`]: photo }).catch(() => {});
       toast("Photo updated");
@@ -1965,9 +2008,15 @@ async function deleteAccount() {
 
 // ---------- ACTIVITY ----------
 const seenAt = () => (S.profile && S.profile.activitySeenAt) || 0;
-const unreadCount = () => (S.activity || []).filter(a => a.createdAt > seenAt()).length;
-const newCountFor = urlTail => (S.activity || []).filter(a => a.createdAt > seenAt() && String(a.url || "").endsWith(urlTail)).length;
-const isNewEvent = ev => (S.activity || []).some(a => a.createdAt > seenAt() && String(a.url || "").endsWith("#/e/" + ev.id));
+// A "New" pill clears the moment you actually open that event or group, not only
+// when you visit the Activity page -- opening the thing IS seeing the alert.
+// Tracked per-device in localStorage, keyed by the same url tail activity items carry.
+const peekedMap = () => { try { return JSON.parse(localStorage.getItem("friendlyPeeked") || "{}"); } catch { return {}; } };
+const markPeeked = urlTail => { try { const m = peekedMap(); m[urlTail] = Date.now(); localStorage.setItem("friendlyPeeked", JSON.stringify(m)); } catch {} };
+const isPeeked = a => { const tail = "#" + (String(a.url || "").split("#")[1] || ""); if (tail === "#") return false; return (peekedMap()[tail] || 0) >= a.createdAt; };
+const unreadCount = () => (S.activity || []).filter(a => a.createdAt > seenAt() && !isPeeked(a)).length;
+const newCountFor = urlTail => (S.activity || []).filter(a => a.createdAt > seenAt() && !isPeeked(a) && String(a.url || "").endsWith(urlTail)).length;
+const isNewEvent = ev => (S.activity || []).some(a => a.createdAt > seenAt() && !isPeeked(a) && String(a.url || "").endsWith("#/e/" + ev.id));
 const actIcon = a => /waiting on your RSVP/.test(a.title) ? "📣" : /mentioned you/.test(a.title) ? "＠" : /to a meeting/.test(a.title) ? "📅" : /You're in!/.test(a.title) ? "🎟️" : /still owe/.test(a.title) ? "💸" : /invited you/.test(a.title) ? "🎟️" : /^Today:/.test(a.title) ? "⏰" : /reported/i.test(a.title) ? "⚑" : /is going|might come|can't make|joined the waitlist|requested/.test(a.title) ? "✅" : "💬";
 function notifCard() {
   if (NATIVE || localStorage.getItem("friendlyPushDismissed")) return "";
