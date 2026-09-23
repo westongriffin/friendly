@@ -4,7 +4,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
   getAuth, onAuthStateChanged, createUserWithEmailAndPassword,
-  signInWithEmailAndPassword, signOut, deleteUser, reauthenticateWithCredential, EmailAuthProvider,
+  signInWithEmailAndPassword, signInWithCustomToken, signOut, deleteUser, reauthenticateWithCredential, EmailAuthProvider,
   sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
@@ -205,6 +205,11 @@ function subCol(ev, name) { return collection(db, ...(ev._col || ["events", ev.i
 // Compose a text in the phone's Messages app (iOS wants "&" before body).
 // Phone numbers as +15551234567 so the same person matches whether typed with dashes or spaces.
 const toE164 = p => { const d = String(p || "").trim(); if (!d) return ""; const n = d.replace(/\D/g, ""); if (d.startsWith("+")) return "+" + n; if (n.length === 10) return "+1" + n; if (n.length === 11 && n[0] === "1") return "+" + n; return n ? "+" + n : ""; };
+// Firebase's email/password provider is the only one that supports a password
+// at all, so a phone number becomes its sign-in "email" by pattern -- never
+// shown to anyone, never used to send mail. The real, human email (for
+// calendar invites) lives in the profile's separate `email` field instead.
+const phoneAuthEmail = e164 => e164.replace(/[^0-9]/g, "") + "@phone.officialfriendly.com";
 // Birthdays are stored as YYYY-MM-DD (the year is optional to the user; we only use month and day).
 function nextBirthday(b) { if (!b || b.length < 5) return null; const [, mm, dd] = /(\d{2})-(\d{2})$/.exec(b) || []; if (!mm) return null; const now = new Date(); let d = new Date(now.getFullYear(), +mm - 1, +dd); const t0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()); if (d < t0) d = new Date(now.getFullYear() + 1, +mm - 1, +dd); return d; }
 const daysToBirthday = b => { const d = nextBirthday(b); if (!d) return null; const now = new Date(); return Math.round((d - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000); };
@@ -409,12 +414,55 @@ function render() {
     root.innerHTML = `<div class="splash"><div class="brand splash-brand">Friend<span class="tilt">l</span>y</div><div class="splash-row"><span class="splash-av" style="background:#F08A4B">SR</span><span class="splash-av" style="background:#3B82F6">AK</span><span class="splash-av" style="background:#25A56A">JP</span><span class="splash-av" style="background:#C84B7A">MT</span></div><p>Getting everyone here…</p></div>`; return; }
   if (!S.user) { if (S.route.name === "event") { renderPreview(root, S.route.id); return; } if (S.route.name === "join") { try { localStorage.setItem("friendlyJoin", S.route.id); } catch {} } renderAuth(root); return; }
   if (!S.profile) { root.innerHTML = `<div class="splash"><div class="brand splash-brand">Friend<span class="tilt">l</span>y</div><div class="splash-row"><span class="splash-av" style="background:#F08A4B">SR</span><span class="splash-av" style="background:#3B82F6">AK</span><span class="splash-av" style="background:#25A56A">JP</span><span class="splash-av" style="background:#C84B7A">MT</span></div><p>Setting up your profile…</p></div>`; return; }
+  if (S.profile.onboarded === false) { root.innerHTML = onboardingBody(); wireOnboarding(); return; }
   const r = S.route;
   if (r.name === "event") return renderEventPage(root, r.id);
   cleanupEvent();
   root.innerHTML = shell(routeBody(r));
   watchTabs();
   wireShell();
+}
+
+// ---------- onboarding (right after creating a phone+password account) ----------
+function onboardingBody() {
+  const p = S.profile;
+  return `
+  <div class="auth-wrap">
+    <canvas id="authbg" class="auth-bg"></canvas>
+    <div class="auth-card card">
+      <div class="brand xl">Friend<span class="tilt">l</span>y</div>
+      <p class="auth-lede">Welcome, ${esc(p.name)}! A few optional details, then you're in.</p>
+      <button type="button" class="avatar-edit" id="obPhotoBtn" title="Add a photo" style="margin:0 auto 14px;display:block">${avatar(myUid(), "xxl")}<span class="cam">📷</span></button>
+      <form id="onboardForm" class="stack">
+        <label class="field"><span>Email <span class="muted">(optional, for calendar invites)</span></span>
+          <input id="obEmail" type="email" placeholder="sam@example.com" autocomplete="email"></label>
+        <label class="field"><span>Venmo <span class="muted">(optional)</span></span>
+          <input id="obVenmo" placeholder="@sam-rivera" autocomplete="off"></label>
+        <label class="field"><span>Apple Cash number <span class="muted">(optional)</span></span>
+          <input id="obApple" type="tel" placeholder="+1 555 123 4567" value="${esc(p.phone || "")}" autocomplete="tel"></label>
+        <button class="btn primary lg" type="submit">Done</button>
+      </form>
+      <p class="auth-foot"><a id="obSkip">Skip for now</a></p>
+    </div>
+  </div>`;
+}
+function wireOnboarding() {
+  startParticles(el("authbg"), "confetti");
+  const finish = async () => {
+    const email = el("obEmail").value.trim(), venmo = el("obVenmo").value.trim(), apple = el("obApple").value.trim();
+    try {
+      await updateDoc(doc(db, "users", myUid()), { email: email.toLowerCase(), venmo, phone: apple, phoneE164: toE164(apple) || S.profile.phoneE164, onboarded: true });
+    } catch (e) { toast(e.message); }
+  };
+  el("onboardForm").onsubmit = e => { e.preventDefault(); finish(); };
+  el("obSkip").onclick = () => updateDoc(doc(db, "users", myUid()), { onboarded: true }).catch(e => toast(e.message));
+  el("obPhotoBtn").onclick = async () => {
+    const f = await pickFile(); if (!f) return;
+    const cropped = await openCropDialog(f); if (!cropped) return;
+    toast("Updating photo…");
+    try { const photo = await compressImage(cropped, 320, 0.82); await updateDoc(doc(db, "users", myUid()), { photo }); toast("Photo updated"); }
+    catch (e) { toast(e.message); }
+  };
 }
 
 // ---------- auth screen ----------
@@ -433,20 +481,13 @@ function renderAuth(root) {
       <form id="authForm" class="stack">
         <label class="field ${authMode === "in" ? "hidden" : ""}" id="nameField"><span>Your name</span>
           <input id="aName" maxlength="40" placeholder="Sam Rivera" autocomplete="name"></label>
-        <div class="two ${authMode === "in" ? "hidden" : ""}" id="payFields">
-          <label class="field"><span>Venmo <span class="muted">(optional)</span></span>
-            <input id="aVenmo" placeholder="@sam-rivera" autocomplete="off"></label>
-          <label class="field"><span>Phone <span class="muted">(optional)</span></span>
-            <input id="aPhone" type="tel" placeholder="+1 555 123 4567" autocomplete="tel"></label>
-        </div>
-        <label class="field"><span>Email</span>
-          <input id="aEmail" name="username" type="email" required placeholder="sam@example.com" autocomplete="username"></label>
+        <label class="field"><span>Phone number</span>
+          <input id="aPhone" name="username" type="tel" required inputmode="tel" placeholder="+1 555 123 4567" autocomplete="${authMode === "in" ? "username" : "tel"}"></label>
         <label class="field"><span>Password</span>
           <input id="aPass" name="password" type="password" required minlength="6" placeholder="At least 6 characters" autocomplete="${authMode === "in" ? "current-password" : "new-password"}"></label>
         <button class="btn primary lg" type="submit">${authMode === "in" ? "Sign in" : "Create account"}</button>
         ${authMode === "up" ? `<label class="cbox" style="margin:12px 0 0;align-items:flex-start"><input type="checkbox" id="aTerms" style="margin-top:3px"><span class="sm">I agree to the <a href="./terms.html" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">Terms of Use</a> and <a href="./privacy.html" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">Privacy Policy</a>. No harassment or objectionable content; accounts that post it are removed.</span></label>` : ""}
       </form>
-      ${authMode === "in" ? `<p class="auth-foot"><a id="magicLink">Email me a sign-in link instead</a></p>` : ""}
       <p class="auth-foot">${authMode === "in" ? "New here?" : "Already have an account?"}
         <a id="authSwap">${authMode === "in" ? "Create an account" : "Sign in"}</a></p>
     </div>
@@ -455,29 +496,39 @@ function renderAuth(root) {
   el("segIn").onclick = () => { authMode = "in"; renderAuth(root); };
   el("segUp").onclick = () => { authMode = "up"; renderAuth(root); };
   el("authSwap").onclick = () => { authMode = authMode === "in" ? "up" : "in"; renderAuth(root); };
-  if (el("magicLink")) el("magicLink").onclick = sendMagicLink;
   el("authForm").onsubmit = async e => {
     e.preventDefault();
-    const email = el("aEmail").value.trim(), pass = el("aPass").value, name = el("aName").value.trim();
-    const venmo = el("aVenmo").value.trim(), phone = el("aPhone").value.trim();
+    const phone = el("aPhone").value.trim(), pass = el("aPass").value, name = el("aName").value.trim();
+    const e164 = toE164(phone); if (!e164) return toast("Enter a valid phone number.");
+    const authEmail = phoneAuthEmail(e164);
     try {
       if (authMode === "up") {
         if (!name) return toast("Add your name so friends recognize you.");
         if (!el("aTerms") || !el("aTerms").checked) return toast("Please agree to the Terms of Use to create an account.");
-        const cred = await createUserWithEmailAndPassword(auth, email, pass);
-        await setDoc(doc(db, "users", cred.user.uid), { name, email: email.toLowerCase(), venmo, phone, phoneE164: toE164(phone), createdAt: Date.now() });
+        const cred = await createUserWithEmailAndPassword(auth, authEmail, pass);
+        await setDoc(doc(db, "users", cred.user.uid), { name, phone, phoneE164: e164, email: "", venmo: "", onboarded: false, createdAt: Date.now() });
       } else {
-        await signInWithEmailAndPassword(auth, email, pass);
+        try { await signInWithEmailAndPassword(auth, authEmail, pass); }
+        catch (err) {
+          // Not a phone-based account under that number -- might be one of the
+          // accounts from before phone sign-in existed. Ask the server to look
+          // it up by phone and verify the password itself; it hands back a
+          // one-time token instead of ever revealing the account's real email.
+          if (!["auth/user-not-found", "auth/invalid-credential", "auth/wrong-password"].includes(err.code)) throw err;
+          const r = await fetch(FN_BASE + "/phoneSignIn", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phoneE164: e164, password: pass }) });
+          const j = await r.json().catch(() => ({}));
+          if (r.ok && j.token) await signInWithCustomToken(auth, j.token); else throw err;
+        }
       }
     } catch (err) { toast(authError(err)); }
   };
 }
 function authError(err) {
   const c = (err && err.code) || "";
-  if (c.includes("email-already-in-use")) return "That email already has an account. Sign in instead.";
-  if (c.includes("invalid-credential") || c.includes("wrong-password") || c.includes("user-not-found")) return "Email or password is incorrect.";
+  if (c.includes("email-already-in-use")) return "That phone number already has an account. Sign in instead.";
+  if (c.includes("invalid-credential") || c.includes("wrong-password") || c.includes("user-not-found")) return "Phone number or password is incorrect.";
   if (c.includes("weak-password")) return "Password needs at least 6 characters.";
-  if (c.includes("invalid-email")) return "That doesn't look like a valid email.";
+  if (c.includes("invalid-email")) return "That doesn't look like a valid phone number.";
   return "Couldn't do that: " + (err.message || c);
 }
 

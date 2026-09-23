@@ -13,6 +13,7 @@ const webpush = require("web-push");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
+const { getAuth } = require("firebase-admin/auth");
 const { GoogleAuth } = require("google-auth-library");
 const sharp = require("sharp");
 const logger = require("firebase-functions/logger");
@@ -294,6 +295,35 @@ exports.share = onRequest({ region: "us-central1", invoker: "public", memory: "2
 <meta name="twitter:card" content="${p.cover ? "summary_large_image" : "summary"}"><meta name="twitter:title" content="${htmlEsc(title)}"><meta name="twitter:description" content="${htmlEsc(desc)}"><meta name="twitter:image" content="${img}">
 <meta http-equiv="refresh" content="0;url=${target}"><script>location.replace(${JSON.stringify(target)});</script></head>
 <body style="font-family:-apple-system,system-ui,sans-serif;padding:24px;color:#2A2019"><p>Opening your invite… <a href="${target}">Tap here if it doesn't open.</a></p></body></html>`);
+});
+
+// Phone-based sign-in fell back to us: the account predates phone sign-in, so
+// it's still keyed by its real email in Firebase Auth. We look the account up
+// by phone, verify the password server-side via Identity Toolkit (the client
+// never learns the real email), and hand back a one-time custom token.
+const WEB_API_KEY = "AIzaSyA_lgyYmCL6HnoFPn4Ux89bD6iI_fazkmA";
+exports.phoneSignIn = onRequest({ region: "us-central1", invoker: "public", memory: "256MiB" }, async (req, res) => {
+  res.set("Access-Control-Allow-Origin", SITE);
+  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
+  const { phoneE164, password } = req.body || {};
+  if (!phoneE164 || !password) { res.status(400).json({ error: "Missing phoneE164 or password" }); return; }
+  try {
+    const snap = await db.collection("users").where("phoneE164", "==", phoneE164).limit(1).get();
+    if (snap.empty) { res.status(401).json({ error: "No account" }); return; }
+    const uid = snap.docs[0].id;
+    const authUser = await getAuth().getUser(uid).catch(e => { logger.error("phoneSignIn getUser", e); return null; });
+    if (!authUser || !authUser.email) { res.status(401).json({ error: "No account" }); return; }
+    const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${WEB_API_KEY}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: authUser.email, password, returnSecureToken: true }),
+    });
+    if (!r.ok) { res.status(401).json({ error: "Wrong password" }); return; }
+    const token = await getAuth().createCustomToken(uid);
+    res.json({ token });
+  } catch (e) { logger.error("phoneSignIn", e); res.status(500).json({ error: "Server error" }); }
 });
 
 // Calendar subscription: /cal?u=<uid>&t=<token> is a live .ics feed of every
