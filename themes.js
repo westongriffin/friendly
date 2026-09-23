@@ -80,13 +80,66 @@ export const THEMES = [
 export const THEME_BY_ID = Object.fromEntries(THEMES.map(t => [t.id, t]));
 export const DEFAULT_THEME = "confetti";
 
-export function themeOf(id) { return THEME_BY_ID[id] || THEME_BY_ID[DEFAULT_THEME]; }
+// "Create your own": fonts already loaded (see index.html's Google Fonts link,
+// shared with the preset themes above -- no extra font weight to pay for) and
+// the particle styles the canvas engine below already knows how to draw.
+export const CUSTOM_FONTS = [
+  { id: "'Bricolage Grotesque'", name: "Bricolage" },
+  { id: "'Fraunces'", name: "Fraunces" },
+  { id: "'DM Serif Display'", name: "DM Serif" },
+  { id: "'Syne'", name: "Syne" },
+  { id: "'Space Grotesk'", name: "Space Grotesk" },
+  { id: "'Unbounded'", name: "Unbounded" },
+  { id: "'Pacifico'", name: "Pacifico" },
+  { id: "'Righteous'", name: "Righteous" },
+];
+export const CUSTOM_PARTICLES = ["confetti", "petals", "stars", "bubbles", "sparkles", "embers", "none"];
+
+function hexToRgb(hex) { const m = hex.replace("#", "").match(/.{1,2}/g).map(x => parseInt(x, 16)); return { r: m[0], g: m[1], b: m[2] }; }
+function rgbToHsl({ r, g, b }) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b); let h, s; const l = (max + min) / 2;
+  if (max === min) { h = s = 0; } else {
+    const d = max - min; s = l > .5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) { case r: h = (g - b) / d + (g < b ? 6 : 0); break; case g: h = (b - r) / d + 2; break; default: h = (r - g) / d + 4; }
+    h /= 6;
+  }
+  return { h: h * 360, s: s * 100, l: l * 100 };
+}
+function hslToHex(h, s, l) {
+  s /= 100; l /= 100;
+  const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  const toHex = x => Math.round(255 * x).toString(16).padStart(2, "0");
+  return "#" + toHex(f(0)) + toHex(f(8)) + toHex(f(4));
+}
+// Turns one picked accent color into a full theme: readable text on top of it
+// (dark accent -> white text, light accent -> dark text), a couple of lighter
+// tints for the particle system, and everything else fixed to values that
+// read fine against any hue (matches the light preset themes' recipe).
+export function makeCustomTheme(accent, font, particleKind) {
+  const { h, s, l } = rgbToHsl(hexToRgb(accent));
+  const onAccent = l > 60 ? "#241608" : "#fff";
+  const tint = dl => hslToHex(h, Math.max(s, 40), Math.min(90, l + dl));
+  return {
+    id: "custom", name: "Your Theme", font,
+    ink: "#2E1A12", sub: "#7A5A48", accent, onAccent,
+    chip: "rgba(255,255,255,.72)", card: "rgba(255,255,255,.66)",
+    particles: particleKind === "none" ? { kind: "none" } : { kind: particleKind, colors: [accent, tint(15), tint(30)], density: 1 }
+  };
+}
+
+export function themeOf(id, custom) {
+  if (id === "custom" && custom) return custom;
+  return THEME_BY_ID[id] || THEME_BY_ID[DEFAULT_THEME];
+}
 
 // Apply a theme's palette + font to an element (the event surface) and set the
 // background class. Does not start particles; call startParticles separately.
-export function applyTheme(el, id) {
-  const t = themeOf(id);
+export function applyTheme(el, id, custom) {
+  const t = themeOf(id, custom);
   THEMES.forEach(x => el.classList.remove("t-" + x.id));
+  el.classList.remove("t-custom");
   el.classList.add("ev-theme", "t-" + t.id);
   el.style.setProperty("--th-font", t.font + ", system-ui, sans-serif");
   el.style.setProperty("--th-ink", t.ink);
@@ -101,8 +154,8 @@ export function applyTheme(el, id) {
 const REDUCED = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // Particle engine. Returns a stop() that cancels the animation and clears.
-export function startParticles(canvas, id) {
-  const t = themeOf(id);
+export function startParticles(canvas, id, custom) {
+  const t = themeOf(id, custom);
   const spec = t.particles || { kind: "none" };
   if (!canvas || spec.kind === "none") return () => {};
   const ctx = canvas.getContext("2d");

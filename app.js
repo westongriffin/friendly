@@ -12,7 +12,7 @@ import {
   query, where, onSnapshot, addDoc, arrayUnion, arrayRemove, deleteField, orderBy, limit, getDocs
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import { firebaseConfig, mapsKey, adminUids, vapidPublicKey, giphyKey } from "./firebase-config.js";
-import { THEMES, themeOf, applyTheme, startParticles, DEFAULT_THEME } from "./themes.js";
+import { THEMES, themeOf, applyTheme, startParticles, DEFAULT_THEME, CUSTOM_FONTS, CUSTOM_PARTICLES, makeCustomTheme } from "./themes.js";
 
 const fb = initializeApp(firebaseConfig);
 const auth = getAuth(fb);
@@ -706,7 +706,7 @@ function emptyState(emoji, title, sub) { return `<div class="card empty"><div cl
 
 function eventCard(ev) {
   if (ev.kind === "meeting") return meetingCard(ev);
-  const th = themeOf(ev.theme);
+  const th = themeOf(ev.theme, ev.customTheme);
   const d = evDate(ev);
   const going = goingCount(ev);
   const guests = (ev.invitedUids || []).slice(0, 5);
@@ -985,15 +985,15 @@ async function leaveGroup(g) {
 }
 
 // ---------- COMPOSE (create event) ----------
-const compose = { theme: DEFAULT_THEME, emoji: "🎉", cover: null, coverTab: "emoji",
+const compose = { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji",
   title: "", date: "", time: "", end: "", where: "", notes: "", cap: "", approval: false,
   questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "" };
-function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", repeat: "", _restored: false, _fromDraft: false }); }
+function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", repeat: "", _restored: false, _fromDraft: false }); }
 function composeBody() {
   restoreDraft();
   const emojis = ["🎉", "🍕", "🌮", "🍻", "🎂", "🎬", "🎮", "🏖️", "🥾", "⚽", "🎲", "🍜", "🎃", "🎄", "🕺", "🔥"];
   const groups = [...S.groups.values()];
-  const th = themeOf(compose.theme);
+  const th = themeOf(compose.theme, compose.customTheme);
   return `
   <button class="link-back" data-go="#/">‹ Cancel</button>
   <div class="compose">
@@ -1028,6 +1028,7 @@ function composeBody() {
     <div class="section-head" style="margin-top:18px"><h2>Theme</h2></div>
     <div class="theme-strip" id="themeStrip">
       ${THEMES.map(t => `<button class="theme-swatch t-${t.id} ${t.id === compose.theme ? "on" : ""}" data-theme="${t.id}" title="${t.name}"><span class="theme-swatch-bg"></span><span class="theme-name" style="font-family:${t.font},system-ui">${esc(t.name)}</span></button>`).join("")}
+      <button type="button" class="theme-swatch t-custom ${compose.theme === "custom" ? "on" : ""}" id="customThemeBtn" title="Create your own" style="--th-accent:${(compose.customTheme || {}).accent || "#B388FF"}"><span class="theme-swatch-bg"></span><span class="theme-name" style="font-family:${(compose.customTheme || {}).font || "'Bricolage Grotesque'"},system-ui">🎨 ${compose.customTheme ? "Your Theme" : "Create your own"}</span></button>
     </div>
     </div>
 
@@ -1085,6 +1086,27 @@ function coverPanel() {
   if (compose.coverTab === "ai") return `<div class="ai-row"><input id="aiPrompt" placeholder="e.g. neon rooftop taco party at sunset"><button type="button" class="btn primary" id="aiGo">Generate</button></div><p class="muted sm" style="margin:8px 0 0">Describe your vibe and AI paints a one-of-a-kind cover.</p>`;
   return `<div class="emoji-pick" id="cEmoji">${COVER_EMOJIS.map(e => `<button type="button" class="${e === compose.emoji ? "on" : ""}" data-e="${e}">${e}</button>`).join("")}</div>`;
 }
+const PARTICLE_LABELS = { confetti: "🎊 Confetti", petals: "🌸 Petals", stars: "✨ Stars", bubbles: "🫧 Bubbles", sparkles: "💫 Sparkles", embers: "🔥 Embers", none: "◯ None" };
+function openCustomThemeDialog() {
+  const cur = compose.customTheme;
+  const accent = (cur && cur.accent) || "#B388FF";
+  const font = (cur && cur.font) || "'Bricolage Grotesque'";
+  const particles = (cur && cur.particles && cur.particles.kind) || "confetti";
+  dialog(`<h3>Create your own theme</h3>
+    <label class="field"><span>Accent color</span><input type="color" id="ctAccent" value="${accent}" style="width:100%;height:44px;padding:2px;border-radius:10px"></label>
+    <span class="field-label">Font</span>
+    <div class="check-grid">${CUSTOM_FONTS.map(f => `<label class="cbox"><input type="radio" name="ctFont" value="${esc(f.id)}" ${f.id === font ? "checked" : ""}><span style="font-family:${f.id},system-ui">${esc(f.name)}</span></label>`).join("")}</div>
+    <span class="field-label" style="margin-top:10px">Background sparkle</span>
+    <div class="check-grid">${CUSTOM_PARTICLES.map(p => `<label class="cbox"><input type="radio" name="ctParticles" value="${p}" ${p === particles ? "checked" : ""}><span>${PARTICLE_LABELS[p]}</span></label>`).join("")}</div>`,
+    "Use this theme", () => {
+      const pickedAccent = el("ctAccent").value;
+      const pickedFont = (document.querySelector('input[name=ctFont]:checked') || {}).value || font;
+      const pickedParticles = (document.querySelector('input[name=ctParticles]:checked') || {}).value || particles;
+      compose.theme = "custom";
+      compose.customTheme = makeCustomTheme(pickedAccent, pickedFont, pickedParticles);
+      closeDialog(); syncCompose(); render();
+    });
+}
 function contactChecks(name, set) {
   const others = [...S.contacts.entries()].filter(([u]) => u !== myUid());
   if (!others.length) return `<span class="muted sm">No friends yet. Invite people to a group first.</span>`;
@@ -1122,7 +1144,7 @@ function syncCompose() {
 }
 function wireCompose() {
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
-  composeStop = startParticles(el("cCanvas"), compose.theme);
+  composeStop = startParticles(el("cCanvas"), compose.theme, compose.customTheme);
   const upd = () => {
     el("cPvTitle").textContent = el("cTitle").value.trim() || "Your event";
     const dv = el("cDate").value, tv = el("cTime").value;
@@ -1132,6 +1154,7 @@ function wireCompose() {
   attachPlaces(el("cWhere"));
   wireCover();
   document.querySelectorAll("[data-theme]").forEach(b => b.onclick = () => { syncCompose(); compose.theme = b.dataset.theme; render(); });
+  if (el("customThemeBtn")) el("customThemeBtn").onclick = () => { syncCompose(); openCustomThemeDialog(); };
   const gsel = el("cGroup"); if (gsel) gsel.onchange = () => { compose.groupId = gsel.value; el("cPickWrap").classList.toggle("hidden", !!compose.groupId); };
   if (el("cAddPeople")) el("cAddPeople").onclick = openComposeInviteDialog;
   document.querySelectorAll("[data-cunpick-u]").forEach(b => b.onclick = () => { compose.invitees.delete(b.dataset.cunpickU); syncCompose(); render(); });
@@ -1191,7 +1214,7 @@ async function createEvent() {
     hostId: myUid(), hostName: S.profile.name, cohostUids, groupId, invitedUids,
     // Guest names travel with the event so link-joined guests can see who's who.
     names: Object.fromEntries(invitedUids.map(u => [u, u === myUid() ? S.profile.name : nameOf(u)])),
-    title, emoji: compose.emoji, theme: compose.theme, cover: compose.cover || "",
+    title, emoji: compose.emoji, theme: compose.theme, customTheme: compose.theme === "custom" ? compose.customTheme : null, cover: compose.cover || "",
     date, time: el("cTime").value || "", endTime: el("cEnd").value || "",
     location: el("cWhere").value.trim(), notes: el("cNotes").value.trim(),
     capacity: Number(el("cCap").value) || 0, approval: !!el("cApproval").checked,
@@ -1229,12 +1252,12 @@ function renderEventPage(root, id) {
   const ev = S.events.get(id);
   if (!ev) { root.innerHTML = shell(`<div class="card empty"><b>Loading event…</b><p class="muted">If this stays, you may not have access.</p><button class="btn" data-go="#/">Home</button></div>`); wireShell(); getDoc(doc(db, "events", id)).then(d => { if (d.exists()) { S.events.set(id, { id, ...d.data() }); render(); } }); return; }
   if (ev.kind === "meeting") { root.innerHTML = shell(meetingBody(ev)); wireShell(); wireMeeting(ev); return; }
-  const th = themeOf(ev.theme);
+  const th = themeOf(ev.theme, ev.customTheme);
   root.innerHTML = `<div class="event-page t-${th.id}" id="evPage" style="--th-font:${th.font},system-ui;--th-ink:${th.ink};--th-sub:${th.sub};--th-accent:${th.accent};--th-on-accent:${th.onAccent};--th-chip:${th.chip};--th-card:${th.card}">
     <canvas class="event-bg-canvas" id="evCanvas"></canvas>
     <div class="event-scroll">${eventInner(ev)}</div>
   </div>`;
-  eventBgStop = startParticles(el("evCanvas"), ev.theme);
+  eventBgStop = startParticles(el("evCanvas"), ev.theme, ev.customTheme);
   wireEventPage(ev);
   // live subcollections (comments, photos, polls, songs)
   S.evSubs.forEach(fn => fn()); S.evSubs = [];
@@ -1251,7 +1274,7 @@ function statusGroups(ev) {
   return g;
 }
 function eventInner(ev) {
-  const th = themeOf(ev.theme);
+  const th = themeOf(ev.theme, ev.customTheme);
   const me = myUid();
   const myR = (ev.rsvps || {})[me];
   const myPlus = ((ev.plusOnes || {})[me]) || 0;
@@ -2439,7 +2462,7 @@ function restoreDraft() {
 }
 function duplicateEvent(ev) {
   resetCompose(); compose._restored = true;
-  Object.assign(compose, { title: ev.title, emoji: ev.emoji || "🎉", theme: ev.theme || DEFAULT_THEME, cover: ev.cover || null, coverTab: ev.cover ? "upload" : "emoji", time: ev.time || "", end: ev.endTime || "", where: ev.location || "", notes: ev.notes || "", cap: ev.capacity ? String(ev.capacity) : "", approval: !!ev.approval, questions: (ev.questions || []).map(q => ({ ...q, id: newId() })), groupId: ev.groupId || "", invitees: new Set(ev.groupId ? [] : (ev.invitedUids || []).filter(u => u !== myUid())), phoneInvitees: ev.groupId ? [] : Object.entries(ev.invitedPhoneNames || {}).map(([e164, name]) => ({ e164, name })), cohosts: new Set(ev.cohostUids || []), kind: ev.kind || "event", repeat: ev.repeat || "", date: "" });
+  Object.assign(compose, { title: ev.title, emoji: ev.emoji || "🎉", theme: ev.theme || DEFAULT_THEME, customTheme: ev.customTheme || null, cover: ev.cover || null, coverTab: ev.cover ? "upload" : "emoji", time: ev.time || "", end: ev.endTime || "", where: ev.location || "", notes: ev.notes || "", cap: ev.capacity ? String(ev.capacity) : "", approval: !!ev.approval, questions: (ev.questions || []).map(q => ({ ...q, id: newId() })), groupId: ev.groupId || "", invitees: new Set(ev.groupId ? [] : (ev.invitedUids || []).filter(u => u !== myUid())), phoneInvitees: ev.groupId ? [] : Object.entries(ev.invitedPhoneNames || {}).map(([e164, name]) => ({ e164, name })), cohosts: new Set(ev.cohostUids || []), kind: ev.kind || "event", repeat: ev.repeat || "", date: "" });
   go("#/new"); toast("Copied. Pick a date and it's ready.");
 }
 // ---------- passwordless sign-in (email link) ----------
