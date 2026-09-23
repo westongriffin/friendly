@@ -787,9 +787,9 @@ function groupPageBody(gid) {
   ${(() => { const bs = upcomingBirthdays(90, g.id); const anySet = members.some(m => m.birthday); return `<div class="section-head" style="margin-top:22px"><h2>Birthdays</h2></div>
     <div class="card">${bs.length ? bs.map(b => `<div class="member-row">${avatar(b.uid, "lg")}<div style="flex:1;min-width:0"><b>${esc(first(b.name))}</b><div class="muted sm">${esc(fmtDay({ date: b.date }))} · ${b.days === 0 ? "today 🎉" : b.days === 1 ? "tomorrow" : "in " + b.days + " days"}</div></div>${b.days <= 45 ? `<button class="btn small ${b.days <= 30 ? "primary" : ""}" data-bplan="${b.uid}">Plan something</button>` : ""}</div>`).join("") : `<p class="muted sm" style="padding:14px 16px;margin:0">${anySet ? "No birthdays in the next 90 days." : "Nobody has added a birthday yet. Add yours on your profile and the group gets a heads-up a month before."}</p>`}</div>`; })()}
   <div class="section-head" style="margin-top:22px"><h2>Members</h2></div>
-  <div class="card">${members.map(m => `<div class="member-row">${avatar(m.uid, "lg")}
+  <div class="card">${members.map(m => `<div class="member-row"><span class="member-click" data-viewprofile="${m.uid}" style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;cursor:pointer">${avatar(m.uid, "lg")}
     <div style="flex:1;min-width:0"><b>${esc(m.name || "Member")}${m.uid === myUid() ? " (you)" : ""}${hostUids.includes(m.uid) ? " · host" : ""}</b>
-    ${m.venmo ? `<div class="muted sm mono">${esc(m.venmo)}</div>` : ""}</div>${host && m.uid !== g.ownerId && m.uid !== myUid() ? `<span class="btnrow" style="gap:6px"><button class="btn ghost small" data-mkhost="${m.uid}|${hostUids.includes(m.uid) ? 0 : 1}">${hostUids.includes(m.uid) ? "Remove host" : "Make host"}</button><button class="btn ghost small" data-kick="${m.uid}" title="Remove from group">✕</button></span>` : ""}</div>`).join("")}</div>
+    ${m.venmo ? `<div class="muted sm mono">${esc(m.venmo)}</div>` : ""}</div></span>${host && m.uid !== g.ownerId && m.uid !== myUid() ? `<span class="btnrow" style="gap:6px"><button class="btn ghost small" data-mkhost="${m.uid}|${hostUids.includes(m.uid) ? 0 : 1}">${hostUids.includes(m.uid) ? "Remove host" : "Make host"}</button><button class="btn ghost small" data-kick="${m.uid}" title="Remove from group">✕</button></span>` : ""}</div>`).join("")}</div>
   <div class="section-head" style="margin-top:22px"><h2>Crew tab</h2><button class="btn small" id="gExpense">＋ Expense</button></div>
   ${groupTab(g)}
   ${((g.invitedEmails || []).length || (g.invitedPhones || []).length) ? `<div class="section-head" style="margin-top:18px"><h2>Invited</h2></div>
@@ -805,6 +805,7 @@ function wireGroupPage() {
   const g = S.groups.get(S.route.id); if (!g) { document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go)); return; }
   markPeeked("#/g/" + g.id);
   if (el("inviteBtn")) el("inviteBtn").onclick = () => openInviteDialog(g);
+  document.querySelectorAll("[data-viewprofile]").forEach(el2 => el2.onclick = () => openProfileDialog(el2.dataset.viewprofile));
   document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
   document.querySelectorAll("[data-homefilter]").forEach(b => b.onclick = () => { homeFilter = b.dataset.homefilter; go("#/"); });
   document.querySelectorAll("[data-bplan]").forEach(b => b.onclick = () => { const x = upcomingBirthdays(400, g.id).find(y => y.uid === b.dataset.bplan); if (x) planBirthday(x); });
@@ -1107,6 +1108,24 @@ function openCustomThemeDialog() {
       closeDialog(); syncCompose(); render();
     });
 }
+// Read-only look at someone you share a group with. S.contacts is exactly
+// "people I'm in a group with" (built from each shared group's members map in
+// rebuildContacts), so anyone wired to open this by uid is already fair game --
+// no extra permission check needed beyond "we have their info to show at all".
+function openProfileDialog(uid) {
+  if (uid === myUid()) return go("#/profile");
+  const info = S.contacts.get(uid); if (!info) return;
+  dialog(`<div style="text-align:center">
+    ${avatar(uid, "xxl")}
+    <h2 style="margin:12px 0 2px">${esc(info.name || "Friend")}</h2>
+    ${info.birthday ? `<p class="muted sm" style="margin:0">🎂 ${esc(fmtDay({ date: info.birthday }))}</p>` : ""}
+  </div>
+  ${info.venmo || info.phone ? `<div class="form-card card" style="margin-top:14px">
+    ${info.venmo ? `<div class="member-row"><span class="li">💸</span><div style="flex:1;min-width:0"><b>Venmo</b><div class="muted sm mono">${esc(info.venmo)}</div></div></div>` : ""}
+    ${info.phone ? `<div class="member-row"><span class="li">📱</span><div style="flex:1;min-width:0"><b>Apple Cash</b><div class="muted sm mono">${esc(info.phone)}</div></div></div>` : ""}
+  </div>` : `<p class="muted sm" style="text-align:center;margin-top:10px">No Venmo or Apple Cash on file yet.</p>`}`,
+    null, null);
+}
 function contactChecks(name, set) {
   const others = [...S.contacts.entries()].filter(([u]) => u !== myUid());
   if (!others.length) return `<span class="muted sm">No friends yet. Invite people to a group first.</span>`;
@@ -1309,7 +1328,7 @@ function eventInner(ev) {
     if (!g[k].length) return "";
     const label = { going: "Going", maybe: "Maybe", waitlist: "Waitlist", pending: "Awaiting approval", no: "Can't make it", none: "Invited" }[k];
     return `<div class="guest-group"><div class="guest-label">${label} · ${g[k].length}</div><div class="guest-chips">${g[k].map(u => `
-      <span class="guest-chip">${avatar(u)}${esc(first(nameOf(u)))}${(ev.plusOnes || {})[u] ? `<i class="plusone">+${ev.plusOnes[u]}</i>` : ""}
+      <span class="guest-chip"><span data-viewprofile="${u}" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px">${avatar(u)}${esc(first(nameOf(u)))}</span>${(ev.plusOnes || {})[u] ? `<i class="plusone">+${ev.plusOnes[u]}</i>` : ""}
       ${manage && (k === "pending") ? `<button class="approve" data-approve="${u}" title="Approve">✓</button>` : ""}
       ${manage && (k === "waitlist") ? `<button class="approve" data-promote="${u}" title="Move in">↑</button>` : ""}</span>`).join("")}</div></div>`;
   }).join("");
@@ -1578,6 +1597,7 @@ function wireEventPage(ev) {
   const id = ev.id;
   markPeeked("#/e/" + ev.id);
   wireDay(ev); loadWeather(ev); maybePostRecap(ev);
+  document.querySelectorAll("[data-viewprofile]").forEach(el2 => el2.onclick = () => openProfileDialog(el2.dataset.viewprofile));
   const dup = $("[data-dup]"); if (dup) dup.onclick = () => duplicateEvent(ev);
   // Group members who joined after the event was created aren't in invitedUids
   // yet (it's snapshotted at creation); add them quietly so they can RSVP.
@@ -2261,7 +2281,7 @@ function wireActivity() {
 function meetingBody(ev) {
   const me = myUid(); const myR = (ev.rsvps || {})[me]; const invited = (ev.invitedUids || []).includes(me); const manage = canManage(ev);
   const g = statusGroups(ev);
-  const row = (label, uids) => uids.length ? `<div class="muted sm" style="margin:8px 0 4px;font-weight:600">${label} · ${uids.length}</div>${uids.map(u => `<div class="member-row" style="padding:6px 0">${avatar(u, "sm")}<span>${esc(nameOf(u))}${u === ev.hostId ? " · organizer" : ""}</span></div>`).join("")}` : "";
+  const row = (label, uids) => uids.length ? `<div class="muted sm" style="margin:8px 0 4px;font-weight:600">${label} · ${uids.length}</div>${uids.map(u => `<div class="member-row" data-viewprofile="${u}" style="padding:6px 0;cursor:pointer">${avatar(u, "sm")}<span>${esc(nameOf(u))}${u === ev.hostId ? " · organizer" : ""}</span></div>`).join("")}` : "";
   return `
   <button class="link-back" data-go="#/">‹ Back</button>
   <div class="group-hero"><span class="li" style="width:52px;height:52px;font-size:24px">📅</span>
@@ -2294,6 +2314,7 @@ function wireMeeting(ev) {
     updateDoc(doc(db, "events", ev.id), { invitedUids: arrayUnion(myUid()), [`names.${myUid()}`]: S.profile.name }).catch(e => console.warn("auto-join failed:", e.message));
   }
   document.querySelectorAll("[data-rsvp]").forEach(b => b.onclick = () => setRsvp(ev, b.dataset.rsvp));
+  document.querySelectorAll("[data-viewprofile]").forEach(el2 => el2.onclick = () => openProfileDialog(el2.dataset.viewprofile));
   const j = $("[data-join]"); if (j) j.onclick = () => joinViaLink(ev, j);
   const cal = $("[data-cal]"); if (cal) cal.onclick = () => downloadIcs(ev);
   if (el("addPeopleBtn")) el("addPeopleBtn").onclick = () => openEventInviteDialog(ev);
