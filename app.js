@@ -1002,6 +1002,7 @@ function composeBody() {
       <button type="button" class="${compose.kind === "meeting" ? "on" : ""}" data-kind="meeting">📅 Meeting</button>
     </div>
     ${compose._fromDraft ? `<p class="muted sm" style="margin:-4px 0 10px">Restored your draft · <a id="discardDraft" style="color:var(--accent);font-weight:600">Discard</a></p>` : ""}
+    <p class="muted sm draft-status" id="draftStatus" style="margin:-4px 0 10px;min-height:1.4em"></p>
     ${compose.kind === "meeting" ? `<p class="muted sm" style="margin:-4px 0 12px">A plain calendar entry: title, time, place, who. Everyone gets a calendar invite by email.</p>` : ""}
     <div class="${compose.kind === "meeting" ? "hidden" : ""}">
     <div class="compose-preview t-${th.id}" id="cPreview" style="--th-accent:${th.accent};--th-ink:${th.ink};--th-on-accent:${th.onAccent};font-family:${th.font},system-ui">
@@ -2052,6 +2053,15 @@ function openSettle(from, to, amount) {
 }
 
 // ---------- PROFILE ----------
+// Push categories a person can turn on/off individually. Keys match what the
+// notify() Cloud Function checks (functions/index.js NOTIF_CATEGORY); missing
+// or true = on, so existing accounts keep getting everything until they opt out.
+const NOTIF_CATS = [
+  { key: "invites", label: "Invites & RSVPs" },
+  { key: "chat", label: "Group chat & comments" },
+  { key: "reminders", label: "Day-of reminders & nudges" },
+  { key: "birthdays", label: "Birthdays" },
+];
 function profileBody() {
   const p = S.profile;
   return `
@@ -2068,6 +2078,10 @@ function profileBody() {
   <button class="btn" id="memoriesBtn" style="margin-top:14px">📸 Memories: photos from all your events</button>
   <div class="section-head" style="margin-top:22px"><h2>Notifications</h2></div>
   <div class="card member-row"${NATIVE ? ' id="notifRow" style="cursor:pointer"' : ""}><span class="li">🔔</span><div style="flex:1;min-width:0"><b>${({ on: "On for this device", off: "Off", denied: "Blocked in your browser settings", unsupported: "Not available in this browser", native: "Managed in iPhone Settings" })[pushState()]}</b><div class="muted sm">${IOS && !STANDALONE && pushState() === "off" ? "Add Friendly to your Home Screen first (Share → Add to Home Screen)." : NATIVE ? "Tap to open Notification settings." : "Invites, comments, RSVPs, and day-of reminders."}</div></div>${NATIVE ? `<span class="chev">›</span>` : pushState() === "off" ? `<button class="btn small primary" id="pushToggle">Turn on</button>` : pushState() === "on" ? `<button class="btn small" id="pushToggle">Turn off</button>` : ""}</div>
+  ${["native", "on"].includes(pushState()) ? `<div class="card" style="padding:12px 16px;margin-top:8px">
+    <p class="muted sm" style="margin:0 0 4px">What you get notified about:</p>
+    ${NOTIF_CATS.map(c => `<label class="switch" style="margin:8px 0"><input type="checkbox" data-notifpref="${c.key}" ${(p.notifPrefs || {})[c.key] !== false ? "checked" : ""}><span>${esc(c.label)}</span></label>`).join("")}
+  </div>` : ""}
   <div class="section-head" style="margin-top:22px"><h2>Calendar sync</h2></div>
   <div class="card" style="padding:14px 16px"><p class="muted sm" style="margin:0 0 10px">Subscribe once and every event you're invited to appears in your calendar and stays up to date when plans change.</p>
     <div class="btnrow"><button class="btn primary small" id="calSubscribe">Add to iPhone / Apple Calendar</button><button class="btn small" id="calCopy">Copy link for Google Calendar</button></div>
@@ -2115,6 +2129,7 @@ function wireProfile() {
   el("signOut").onclick = () => { stopListening(); signOut(auth); };
   const pt = el("pushToggle"); if (pt) pt.onclick = () => pushState() === "on" ? disableWebPush() : enableWebPush();
   const nr = el("notifRow"); if (nr) nr.onclick = () => { location.href = "app-settings:"; };
+  document.querySelectorAll("[data-notifpref]").forEach(cb => cb.onchange = () => updateDoc(doc(db, "users", myUid()), { [`notifPrefs.${cb.dataset.notifpref}`]: cb.checked }).catch(e => toast(e.message)));
   el("photoBtn").onclick = async () => {
     const f = await pickFile(); if (!f) return;
     const cropped = await openCropDialog(f); if (!cropped) return;
@@ -2386,7 +2401,11 @@ function wireSearch() {
 }
 // ---------- drafts (the composer remembers what you typed) ----------
 function saveDraft() {
-  try { if (compose.title || compose.notes) localStorage.setItem("friendlyDraft", JSON.stringify({ ...compose, invitees: [...compose.invitees], cohosts: [...compose.cohosts], _restored: undefined, _fromDraft: undefined })); } catch {}
+  try {
+    if (!(compose.title || compose.notes)) return;
+    localStorage.setItem("friendlyDraft", JSON.stringify({ ...compose, invitees: [...compose.invitees], cohosts: [...compose.cohosts], _restored: undefined, _fromDraft: undefined }));
+    const s = el("draftStatus"); if (s) s.textContent = "✓ Draft saved";
+  } catch {}
 }
 function restoreDraft() {
   if (compose._restored || compose.title) return; compose._restored = true;

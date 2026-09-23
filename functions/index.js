@@ -361,17 +361,23 @@ const commentPreview = c => c.img && !c.text ? "📷 Photo" : String(c.text || "
 // People named with @ get their own line in the feed / a push of their own.
 const mentionNotify = (c, url, where) => (c.mentions && c.mentions.length) ? notify(c.mentions.filter(u => u !== c.authorId), firstName(c.authorName) + " mentioned you" + (where ? " in " + where : ""), commentPreview(c), url, { type: "mention", actorId: c.authorId }) : Promise.resolve();
 
+// Which notifCategory toggle (profile > Notifications) a push type falls under.
+// Types with no entry here (money reminders, admin content reports) always send --
+// only the four categories the person can actually see and turn off are gated.
+const NOTIF_CATEGORY = { event: "invites", meeting: "invites", rsvp: "invites", nudge: "reminders", reminder: "reminders", mention: "chat", comment: "chat", birthday: "birthdays" };
 // Every device for a set of users (native FCM tokens + web push subscriptions):
 // send, prune anything dead, and log the item to the Activity feed so it shows
-// in-app even for people who keep notifications off.
+// in-app even for people who keep notifications (or this category) off.
 async function notify(uids, title, body, url = "/", extra = {}) {
   const ids = [...new Set(uids)].filter(Boolean);
   if (!ids.length) return;
   await db.collection("activity").add({ uids: ids, title, body, url, type: extra.type || "", actorId: extra.actorId || "", createdAt: Date.now() })
     .catch(err => logger.warn("activity: " + err.message));
+  const category = NOTIF_CATEGORY[extra.type];
   const snaps = await db.getAll(...ids.map(id => db.doc("users/" + id)));
   const tokenOwner = {}, tokens = [], subs = [];
   snaps.forEach(s => {
+    if (category && s.get(`notifPrefs.${category}`) === false) return;
     (s.get("pushTokens") || []).forEach(t => { tokens.push(t); tokenOwner[t] = s.id; });
     (s.get("webPush") || []).forEach(sub => subs.push({ sub, uid: s.id }));
   });
