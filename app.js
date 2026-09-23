@@ -111,26 +111,28 @@ function parseAmount(v) { const n = Number(String(v).replace(/[$,\s]/g, "")); re
 // photo-wall shots at ~900px. Keeps the app on the free plan (no Storage).
 function loadImg(src) { return new Promise((res, rej) => { const i = new Image(); i.crossOrigin = "anonymous"; i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
 function blobToURL(b) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(b); }); }
-// Square crop for a profile photo: drag to pan, slider to zoom, "cover" fit
-// so there's never empty space around the frame. Resolves to a data URL, or
-// null if the person cancels.
-function openCropDialog(file) {
+// Crop dialog: drag to pan, slider to zoom, "cover" fit so there's never empty
+// space around the frame. Defaults to a square/circular profile-photo crop;
+// pass opts for a rectangular crop (e.g. a 16:9 event cover). Resolves to a
+// data URL, or null if the person cancels.
+function openCropDialog(file, opts = {}) {
+  const { shape = "circle", ratio = 1, outW = 600, outH = 600, title = "Crop your photo", quality = 0.92 } = opts;
   return new Promise(async resolve => {
     let img; try { img = await loadImg(await blobToURL(file)); } catch { toast("Couldn't read that image."); return resolve(null); }
-    const SIZE = 280;
-    dialog(`<h3>Crop your photo</h3>
+    const W = 280, H = Math.round(280 / ratio);
+    dialog(`<h3>${esc(title)}</h3>
       <p class="muted" style="margin-top:-6px">Drag to reposition, use the slider to zoom.</p>
-      <div class="crop-wrap"><canvas id="cropCanvas" width="${SIZE}" height="${SIZE}"></canvas></div>
+      <div class="crop-wrap ${shape === "rect" ? "rect" : ""}" style="width:${W}px;height:${H}px"><canvas id="cropCanvas" width="${W}" height="${H}"></canvas></div>
       <input type="range" id="cropZoom" min="100" max="320" value="100" style="width:100%;margin-top:10px">`,
       "Use photo", () => { const out = finish(); closeDialog(); resolve(out); });
     let cancelled = true;
     const cancelBtn = el("dlgCancel"); if (cancelBtn) cancelBtn.addEventListener("click", () => { if (cancelled) resolve(null); }, { once: true });
     const canvas = el("cropCanvas"); const ctx = canvas.getContext("2d");
-    const cover = Math.max(SIZE / img.width, SIZE / img.height);
+    const cover = Math.max(W / img.width, H / img.height);
     let scale = cover; const minScale = cover;
-    let ox = (SIZE - img.width * scale) / 2, oy = (SIZE - img.height * scale) / 2;
-    const clamp = () => { const w = img.width * scale, h = img.height * scale; ox = Math.min(0, Math.max(SIZE - w, ox)); oy = Math.min(0, Math.max(SIZE - h, oy)); };
-    const draw = () => { ctx.clearRect(0, 0, SIZE, SIZE); ctx.drawImage(img, ox, oy, img.width * scale, img.height * scale); };
+    let ox = (W - img.width * scale) / 2, oy = (H - img.height * scale) / 2;
+    const clamp = () => { const w = img.width * scale, h = img.height * scale; ox = Math.min(0, Math.max(W - w, ox)); oy = Math.min(0, Math.max(H - h, oy)); };
+    const draw = () => { ctx.clearRect(0, 0, W, H); ctx.drawImage(img, ox, oy, img.width * scale, img.height * scale); };
     clamp(); draw();
     let dragging = false, lastX = 0, lastY = 0;
     canvas.style.touchAction = "none";
@@ -138,16 +140,16 @@ function openCropDialog(file) {
     canvas.onpointermove = e => { if (!dragging) return; ox += e.offsetX - lastX; oy += e.offsetY - lastY; lastX = e.offsetX; lastY = e.offsetY; clamp(); draw(); };
     canvas.onpointerup = () => { dragging = false; }; canvas.onpointerleave = () => { dragging = false; };
     el("cropZoom").oninput = e => {
-      const cx = SIZE / 2, cy = SIZE / 2, imgX = (cx - ox) / scale, imgY = (cy - oy) / scale;
+      const cx = W / 2, cy = H / 2, imgX = (cx - ox) / scale, imgY = (cy - oy) / scale;
       scale = minScale * (e.target.value / 100);
       ox = cx - imgX * scale; oy = cy - imgY * scale; clamp(); draw();
     };
     function finish() {
       cancelled = false;
-      const out = document.createElement("canvas"); out.width = 600; out.height = 600;
-      const k = 600 / SIZE;
+      const out = document.createElement("canvas"); out.width = outW; out.height = outH;
+      const k = outW / W;
       out.getContext("2d").drawImage(img, ox * k, oy * k, img.width * scale * k, img.height * scale * k);
-      return out.toDataURL("image/jpeg", 0.92);
+      return out.toDataURL("image/jpeg", quality);
     }
   });
 }
@@ -442,14 +444,15 @@ function onboardingBody() {
     <canvas id="authbg" class="auth-bg"></canvas>
     <div class="auth-card card">
       <div class="brand xl">Friend<span class="tilt">l</span>y</div>
-      <p class="auth-lede">Welcome, ${esc(p.name)}! A few optional details, then you're in.</p>
-      <button type="button" class="avatar-edit" id="obPhotoBtn" title="Add a photo" style="margin:0 auto 14px;display:block">${avatar(myUid(), "xxl")}<span class="cam">📷</span></button>
+      <p class="auth-lede">Welcome, ${esc(p.name)}! Let's finish setting up your profile.</p>
+      <p class="pic-cta">✨ Select a profile pic! ✨</p>
+      <button type="button" class="avatar-edit pulse" id="obPhotoBtn" title="Add a photo" style="margin:0 auto 14px;display:block">${avatar(myUid(), "xxl")}<span class="cam">📷</span></button>
       <form id="onboardForm" class="stack">
-        <label class="field"><span>Email <span class="muted">(optional, for calendar invites)</span></span>
+        <label class="field"><span>Email <span class="muted">for calendar invites</span></span>
           <input id="obEmail" type="email" placeholder="sam@example.com" autocomplete="email"></label>
-        <label class="field"><span>Venmo <span class="muted">(optional)</span></span>
+        <label class="field"><span>Venmo</span>
           <input id="obVenmo" placeholder="@sam-rivera" autocomplete="off"></label>
-        <label class="field"><span>Apple Cash number <span class="muted">(optional)</span></span>
+        <label class="field"><span>Apple Cash number</span>
           <input id="obApple" type="tel" placeholder="+1 555 123 4567" value="${esc(p.phone || "")}" autocomplete="tel"></label>
         <button class="btn primary lg" type="submit">Done</button>
       </form>
@@ -856,40 +859,35 @@ function openGroupDialog() {
     });
   document.querySelectorAll("#gEmoji button").forEach(b => b.onclick = () => { document.querySelectorAll("#gEmoji button").forEach(x => x.classList.remove("on")); b.classList.add("on"); });
 }
-function openInviteDialog(g) {
+// Shared contact-picker used to invite people to a group, event, or meeting:
+// pick from iPhone contacts or type name+phone. Friends already on Friendly
+// are handed back as `direct` (with a uid); everyone else as `texted` (phone
+// number only, to be added to a pending-invite list and texted a join link).
+// Phone number is the one thing every contact reliably has, and the one thing
+// the join/auto-add mechanisms actually match on.
+function pickPeopleDialog({ title, blurb, exclude, submitLabel = "Add & send", onSubmit }) {
   const me = myUid(); const picked = [];   // { name, phone, e164, uid|null }
   const nativeContacts = plugin("Contacts");
   const webPicker = !nativeContacts && ("contacts" in navigator && "ContactsManager" in window);
-  const known = [...S.contacts.entries()].filter(([u]) => u !== me && !(g.memberUids || []).includes(u));
+  const known = [...S.contacts.entries()].filter(([u]) => u !== me && !exclude.has(u));
   const byPhone = e164 => e164 && known.find(([, i]) => toE164(i.phone) === e164);
-  // Phone number only -- that's the one thing every contact reliably has, and
-  // the one thing the join and auto-add mechanisms actually match on.
   const addPicked = (name, phone) => {
     const e164 = toE164(phone); if (!e164) return toast(`Couldn't read a phone number for ${name || "that contact"}.`);
     if (picked.some(p => p.e164 === e164)) return;
-    const hit = byPhone(e164); picked.push({ name: name || (hit ? hit[1].name : "") || e164, phone, e164, uid: hit ? hit[0] : null }); renderPicked();
+    const hit = byPhone(e164); picked.push({ name: name || (hit ? hit[1].name : "") || "", phone, e164, uid: hit ? hit[0] : null }); renderPicked();
   };
-  const renderPicked = () => { const box = el("invChosen"); if (box) box.innerHTML = picked.map((p, i) => `<div class="inv-hit"><div style="flex:1;min-width:0"><b>${esc(p.name)}</b><div class="muted sm">${p.uid ? "On Friendly · added right away" : "Gets a text with the join link"}${p.e164 ? " · " + esc(p.e164) : ""}</div></div><button type="button" class="btn ghost small" data-unpick="${i}">✕</button></div>`).join("") || `<p class="muted sm">Nobody picked yet.</p>`; box.querySelectorAll("[data-unpick]").forEach(b => b.onclick = () => { picked.splice(+b.dataset.unpick, 1); renderPicked(); }); };
-  dialog(`<h3>Add people to ${esc(g.name)}</h3>
-    <p class="muted" style="margin-top:-6px">Pick them from your contacts. Friends already on Friendly are added on the spot; everyone else gets a text from you with a join link.</p>
+  const renderPicked = () => { const box = el("invChosen"); if (box) box.innerHTML = picked.map((p, i) => `<div class="inv-hit"><div style="flex:1;min-width:0"><b>${esc(p.name || p.e164)}</b><div class="muted sm">${p.uid ? "On Friendly · added right away" : "Gets a text with the join link"}${p.e164 ? " · " + esc(p.e164) : ""}</div></div><button type="button" class="btn ghost small" data-unpick="${i}">✕</button></div>`).join("") || `<p class="muted sm">Nobody picked yet.</p>`; box.querySelectorAll("[data-unpick]").forEach(b => b.onclick = () => { picked.splice(+b.dataset.unpick, 1); renderPicked(); }); };
+  dialog(`<h3>${esc(title)}</h3>
+    <p class="muted" style="margin-top:-6px">${esc(blurb)}</p>
     ${nativeContacts || webPicker ? `<button type="button" class="btn primary" id="invPick" style="width:100%">📇 Choose from contacts</button>` : `<p class="muted sm">Picking from your address book works in the Friendly iPhone app. Here, type a name and number:</p>`}
     <div class="two" style="margin-top:10px"><label class="field"><span>Name</span><input id="invName" placeholder="Jo Park" maxlength="40" autocomplete="off"></label><label class="field"><span>Phone</span><input id="invPhone" inputmode="tel" placeholder="+1 555 123 4567" autocomplete="off"></label></div>
     <button type="button" class="btn small" id="invAddManual">＋ Add to the list</button>
     <div class="inv-chosen" id="invChosen" style="margin-top:12px"></div>
     ${known.length ? `<details class="adv" style="margin-top:12px"><summary>Friends from your other groups</summary><input class="inv-search" id="invSearch" placeholder="Search by name…" autocomplete="off" style="margin-top:8px"><div class="inv-results" id="invResults"></div></details>` : ""}`,
-    "Add & send", async () => {
+    submitLabel, async () => {
       const direct = picked.filter(p => p.uid); const texted = picked.filter(p => !p.uid);
       if (!direct.length && !texted.length) return toast("Pick someone first.");
-      const updates = {};
-      if (direct.length) { updates.memberUids = [...new Set([...(g.memberUids || []), ...direct.map(p => p.uid)])]; for (const p of direct) { const info = S.contacts.get(p.uid) || {}; updates[`members.${p.uid}`] = { name: info.name || p.name || "Friend", venmo: info.venmo || "", phone: info.phone || "", photo: info.photo || "", birthday: info.birthday || "" }; } }
-      const addP = texted.map(p => p.e164).filter(n => !(g.invitedPhones || []).includes(n)); if (addP.length) updates.invitedPhones = [...(g.invitedPhones || []), ...addP];
-      for (const p of texted) if (p.e164) updates[`invitedPhoneNames.${p.e164}`] = p.name || "";
-      try {
-        if (Object.keys(updates).length) await updateDoc(doc(db, "groups", g.id), updates);
-        closeDialog(); toast(direct.length ? direct.length + " added" + (texted.length ? ", texting the rest" : "") : texted.length ? "Opening Messages…" : "Invites sent");
-        if (texted.length === 1) setTimeout(() => { location.href = smsLink([texted[0].e164], groupInviteText(g)); }, 400);
-        else if (texted.length > 1) setTimeout(() => openTextInviteDialog(texted, groupInviteText(g)), 400);
-      } catch (e) { toast(e.message); }
+      await onSubmit(direct, texted);
     });
   renderPicked();
   if (el("invAddManual")) el("invAddManual").onclick = () => { addPicked(el("invName").value.trim(), el("invPhone").value.trim()); el("invName").value = ""; el("invPhone").value = ""; };
@@ -912,6 +910,25 @@ function openInviteDialog(g) {
     renderResults(""); el("invSearch").oninput = e => renderResults(e.target.value);
     el("invResults").onclick = e => { const h = e.target.closest("[data-choose]"); if (h) { const i = S.contacts.get(h.dataset.choose) || {}; picked.push({ name: i.name || "Friend", phone: i.phone || "", e164: toE164(i.phone), uid: h.dataset.choose }); renderPicked(); renderResults(el("invSearch").value); } };
   }
+}
+function openInviteDialog(g) {
+  pickPeopleDialog({
+    title: `Add people to ${esc(g.name)}`,
+    blurb: "Pick them from your contacts. Friends already on Friendly are added on the spot; everyone else gets a text from you with a join link.",
+    exclude: new Set(g.memberUids || []),
+    onSubmit: async (direct, texted) => {
+      const updates = {};
+      if (direct.length) { updates.memberUids = [...new Set([...(g.memberUids || []), ...direct.map(p => p.uid)])]; for (const p of direct) { const info = S.contacts.get(p.uid) || {}; updates[`members.${p.uid}`] = { name: info.name || p.name || "Friend", venmo: info.venmo || "", phone: info.phone || "", photo: info.photo || "", birthday: info.birthday || "" }; } }
+      const addP = texted.map(p => p.e164).filter(n => !(g.invitedPhones || []).includes(n)); if (addP.length) updates.invitedPhones = [...(g.invitedPhones || []), ...addP];
+      for (const p of texted) if (p.e164) updates[`invitedPhoneNames.${p.e164}`] = p.name || "";
+      try {
+        if (Object.keys(updates).length) await updateDoc(doc(db, "groups", g.id), updates);
+        closeDialog(); toast(direct.length ? direct.length + " added" + (texted.length ? ", texting the rest" : "") : texted.length ? "Opening Messages…" : "Invites sent");
+        if (texted.length === 1) setTimeout(() => { location.href = smsLink([texted[0].e164], groupInviteText(g)); }, 400);
+        else if (texted.length > 1) setTimeout(() => openTextInviteDialog(texted, groupInviteText(g)), 400);
+      } catch (e) { toast(e.message); }
+    }
+  });
 }
 // The text an invitee gets. It comes from the inviter's own number via Messages.
 const groupInviteText = g => `Hey! I added you to our group "${g.name}" on Friendly, our crew's home base for plans, invites, photos, and settling up. Get the app: ${APP_STORE_URL} (free). Sign up with this phone number and you're in.`;
@@ -970,8 +987,8 @@ async function leaveGroup(g) {
 // ---------- COMPOSE (create event) ----------
 const compose = { theme: DEFAULT_THEME, emoji: "🎉", cover: null, coverTab: "emoji",
   title: "", date: "", time: "", end: "", where: "", notes: "", cap: "", approval: false,
-  questions: [], invitees: new Set(), cohosts: new Set(), groupId: "" };
-function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), cohosts: new Set(), groupId: "", kind: "event", repeat: "", guestEmails: "", _restored: false, _fromDraft: false }); }
+  questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "" };
+function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", repeat: "", _restored: false, _fromDraft: false }); }
 function composeBody() {
   restoreDraft();
   const emojis = ["🎉", "🍕", "🌮", "🍻", "🎂", "🎬", "🎮", "🏖️", "🥾", "⚽", "🎲", "🍜", "🎃", "🎄", "🕺", "🔥"];
@@ -1025,11 +1042,8 @@ function composeBody() {
       </div>
       <label class="field"><span>Where</span><input id="cWhere" maxlength="90" value="${esc(compose.where)}" placeholder="Address or vibe"></label>
       <label class="field"><span>The details</span><textarea id="cNotes" maxlength="600" placeholder="Dress code, what to bring, parking…">${esc(compose.notes)}</textarea></label>
-      <div class="two stack-sm">
-        <label class="field"><span>Repeats</span><select id="cRepeat"><option value="" ${!compose.repeat ? "selected" : ""}>Never</option><option value="weekly" ${compose.repeat === "weekly" ? "selected" : ""}>Every week</option><option value="biweekly" ${compose.repeat === "biweekly" ? "selected" : ""}>Every 2 weeks</option><option value="monthly" ${compose.repeat === "monthly" ? "selected" : ""}>Every month</option></select></label>
-        <label class="field"><span>Also email invites to</span><input id="cEmails" value="${esc(compose.guestEmails || "")}" placeholder="pat@example.com, sam@…"></label>
-      </div>
-      <p class="muted sm" style="margin:-4px 0 0">Guests get a calendar invite at their email on file. Add anyone who isn't on Friendly here.</p>
+      <label class="field"><span>Repeats</span><select id="cRepeat"><option value="" ${!compose.repeat ? "selected" : ""}>Never</option><option value="weekly" ${compose.repeat === "weekly" ? "selected" : ""}>Every week</option><option value="biweekly" ${compose.repeat === "biweekly" ? "selected" : ""}>Every 2 weeks</option><option value="monthly" ${compose.repeat === "monthly" ? "selected" : ""}>Every month</option></select></label>
+      <p class="muted sm" style="margin:-4px 0 0">Guests get a calendar invite at their email on file.</p>
     </div>
 
     <div class="section-head"><h2>Who's invited</h2></div>
@@ -1037,8 +1051,9 @@ function composeBody() {
       ${groups.length ? `<label class="field"><span>Invite a whole group</span>
         <select id="cGroup"><option value="">Hand-pick friends instead</option>${groups.map(g => `<option value="${g.id}" ${compose.groupId === g.id ? "selected" : ""}>${esc(g.emoji || "")} ${esc(g.name)} (${(g.memberUids || []).length})</option>`).join("")}</select></label>` : `<p class="muted">You're not in any groups yet. <a data-go="#/groups">Create one</a> to invite people, or invite friends you already share a group with below.</p>`}
       <div id="cPickWrap" class="${compose.groupId ? "hidden" : ""}">
-        <span class="field-label">Friends</span>
-        <div class="check-grid" id="cInvitees">${contactChecks("inv", compose.invitees)}</div>
+        <span class="field-label">Who's coming</span>
+        <div class="inv-chosen" id="cInvChosen">${composePickedInner()}</div>
+        <button type="button" class="btn small" id="cAddPeople">＋ Add people</button>
       </div>
       <div class="${compose.kind === "meeting" ? "hidden" : ""}">
       <details class="adv"><summary>Co-hosts &amp; approval</summary>
@@ -1046,9 +1061,6 @@ function composeBody() {
         <div class="check-grid" id="cCohosts">${contactChecks("coh", compose.cohosts)}</div>
         <label class="switch"><input type="checkbox" id="cApproval"><span>Approve guests before they're in</span></label>
       </details>
-      <label class="switch" style="margin-top:12px"><input type="checkbox" id="cOpenLink" ${compose.openLink === false ? "" : "checked"}><span>Anyone with the link can join (so you can text people who aren't on Friendly yet)</span></label>
-      <button type="button" class="btn small" id="cTextInvite" style="margin-top:10px">💬 Create &amp; text friends the invite</button>
-      <p class="muted sm" style="margin:6px 0 0">Creates the event, then opens Messages with the invite and link already written, sent from your own number.</p>
       </div>
     </div>
 
@@ -1077,12 +1089,34 @@ function contactChecks(name, set) {
   if (!others.length) return `<span class="muted sm">No friends yet. Invite people to a group first.</span>`;
   return others.map(([u, info]) => `<label class="cbox"><input type="checkbox" name="${name}" value="${u}" ${set.has(u) ? "checked" : ""}>${avatar(u)} ${esc(first(info.name))}</label>`).join("");
 }
+// Picked-guest list for a not-yet-created event: known Friendly contacts (added
+// straight to invitedUids on creation) plus phone-only picks (texted the join
+// link right after creation). Mirrors the live event page's own picker/list.
+function composePickedInner() {
+  const rows = [
+    ...[...compose.invitees].map(u => `<div class="inv-hit"><div style="flex:1;min-width:0"><b>${esc(nameOf(u))}</b><div class="muted sm">On Friendly · added right away</div></div><button type="button" class="btn ghost small" data-cunpick-u="${u}">✕</button></div>`),
+    ...compose.phoneInvitees.map((p, i) => `<div class="inv-hit"><div style="flex:1;min-width:0"><b>${esc(p.name || p.e164)}</b><div class="muted sm">Gets a text with the join link · ${esc(p.e164)}</div></div><button type="button" class="btn ghost small" data-cunpick-p="${i}">✕</button></div>`)
+  ];
+  return rows.join("") || `<p class="muted sm">Nobody added yet.</p>`;
+}
+function openComposeInviteDialog() {
+  pickPeopleDialog({
+    title: "Add people",
+    blurb: "Pick them from your contacts. Friends already on Friendly are added when you create the event; everyone else gets texted a join link right after.",
+    exclude: new Set([...compose.invitees, myUid()]),
+    submitLabel: "Add",
+    onSubmit: async (direct, texted) => {
+      for (const p of direct) compose.invitees.add(p.uid);
+      for (const p of texted) if (p.e164 && !compose.phoneInvitees.some(x => x.e164 === p.e164)) compose.phoneInvitees.push({ name: p.name || "", e164: p.e164 });
+      closeDialog(); syncCompose(); render();
+    }
+  });
+}
 function syncCompose() {
   compose.title = el("cTitle").value; compose.date = el("cDate").value; compose.time = el("cTime").value;
   compose.end = el("cEnd").value; compose.where = el("cWhere").value; compose.notes = el("cNotes").value;
   compose.cap = el("cCap").value; if (el("cApproval")) compose.approval = el("cApproval").checked;
-  if (el("cOpenLink")) compose.openLink = el("cOpenLink").checked;
-  if (el("cRepeat")) compose.repeat = el("cRepeat").value; if (el("cEmails")) compose.guestEmails = el("cEmails").value;
+  if (el("cRepeat")) compose.repeat = el("cRepeat").value;
   saveDraft();
 }
 function wireCompose() {
@@ -1098,12 +1132,14 @@ function wireCompose() {
   wireCover();
   document.querySelectorAll("[data-theme]").forEach(b => b.onclick = () => { syncCompose(); compose.theme = b.dataset.theme; render(); });
   const gsel = el("cGroup"); if (gsel) gsel.onchange = () => { compose.groupId = gsel.value; el("cPickWrap").classList.toggle("hidden", !!compose.groupId); };
+  if (el("cAddPeople")) el("cAddPeople").onclick = openComposeInviteDialog;
+  document.querySelectorAll("[data-cunpick-u]").forEach(b => b.onclick = () => { compose.invitees.delete(b.dataset.cunpickU); syncCompose(); render(); });
+  document.querySelectorAll("[data-cunpick-p]").forEach(b => b.onclick = () => { compose.phoneInvitees.splice(+b.dataset.cunpickP, 1); syncCompose(); render(); });
   el("addQ").onclick = () => { compose.questions.push({ id: newId().slice(0, 6), q: "" }); el("qList").insertAdjacentHTML("beforeend", qRow(compose.questions[compose.questions.length - 1])); wireQ(); };
   wireQ();
-  el("createEventBtn").onclick = () => createEvent(false);
+  el("createEventBtn").onclick = () => createEvent();
   document.querySelectorAll("[data-kind]").forEach(b => b.onclick = () => { syncCompose(); compose.kind = b.dataset.kind; render(); });
   if (el("discardDraft")) el("discardDraft").onclick = () => { localStorage.removeItem("friendlyDraft"); resetCompose(); compose._restored = true; render(); };
-  el("cTextInvite").onclick = () => createEvent(true);
 }
 function refreshCoverUI() {
   el("coverPanel").innerHTML = coverPanel();
@@ -1118,7 +1154,12 @@ function wireCover() {
   document.querySelectorAll("[data-ctab]").forEach(b => b.onclick = () => { compose.coverTab = b.dataset.ctab; refreshCoverUI(); });
   document.querySelectorAll("#cEmoji button").forEach(b => b.onclick = () => { compose.emoji = b.dataset.e; document.querySelectorAll("#cEmoji button").forEach(x => x.classList.remove("on")); b.classList.add("on"); const em = el("cPvEmoji"); if (em) em.textContent = b.dataset.e; });
   if (el("coverRemove")) el("coverRemove").onclick = () => { compose.cover = null; refreshCoverUI(); };
-  if (el("coverDrop")) el("coverDrop").onclick = async () => { const f = await pickFile(); if (!f) return; el("coverDrop").textContent = "Processing…"; try { compose.cover = await compressImage(f, 1600, 0.82); refreshCoverUI(); } catch { toast("Couldn't read that image."); el("coverDrop").textContent = "📷 Tap to upload a photo"; } };
+  if (el("coverDrop")) el("coverDrop").onclick = async () => {
+    const f = await pickFile(); if (!f) return;
+    const cropped = await openCropDialog(f, { shape: "rect", ratio: 16 / 9, outW: 1280, outH: 720, title: "Crop your cover photo" }); if (!cropped) return;
+    el("coverDrop").textContent = "Processing…";
+    try { compose.cover = await compressImage(cropped, 1600, 0.82); refreshCoverUI(); } catch { toast("Couldn't read that image."); el("coverDrop").textContent = "📷 Tap to upload a photo"; }
+  };
   if (el("aiGo")) el("aiGo").onclick = async () => {
     const p = el("aiPrompt").value.trim(); if (!p) return toast("Describe the vibe first.");
     el("coverPanel").innerHTML = `<div class="cover-spin"><div class="spinner"></div>Painting your cover…</div>`;
@@ -1131,12 +1172,17 @@ function wireQ() {
   document.querySelectorAll("[data-qdel]").forEach(b => b.onclick = () => { compose.questions = compose.questions.filter(q => q.id !== b.dataset.qdel); $(`.q-row[data-q="${b.dataset.qdel}"]`)?.remove(); });
   document.querySelectorAll("[data-qedit]").forEach(i => i.oninput = () => { const q = compose.questions.find(q => q.id === i.dataset.qedit); if (q) q.q = i.value; });
 }
-async function createEvent(thenText) {
+async function createEvent() {
   const title = el("cTitle").value.trim(); if (!title) return toast("Add a title.");
   const date = el("cDate").value; if (!date) return toast("Pick a date.");
-  let invitedUids, groupId = compose.groupId || null;
+  let invitedUids, invitedPhones = [], invitedPhoneNames = {}, groupId = compose.groupId || null;
   if (groupId) { const g = S.groups.get(groupId); invitedUids = [...new Set([...(g.memberUids || []), myUid()])]; }
-  else { invitedUids = [...new Set([...[...document.querySelectorAll('input[name=inv]:checked')].map(i => i.value), myUid()])]; }
+  else {
+    invitedUids = [...new Set([...compose.invitees, myUid()])];
+    invitedPhones = compose.phoneInvitees.map(p => p.e164);
+    invitedPhoneNames = Object.fromEntries(compose.phoneInvitees.map(p => [p.e164, p.name || ""]));
+  }
+  const phoneInviteesSnapshot = [...compose.phoneInvitees];
   const cohostUids = [...document.querySelectorAll('input[name=coh]:checked')].map(i => i.value).filter(u => u !== myUid());
   const questions = compose.questions.filter(q => q.q.trim());
   const id = newId();
@@ -1149,9 +1195,11 @@ async function createEvent(thenText) {
     location: el("cWhere").value.trim(), notes: el("cNotes").value.trim(),
     capacity: Number(el("cCap").value) || 0, approval: !!el("cApproval").checked,
     questions, rsvps: { [myUid()]: "going" }, plusOnes: {}, hypes: {}, answers: {},
-    openLink: el("cOpenLink") ? el("cOpenLink").checked : true,
+    // The event's own unguessable id is the access token behind the "add people" flow
+    // (anyone with the link can open + join), so it's always on now.
+    openLink: true,
     kind: compose.kind === "meeting" ? "meeting" : "event", repeat: el("cRepeat") ? el("cRepeat").value : "",
-    guestEmails: (el("cEmails") ? el("cEmails").value : "").split(",").map(x => x.trim().toLowerCase()).filter(x => x.includes("@")), sequence: 0,
+    invitedPhones, invitedPhoneNames, guestEmails: [], sequence: 0,
     createdAt: Date.now()
   };
   try {
@@ -1162,8 +1210,13 @@ async function createEvent(thenText) {
     const made = (ev.kind === "meeting" ? "Meeting" : "Event") + " created, invites are on their way";
     // Hosts with Calendar sync get it automatically; everyone else gets a one-tap add.
     if (S.profile && S.profile.calToken) toast(made); else toast(made, "Add to my calendar", () => openCalendarDialog({ ...ev, id }));
-    // "Create & text": hand off to Messages once the event page is up.
-    if (thenText) setTimeout(() => textEventInvite({ id, ...ev }), 400);
+    if (phoneInviteesSnapshot.length) {
+      const text = eventInviteText({ ...ev, id });
+      setTimeout(() => {
+        if (phoneInviteesSnapshot.length === 1) location.href = smsLink([phoneInviteesSnapshot[0].e164], text);
+        else openTextInviteDialog(phoneInviteesSnapshot, text);
+      }, 400);
+    }
   } catch (e) { toast("Couldn't create: " + e.message); el("createEventBtn").disabled = false; el("createEventBtn").textContent = "Create event & send invites"; }
 }
 
@@ -1260,9 +1313,15 @@ function eventInner(ev) {
   <div class="ev-card-glass">
     <div class="glass-head">Guest list <span>${(ev.invitedUids || []).length} invited</span></div>
     ${guestList || `<p class="muted-th">No guests yet.</p>`}
+    ${manage ? `<button class="btn-th ghost small" id="addPeopleBtn">＋ Add people</button>` : ""}
     ${manage && (ev.questions || []).length ? `<button class="btn-th ghost small" id="viewAnswers">View RSVP answers</button>` : ""}
     ${manage && (ev.invitedUids || []).filter(u => u !== me && !(ev.rsvps || {})[u]).length ? `<button class="btn-th ghost small" id="nudgeBtn">Nudge ${(ev.invitedUids || []).filter(u => u !== me && !(ev.rsvps || {})[u]).length} who haven't answered</button>` : ""}
   </div>
+
+  ${(ev.invitedPhones || []).length ? `<div class="ev-card-glass">
+    <div class="glass-head">Invited <span>${ev.invitedPhones.length} pending</span></div>
+    ${ev.invitedPhones.map(p => { const nm = (ev.invitedPhoneNames || {})[p]; return `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">💬</span><div style="flex:1;min-width:0"><b>${esc(nm || p)}</b><div class="muted sm">${nm ? esc(p) + " · " : ""}Hasn't joined yet</div></div>${manage ? `<span class="btnrow" style="gap:6px"><button class="btn ghost small" data-textinvite="${esc(p)}">Text</button><button class="btn ghost small" data-uninvitephone="${esc(p)}">✕</button></span>` : ""}</div>`; }).join("")}
+  </div>` : ""}
 
   <div class="ev-card-glass" id="dayCard">${dayInner(ev)}</div>
   <div class="ev-card-glass" id="pollsCard">${pollsInner(ev)}</div>
@@ -1272,7 +1331,6 @@ function eventInner(ev) {
 
   <div class="ev-actions">
     <button class="btn-th" data-share>Share invite</button>
-    ${manage ? `<button class="btn-th" data-text>Text invite</button>` : ""}
     <button class="btn-th" data-cal>Add to calendar</button>
     <button class="btn-th" data-expense>${cost ? fmt$(cost) + " · " : ""}Expenses</button>
     ${manage ? `<button class="btn-th" data-edit>Edit</button><button class="btn-th" data-dup>Duplicate</button><button class="btn-th danger" data-del>Delete</button>` : ""}
@@ -1510,7 +1568,9 @@ function wireEventPage(ev) {
   if (el("viewAnswers")) el("viewAnswers").onclick = () => showAnswers(ev);
   if (el("nudgeBtn")) el("nudgeBtn").onclick = () => nudge(ev, el("nudgeBtn"));
   const share = $("[data-share]"); if (share) share.onclick = () => shareEvent(ev);
-  const txt = $("[data-text]"); if (txt) txt.onclick = () => textEventInvite(ev);
+  if (el("addPeopleBtn")) el("addPeopleBtn").onclick = () => openEventInviteDialog(ev);
+  document.querySelectorAll("[data-textinvite]").forEach(b => b.onclick = () => { location.href = smsLink([b.dataset.textinvite], eventInviteText({ ...ev, openLink: true })); });
+  document.querySelectorAll("[data-uninvitephone]").forEach(b => b.onclick = () => uninviteEventPhone(ev, b.dataset.uninvitephone));
   const join = $("[data-join]"); if (join) join.onclick = () => joinViaLink(ev, join);
   const cal = $("[data-cal]"); if (cal) cal.onclick = () => downloadIcs(ev);
   const exp = $("[data-expense]"); if (exp) exp.onclick = () => openExpense(ev.id, ev.invitedUids, ev.groupId || null);
@@ -1695,15 +1755,46 @@ const FN_BASE = "https://us-central1-friendly-6992a.cloudfunctions.net";
 // Links people text or share go through /share/p/{id} so iMessage, WhatsApp
 // and Slack show a rich preview (cover, title, when); it forwards to the app.
 const eventUrl = ev => ev.openLink ? FN_BASE + "/share/p/" + ev.id : "https://officialfriendly.com/#/e/" + ev.id;
-// Text the invite from the organizer's own phone; the link lets people who
-// aren't on Friendly yet sign up and join (when "anyone with the link" is on).
-function textEventInvite(ev) {
-  const when = fmtWhen(ev) + (ev.location ? " at " + ev.location : "");
-  const body = `You're invited! ${ev.emoji || "🎉"} ${ev.title}, ${when}. RSVP here: ${eventUrl(ev)}` + (ev.openLink ? "" : " (sign up with the email I invited)");
-  location.href = smsLink([], body);
+// The text a texted invitee gets. It comes from the host's own number via Messages;
+// the link lets anyone -- Friendly member or not -- open the event and join.
+const eventInviteText = ev => { const when = fmtWhen(ev) + (ev.location ? " at " + ev.location : ""); return `You're invited! ${ev.emoji || "🎉"} ${ev.title}, ${when}. RSVP here: ${eventUrl(ev)}`; };
+// Add people to an existing event or meeting the same way people are added to
+// groups: known Friendly contacts go straight onto the guest list; everyone
+// else gets tracked in invitedPhones/invitedPhoneNames (for the "Invited" list
+// and a resend button) and texted the join link. The event's own unguessable
+// id is what actually lets them in (openLink+selfJoin), so this list is for
+// the host's tracking, not a security check.
+function openEventInviteDialog(ev) {
+  pickPeopleDialog({
+    title: "Add people",
+    blurb: "Pick them from your contacts. Friends already on Friendly are added on the spot; everyone else gets a text from you with a join link.",
+    exclude: new Set(ev.invitedUids || []),
+    onSubmit: async (direct, texted) => {
+      const updates = {};
+      if (direct.length) {
+        updates.invitedUids = [...new Set([...(ev.invitedUids || []), ...direct.map(p => p.uid)])];
+        updates.names = { ...(ev.names || {}) };
+        for (const p of direct) updates.names[p.uid] = nameOf(p.uid) !== "Someone" ? nameOf(p.uid) : (p.name || "Friend");
+      }
+      const addP = texted.map(p => p.e164).filter(n => !(ev.invitedPhones || []).includes(n)); if (addP.length) updates.invitedPhones = [...(ev.invitedPhones || []), ...addP];
+      for (const p of texted) if (p.e164) updates[`invitedPhoneNames.${p.e164}`] = p.name || "";
+      if (texted.length && !ev.openLink) updates.openLink = true;
+      try {
+        if (Object.keys(updates).length) await updateDoc(doc(db, "events", ev.id), updates);
+        closeDialog(); toast(direct.length ? direct.length + " added" + (texted.length ? ", texting the rest" : "") : texted.length ? "Opening Messages…" : "Invites sent");
+        const text = eventInviteText({ ...ev, openLink: true });
+        if (texted.length === 1) setTimeout(() => { location.href = smsLink([texted[0].e164], text); }, 400);
+        else if (texted.length > 1) setTimeout(() => openTextInviteDialog(texted, text), 400);
+      } catch (e) { toast(e.message); }
+    }
+  });
 }
+async function uninviteEventPhone(ev, e164) { try { await updateDoc(doc(db, "events", ev.id), { invitedPhones: (ev.invitedPhones || []).filter(p => p !== e164), [`invitedPhoneNames.${e164}`]: deleteField() }); } catch (e) { toast(e.message); } }
 async function joinViaLink(ev, btn) {
   if (btn) { btn.disabled = true; btn.textContent = "Joining…"; }
+  // Security rules only let a self-joiner touch invitedUids/names (see selfJoin()
+  // in firestore.rules) -- clearing their own entry from the host's invitedPhones
+  // tracking list needs the host to do it (the "✕" on the "Invited" list).
   try { await updateDoc(doc(db, "events", ev.id), { invitedUids: arrayUnion(myUid()), [`names.${myUid()}`]: S.profile.name }); toast("You're on the list! RSVP below."); }
   catch (e) { if (btn) { btn.disabled = false; btn.textContent = "Join this event"; } toast("Couldn't join: " + e.message); }
 }
@@ -2124,10 +2215,12 @@ function meetingBody(ev) {
   </div>` : ev.groupId && S.groups.has(ev.groupId) ? `<p class="muted" style="margin-top:12px">Adding you to this meeting…</p>` : ev.openLink ? `<div class="btnrow" style="margin-top:14px"><button class="btn primary" data-join>I'll be there</button></div>` : `<p class="muted" style="margin-top:12px">You're viewing this meeting but aren't on the invite list.</p>`}
   <div class="btnrow" style="margin-top:10px">
     <button class="btn small" data-cal>Add to calendar</button>
-    ${manage ? `<button class="btn small" data-text>Text invite</button><button class="btn small" data-nudge>Nudge non-responders</button><button class="btn small" data-edit>Edit</button><button class="btn small" data-dup>Duplicate</button><button class="btn small danger-ghost" data-del>Delete</button>` : ""}
+    ${manage ? `<button class="btn small" id="addPeopleBtn">＋ Add people</button><button class="btn small" data-nudge>Nudge non-responders</button><button class="btn small" data-edit>Edit</button><button class="btn small" data-dup>Duplicate</button><button class="btn small danger-ghost" data-del>Delete</button>` : ""}
   </div>
   <div class="section-head" style="margin-top:22px"><h2>Who's coming</h2></div>
   <div class="card" style="padding:8px 16px">${row("Accepted", g.going) + row("Maybe", g.maybe) + row("Declined", g.no) + row("No answer yet", g.none) || `<p class="muted">Nobody invited yet.</p>`}</div>
+  ${(ev.invitedPhones || []).length ? `<div class="section-head" style="margin-top:18px"><h2>Invited</h2></div>
+  <div class="card">${ev.invitedPhones.map(p => { const nm = (ev.invitedPhoneNames || {})[p]; return `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">💬</span><div style="flex:1;min-width:0"><b>${esc(nm || p)}</b><div class="muted sm">${nm ? esc(p) + " · " : ""}Hasn't joined yet</div></div>${manage ? `<span class="btnrow" style="gap:6px"><button class="btn ghost small" data-textinvite="${esc(p)}">Text</button><button class="btn ghost small" data-uninvitephone="${esc(p)}">✕</button></span>` : ""}</div>`; }).join("")}</div>` : ""}
   <div class="card th-plain" id="wall" style="margin-top:22px"><p class="muted">Loading…</p></div>`;
 }
 function wireMeeting(ev) {
@@ -2140,7 +2233,9 @@ function wireMeeting(ev) {
   document.querySelectorAll("[data-rsvp]").forEach(b => b.onclick = () => setRsvp(ev, b.dataset.rsvp));
   const j = $("[data-join]"); if (j) j.onclick = () => joinViaLink(ev, j);
   const cal = $("[data-cal]"); if (cal) cal.onclick = () => downloadIcs(ev);
-  const txt = $("[data-text]"); if (txt) txt.onclick = () => textEventInvite(ev);
+  if (el("addPeopleBtn")) el("addPeopleBtn").onclick = () => openEventInviteDialog(ev);
+  document.querySelectorAll("[data-textinvite]").forEach(b => b.onclick = () => { location.href = smsLink([b.dataset.textinvite], eventInviteText({ ...ev, openLink: true })); });
+  document.querySelectorAll("[data-uninvitephone]").forEach(b => b.onclick = () => uninviteEventPhone(ev, b.dataset.uninvitephone));
   const nd = $("[data-nudge]"); if (nd) nd.onclick = () => nudge(ev, nd);
   const ed = $("[data-edit]"); if (ed) ed.onclick = () => editEvent(ev);
   const dp = $("[data-dup]"); if (dp) dp.onclick = () => duplicateEvent(ev);
@@ -2300,7 +2395,7 @@ function restoreDraft() {
 }
 function duplicateEvent(ev) {
   resetCompose(); compose._restored = true;
-  Object.assign(compose, { title: ev.title, emoji: ev.emoji || "🎉", theme: ev.theme || DEFAULT_THEME, cover: ev.cover || null, coverTab: ev.cover ? "upload" : "emoji", time: ev.time || "", end: ev.endTime || "", where: ev.location || "", notes: ev.notes || "", cap: ev.capacity ? String(ev.capacity) : "", approval: !!ev.approval, questions: (ev.questions || []).map(q => ({ ...q, id: newId() })), groupId: ev.groupId || "", invitees: new Set(ev.groupId ? [] : (ev.invitedUids || []).filter(u => u !== myUid())), cohosts: new Set(ev.cohostUids || []), kind: ev.kind || "event", repeat: ev.repeat || "", openLink: ev.openLink !== false, date: "" });
+  Object.assign(compose, { title: ev.title, emoji: ev.emoji || "🎉", theme: ev.theme || DEFAULT_THEME, cover: ev.cover || null, coverTab: ev.cover ? "upload" : "emoji", time: ev.time || "", end: ev.endTime || "", where: ev.location || "", notes: ev.notes || "", cap: ev.capacity ? String(ev.capacity) : "", approval: !!ev.approval, questions: (ev.questions || []).map(q => ({ ...q, id: newId() })), groupId: ev.groupId || "", invitees: new Set(ev.groupId ? [] : (ev.invitedUids || []).filter(u => u !== myUid())), phoneInvitees: ev.groupId ? [] : Object.entries(ev.invitedPhoneNames || {}).map(([e164, name]) => ({ e164, name })), cohosts: new Set(ev.cohostUids || []), kind: ev.kind || "event", repeat: ev.repeat || "", date: "" });
   go("#/new"); toast("Copied. Pick a date and it's ready.");
 }
 // ---------- passwordless sign-in (email link) ----------
