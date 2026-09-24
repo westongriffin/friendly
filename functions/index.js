@@ -686,6 +686,28 @@ exports.onReport = onDocumentCreated({ document: "reports/{id}", ...PUSH }, asyn
   await notify(ADMIN_UIDS, "Content reported: " + (r.reason || "review needed"), String(r.snippet || r.kind || "").slice(0, 120), "/#/profile");
 });
 
+// A phone invite for someone who is already a member/guest (the host typed or
+// picked a number the picker couldn't recognize) is redundant: drop it so no
+// permanent "Hasn't joined yet" row lingers. Server-side because only the Admin
+// SDK can look a phone number up across all profiles.
+async function dropRedundantPhoneInvites(ref, before, after, memberUids) {
+  const fresh = (after.invitedPhones || []).filter(p => !(before.invitedPhones || []).includes(p));
+  if (!fresh.length) return;
+  const drop = [];
+  for (const p of fresh) {
+    const q = await db.collection("users").where("phoneE164", "==", p).limit(1).get();
+    if (!q.empty && memberUids.includes(q.docs[0].id)) drop.push(p);
+  }
+  if (!drop.length) return;
+  const up = { invitedPhones: FieldValue.arrayRemove(...drop) };
+  drop.forEach(p => { up["invitedPhoneNames." + p] = FieldValue.delete(); });
+  await ref.update(up).catch(err => logger.warn("dropRedundantPhoneInvites: " + err.message));
+}
+exports.onGroupUpdated = onDocumentUpdated({ document: "groups/{gid}" }, async e => {
+  const before = e.data.before.data(), after = e.data.after.data();
+  await dropRedundantPhoneInvites(e.data.after.ref, before, after, after.memberUids || []);
+});
+
 // Event updated: RSVP changes tell the host (and promote waitlisters), edits
 // re-send calendar invites, new guests get theirs, and the preview refreshes.
 exports.onRsvp = onDocumentUpdated({ document: "events/{id}", ...MAIL }, async e => {
@@ -700,6 +722,7 @@ exports.onRsvp = onDocumentUpdated({ document: "events/{id}", ...MAIL }, async e
     if (a[changed] === "going" && (b[changed] === "waitlist" || b[changed] === "pending"))
       await notify([changed], "You're in! " + after.title, b[changed] === "waitlist" ? "A spot opened up and it's yours." : "The host approved you.", "/#/e/" + id, { type: "rsvp" });
   }
+  await dropRedundantPhoneInvites(e.data.after.ref, before, after, after.invitedUids || []);
   const added = (after.invitedUids || []).filter(u => !(before.invitedUids || []).includes(u));
   // Someone joined through a shared link (not added by the host, not a group
   // member added automatically): tell the host and co-hosts, since nothing else would.

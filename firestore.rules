@@ -159,13 +159,14 @@ service cloud.firestore {
       }
       function selfJoin() {
         let keys = request.resource.data.diff(resource.data).affectedKeys();
-        return keys.hasOnly(['invitedUids', 'names', 'invitedPhones', 'invitedPhoneNames', 'joinedVia'])
+        return keys.hasOnly(['invitedUids', 'names', 'invitedPhones', 'invitedPhoneNames', 'joinedVia', 'phoneKeys'])
           && request.resource.data.invitedUids.hasAll(resource.data.invitedUids)
           && request.resource.data.invitedUids.size() == resource.data.invitedUids.size() + 1
           && uid() in request.resource.data.invitedUids
           // may add only their own name
           && (!('names' in keys) || request.resource.data.names.diff(resource.data.get('names', {})).affectedKeys().hasOnly([uid()]))
           && (!('joinedVia' in keys) || request.resource.data.joinedVia.diff(resource.data.get('joinedVia', {})).affectedKeys().hasOnly([uid()]))
+          && (!('phoneKeys' in keys) || request.resource.data.phoneKeys.diff(resource.data.get('phoneKeys', {})).affectedKeys().hasOnly([uid()]))
           // may remove only their own number from the pending-invite tracking list, never anyone else's
           && (!('invitedPhones' in keys) || (
                resource.data.get('invitedPhones', []).hasAll(request.resource.data.get('invitedPhones', []))

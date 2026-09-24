@@ -252,7 +252,19 @@ const toE164 = p => { const d = String(p || "").trim(); if (!d) return ""; const
 // at all, so a phone number becomes its sign-in "email" by pattern -- never
 // shown to anyone, never used to send mail. The real, human email (for
 // calendar invites) lives in the profile's separate `email` field instead.
+// One-way key for a phone number, stored on events as phoneKeys.<uid> so a host's
+// "Add people" can tell a typed number is already a guest without the event
+// exposing anyone's actual number to the other guests.
+async function phoneKey(e164) { const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("friendly:" + e164)); return [...new Uint8Array(b)].slice(0, 12).map(x => x.toString(16).padStart(2, "0")).join(""); }
 const phoneAuthEmail = e164 => e164.replace(/[^0-9]/g, "") + "@phone.officialfriendly.com";
+// The phone this account signs in with. Prefer the profile's phoneE164; fall back to
+// the digits baked into a phone-style sign-in identifier, so a profile whose phone
+// field was left blank or cleared never loses its number for invites and joins.
+function myPhoneE164() {
+  if (S.profile && S.profile.phoneE164) return S.profile.phoneE164;
+  const m = /^(\d{7,15})@phone\.officialfriendly\.com$/.exec((S.user && S.user.email) || "");
+  return m ? "+" + m[1] : "";
+}
 // Birthdays are stored as YYYY-MM-DD (the year is optional to the user; we only use month and day).
 function nextBirthday(b) { if (!b || b.length < 5) return null; const [, mm, dd] = /(\d{2})-(\d{2})$/.exec(b) || []; if (!mm) return null; const now = new Date(); let d = new Date(now.getFullYear(), +mm - 1, +dd); const t0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()); if (d < t0) d = new Date(now.getFullYear() + 1, +mm - 1, +dd); return d; }
 const daysToBirthday = b => { const d = nextBirthday(b); if (!d) return null; const now = new Date(); return Math.round((d - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000); };
@@ -369,6 +381,9 @@ function subscribeAll(u) {
   let invitesPhoneUnsub = null, invitesPhoneKey = null;
   add(on("profile", doc(db, "users", u.uid), d => {
     S.profile = d.data(); rebuildContacts(); S.ready = true;
+    // Backfill a missing phoneE164 from the sign-in identifier (once), so phone
+    // invites and joins match for accounts whose profile phone was left blank.
+    if (S.profile && !S.profile.phoneE164 && myPhoneE164() && !S._phoneHealed) { S._phoneHealed = true; updateDoc(doc(db, "users", u.uid), { phoneE164: myPhoneE164() }).catch(() => {}); }
     const pk = (S.profile && S.profile.phoneE164) || "";
     if (pk && pk !== invitesPhoneKey) {
       invitesPhoneKey = pk;
@@ -526,7 +541,7 @@ function wireOnboarding() {
   const finish = async () => {
     const email = el("obEmail").value.trim(), venmo = el("obVenmo").value.trim(), apple = el("obApple").value.trim();
     try {
-      await updateDoc(doc(db, "users", myUid()), { email: email.toLowerCase(), venmo, phone: apple, phoneE164: toE164(apple) || S.profile.phoneE164, onboarded: true });
+      await updateDoc(doc(db, "users", myUid()), { email: email.toLowerCase(), venmo, phone: apple, phoneE164: toE164(apple) || myPhoneE164(), onboarded: true });
     } catch (e) { toast(e.message); }
   };
   el("onboardForm").onsubmit = e => { e.preventDefault(); finish(); };
@@ -775,7 +790,7 @@ function myEvents() {
 
 // ---------- HOME ----------
 let homeFilter = "all";
-let homeView = localStorage.getItem("friendlyHomeView") || "cards";   // "cards" | "calendar"
+let homeView = "cards"; try { homeView = localStorage.getItem("friendlyHomeView") || "cards"; } catch {} // "cards" | "calendar"
 let calYM = null, calDay = null;   // month shown in the calendar, and a tapped day
 const fmtDay = ev => evDate(ev).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 const RSVP_LABEL = { going: "You're going", maybe: "Maybe", no: "Can't go", waitlist: "Waitlisted", pending: "Pending" };
@@ -864,7 +879,7 @@ function wireHome() {
   if (el("calClear")) el("calClear").onclick = () => { calDay = null; render(); };
   document.querySelectorAll("[data-calday]").forEach(c => c.onclick = () => { calDay = calDay === c.dataset.calday ? null : c.dataset.calday; render(); });
   if (el("pushOn")) el("pushOn").onclick = enableWebPush;
-  if (el("pushLater")) el("pushLater").onclick = () => { localStorage.setItem("friendlyPushDismissed", "1"); render(); };
+  if (el("pushLater")) el("pushLater").onclick = () => { try { localStorage.setItem("friendlyPushDismissed", "1"); } catch {} render(); };
 }
 
 // ---------- GROUPS ----------
@@ -992,19 +1007,21 @@ function openGroupDialog() {
 // number only, to be added to a pending-invite list and texted a join link).
 // Phone number is the one thing every contact reliably has, and the one thing
 // the join/auto-add mechanisms actually match on.
-function pickPeopleDialog({ title, blurb, exclude, submitLabel = "Add & send", onSubmit }) {
+function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), submitLabel = "Add & send", onSubmit }) {
   const me = myUid(); const picked = [];   // { name, phone, e164, uid|null }
   const nativeContacts = plugin("Contacts");
   const webPicker = !nativeContacts && ("contacts" in navigator && "ContactsManager" in window);
   const known = [...S.contacts.entries()].filter(([u]) => u !== me && !exclude.has(u));
   const byPhone = e164 => e164 && known.find(([, i]) => toE164(i.phone) === e164);
-  const addPicked = (name, phone) => {
+  const addPicked = async (name, phone) => {
     const e164 = toE164(phone); if (!e164) return toast(`Couldn't read a phone number for ${name || "that contact"}.`);
     if (picked.some(p => p.e164 === e164)) return;
     // Already on this event/group (the picker hides them, but a typed or address-book
     // number wouldn't otherwise be recognized and would text them a second invite).
     const dup = [...S.contacts.entries()].find(([u, i]) => exclude.has(u) && toE164(i.phone) === e164);
     if (dup) return toast(`${first(dup[1].name || "") || "They"} ${dup[0] === me ? "-- that's you" : "is already on the list"}.`);
+    // People the host doesn't share a group with (they joined by link) are known only by phone key.
+    if (excludeKeys.size) { const k = await phoneKey(e164); if (excludeKeys.has(k)) return toast(`${first(excludeKeys.get(k) || "") || "They"} is already on the list.`); }
     const hit = byPhone(e164); picked.push({ name: name || (hit ? hit[1].name : "") || "", phone, e164, uid: hit ? hit[0] : null }); renderPicked();
   };
   const renderPicked = () => { const box = el("invChosen"); if (box) box.innerHTML = picked.map((p, i) => `<div class="inv-hit"><div style="flex:1;min-width:0"><b>${esc(p.name || p.e164)}</b><div class="muted sm">${p.uid ? "On Friendly · added right away" : "Gets a text with the join link"}${p.e164 ? " · " + esc(p.e164) : ""}</div></div><button type="button" class="btn ghost small" data-unpick="${i}">✕</button></div>`).join("") || `<p class="muted sm">Nobody picked yet.</p>`; box.querySelectorAll("[data-unpick]").forEach(b => b.onclick = () => { picked.splice(+b.dataset.unpick, 1); renderPicked(); }); };
@@ -1345,7 +1362,7 @@ function wireCompose() {
   wireQ();
   el("createEventBtn").onclick = () => createEvent();
   document.querySelectorAll("[data-kind]").forEach(b => b.onclick = () => { syncCompose(); compose.kind = b.dataset.kind; render(); });
-  if (el("discardDraft")) el("discardDraft").onclick = () => { localStorage.removeItem("friendlyDraft"); resetCompose(); compose._restored = true; render(); };
+  if (el("discardDraft")) el("discardDraft").onclick = () => { try { localStorage.removeItem("friendlyDraft"); } catch {} resetCompose(); compose._restored = true; render(); };
 }
 function refreshCoverUI() {
   el("coverPanel").innerHTML = coverPanel();
@@ -1411,7 +1428,7 @@ async function createEvent() {
   try {
     el("createEventBtn").disabled = true; el("createEventBtn").textContent = "Creating…";
     await setDoc(doc(db, "events", id), ev);
-    composeStop(); resetCompose(); localStorage.removeItem("friendlyDraft");
+    composeStop(); resetCompose(); try { localStorage.removeItem("friendlyDraft"); } catch {}
     go("#/e/" + id);
     const made = (ev.kind === "meeting" ? "Meeting" : "Event") + " created, invites are on their way";
     // Hosts with Calendar sync get it automatically; everyone else gets a one-tap add.
@@ -1808,7 +1825,7 @@ function wireEventPage(ev) {
   S._autoJoined = S._autoJoined || new Set();
   if (!(ev.invitedUids || []).includes(myUid()) && ev.groupId && S.groups.has(ev.groupId) && !S._autoJoined.has(id)) {
     S._autoJoined.add(id);
-    updateDoc(doc(db, "events", id), { invitedUids: arrayUnion(myUid()), [`names.${myUid()}`]: S.profile.name }).catch(e => console.warn("auto-join failed:", e.message));
+    (async () => { const up = { invitedUids: arrayUnion(myUid()), [`names.${myUid()}`]: S.profile.name }; if (myPhoneE164()) up[`phoneKeys.${myUid()}`] = await phoneKey(myPhoneE164()); return updateDoc(doc(db, "events", id), up); })().catch(e => console.warn("auto-join failed:", e.message));
   }
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
   document.querySelectorAll("[data-rsvp]").forEach(b => b.onclick = () => attemptRsvp(ev, b.dataset.rsvp));
@@ -2076,6 +2093,7 @@ function openEventInviteDialog(ev) {
     title: "Add people",
     blurb: "Pick them from your contacts. Friends already on Friendly are added on the spot; everyone else gets a text from you with a join link.",
     exclude: new Set(ev.invitedUids || []),
+    excludeKeys: new Map(Object.entries(ev.phoneKeys || {}).filter(([u]) => (ev.invitedUids || []).includes(u)).map(([u, k]) => [k, (ev.names || {})[u] || nameOf(u)])),
     onSubmit: async (direct, texted) => {
       const updates = {};
       if (direct.length) {
@@ -2102,9 +2120,10 @@ async function joinViaLink(ev, btn) {
   // joinedVia marks a link join so the host gets a "joined via your link" heads-up
   // (group members added automatically don't set it).
   const patch = { invitedUids: arrayUnion(myUid()), [`names.${myUid()}`]: S.profile.name, [`joinedVia.${myUid()}`]: "link" };
+  if (myPhoneE164()) patch[`phoneKeys.${myUid()}`] = await phoneKey(myPhoneE164());
   // selfJoin() in firestore.rules lets a joiner also clear their own entry from
   // the host's invitedPhones tracking list, but only their own -- never anyone else's.
-  const myPhone = S.profile.phoneE164;
+  const myPhone = myPhoneE164();
   if (myPhone && (ev.invitedPhones || []).includes(myPhone)) { patch.invitedPhones = arrayRemove(myPhone); patch[`invitedPhoneNames.${myPhone}`] = deleteField(); }
   try { await updateDoc(doc(db, "events", ev.id), patch); toast("You're on the list! RSVP below."); }
   catch (e) { if (btn) { btn.disabled = false; btn.textContent = "Join this event"; } toast("Couldn't join: " + e.message); }
@@ -2433,7 +2452,7 @@ function wireProfile() {
     try {
       const birthday = (el("pBday") || {}).value || "";
       const email = (el("pEmail") || {}).value || ""; if (email && !email.includes("@")) return toast("That email doesn't look right.");
-      await updateDoc(doc(db, "users", myUid()), { name, venmo, phone, phoneE164: toE164(phone), birthday, email: email.trim().toLowerCase() });
+      await updateDoc(doc(db, "users", myUid()), { name, venmo, phone, phoneE164: toE164(phone) || myPhoneE164(), birthday, email: email.trim().toLowerCase() });
       // propagate name/contact into each group's denormalized members map
       for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}`]: { name, venmo, phone, photo: S.profile.photo || "", birthday } }).catch(() => {});
       toast("Profile saved");
@@ -2506,7 +2525,8 @@ const newCountFor = urlTail => (S.activity || []).filter(a => a.createdAt > seen
 const isNewEvent = ev => (S.activity || []).some(a => a.createdAt > seenAt() && !isPeeked(a) && String(a.url || "").endsWith("#/e/" + ev.id));
 const actIcon = a => /joined via your link/.test(a.title) ? "🔗" : /waiting on your RSVP/.test(a.title) ? "📣" : /mentioned you/.test(a.title) ? "＠" : /to a meeting/.test(a.title) ? "📅" : /You're in!/.test(a.title) ? "🎟️" : /still owe/.test(a.title) ? "💸" : /invited you/.test(a.title) ? "🎟️" : /^Today:/.test(a.title) ? "⏰" : /reported/i.test(a.title) ? "⚑" : /is going|might come|can't make|joined the waitlist|requested/.test(a.title) ? "✅" : "💬";
 function notifCard() {
-  if (NATIVE || localStorage.getItem("friendlyPushDismissed")) return "";
+  let pushDismissed = false; try { pushDismissed = !!localStorage.getItem("friendlyPushDismissed"); } catch {}
+  if (NATIVE || pushDismissed) return "";
   const st = pushState(); if (st !== "off") return "";
   const needsInstall = IOS && !STANDALONE;
   return `<div class="card notif-card"><span class="li">🔔</span><div style="flex:1;min-width:0"><b>${needsInstall ? "Get a buzz when plans change" : "Turn on notifications"}</b><div class="muted sm">${needsInstall ? "Add Friendly to your Home Screen (Share → Add to Home Screen), then turn them on from your profile." : "New invites, comments, RSVPs, and day-of reminders, right on this device."}</div></div><div class="btnrow">${needsInstall ? "" : `<button class="btn primary small" id="pushOn">Turn on</button>`}<button class="btn ghost small" id="pushLater">Later</button></div></div>`;
@@ -2556,7 +2576,7 @@ function wireMeeting(ev) {
   S._autoJoined = S._autoJoined || new Set();
   if (!(ev.invitedUids || []).includes(myUid()) && ev.groupId && S.groups.has(ev.groupId) && !S._autoJoined.has(ev.id)) {
     S._autoJoined.add(ev.id);
-    updateDoc(doc(db, "events", ev.id), { invitedUids: arrayUnion(myUid()), [`names.${myUid()}`]: S.profile.name }).catch(e => console.warn("auto-join failed:", e.message));
+    (async () => { const up = { invitedUids: arrayUnion(myUid()), [`names.${myUid()}`]: S.profile.name }; if (myPhoneE164()) up[`phoneKeys.${myUid()}`] = await phoneKey(myPhoneE164()); return updateDoc(doc(db, "events", ev.id), up); })().catch(e => console.warn("auto-join failed:", e.message));
   }
   document.querySelectorAll("[data-rsvp]").forEach(b => b.onclick = () => setRsvp(ev, b.dataset.rsvp));
   document.querySelectorAll("[data-viewprofile]").forEach(el2 => el2.onclick = () => openProfileDialog(el2.dataset.viewprofile));
