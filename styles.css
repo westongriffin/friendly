@@ -75,6 +75,8 @@ img{max-width:100%}
 .wrap{max-width:720px;margin:0 auto;padding:12px 18px 120px}
 .fab{position:fixed;right:20px;bottom:calc(22px + env(safe-area-inset-bottom));width:58px;height:58px;border-radius:50%;background:var(--accent);color:#fff;font-size:28px;font-weight:400;box-shadow:var(--shadow-lg);z-index:30}
 .fab:hover{background:var(--accent-strong)}
+/* Soft fade behind the FAB so it reads as floating above content rather than stamped on a card. */
+.fab-scrim{position:fixed;left:0;right:0;bottom:0;height:calc(110px + env(safe-area-inset-bottom));background:linear-gradient(to top, var(--bg), transparent);pointer-events:none;z-index:25}
 
 .section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:18px 0 12px}
 /* activity bell + feed + notification prompt */
@@ -239,6 +241,8 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .preview-emoji{font-size:40px}
 .preview-title{font-family:inherit;font-weight:700;font-size:28px;line-height:1.05;letter-spacing:-.02em;margin-top:4px}
 .preview-date{font-weight:600;opacity:.9;margin-top:4px}
+.theme-strip-wrap{position:relative}
+.theme-strip-wrap::after{content:"";position:absolute;top:0;right:0;bottom:8px;width:40px;background:linear-gradient(to right, transparent, var(--bg));pointer-events:none}
 .theme-strip{display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;scrollbar-width:none}
 .theme-strip::-webkit-scrollbar{display:none}
 .theme-swatch{position:relative;flex:none;width:120px;height:80px;border-radius:14px;overflow:hidden;border:2px solid transparent;isolation:isolate;box-shadow:var(--shadow)}
@@ -271,6 +275,11 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 
 .ev-card-glass{background:var(--th-card);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.14);border-radius:18px;padding:16px;margin-top:14px;color:var(--th-ink)}
 .ev-notes{white-space:normal;line-height:1.5;font-size:15px}
+
+.ev-jumpnav{position:sticky;top:max(8px, env(safe-area-inset-top));z-index:5;display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin-top:14px;padding:8px;background:var(--th-card);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.14);border-radius:14px}
+.ev-jumpnav::-webkit-scrollbar{display:none}
+.jump-chip{flex:none;font-size:13px;font-weight:600;color:var(--th-ink);background:var(--th-chip);padding:7px 14px;border-radius:999px;white-space:nowrap}
+.jump-chip:hover{background:var(--th-accent);color:var(--th-on-accent)}
 .glass-head{display:flex;align-items:center;justify-content:space-between;font-family:var(--th-font);font-weight:700;font-size:16px;margin-bottom:12px}
 .glass-head.sm{font-size:13px} .glass-head span{font-family:var(--body);font-weight:600;font-size:12px;color:var(--th-sub)}
 .muted-th{color:var(--th-sub)}

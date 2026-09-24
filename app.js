@@ -587,10 +587,11 @@ function shell(body) {
     ${T("money", "Money", "#/money")}
   </nav>
   <main class="wrap">${inviteBanner()}${body}</main>
-  ${["new", "group", "expense", "profile"].includes(tab) ? "" : `<button class="fab" data-go="#/new" title="Create event">＋</button>`}`;
+  ${["new", "group", "expense", "profile"].includes(tab) ? "" : `<div class="fab-scrim"></div><button class="fab" id="fabBtn" title="${tab === "groups" ? "New group" : "Create event"}">＋</button>`}`;
 }
 function wireShell() {
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
+  if (el("fabBtn")) el("fabBtn").onclick = () => S.route.name === "groups" ? openGroupDialog() : go("#/new");
   document.querySelectorAll("[data-accept]").forEach(b => b.onclick = () => acceptInvite(b.dataset.accept, b));
   if (S.route.name === "home") wireHome();
   if (S.route.name === "new") wireCompose();
@@ -1054,9 +1055,11 @@ function composeBody() {
     </div>
 
     <div class="section-head" style="margin-top:18px"><h2>Theme</h2></div>
+    <div class="theme-strip-wrap">
     <div class="theme-strip" id="themeStrip">
-      ${THEMES.map(t => `<button class="theme-swatch t-${t.id} ${t.id === compose.theme ? "on" : ""}" data-theme="${t.id}" title="${t.name}"><span class="theme-swatch-bg"></span><span class="theme-name" style="font-family:${t.font},system-ui">${esc(t.name)}</span></button>`).join("")}
       <button type="button" class="theme-swatch t-custom ${compose.theme === "custom" ? "on" : ""}" id="customThemeBtn" title="Create your own" style="--th-accent:${(compose.customTheme || {}).accent || "#B388FF"}"><span class="theme-swatch-bg"></span><span class="theme-name" style="font-family:${(compose.customTheme || {}).font || "'Bricolage Grotesque'"},system-ui">🎨 ${compose.customTheme ? "Your Theme" : "Create your own"}</span></button>
+      ${THEMES.map(t => `<button class="theme-swatch t-${t.id} ${t.id === compose.theme ? "on" : ""}" data-theme="${t.id}" title="${t.name}"><span class="theme-swatch-bg"></span><span class="theme-name" style="font-family:${t.font},system-ui">${esc(t.name)}</span></button>`).join("")}
+    </div>
     </div>
     </div>
 
@@ -1376,11 +1379,21 @@ function eventInner(ev) {
     ${hypeBar}
   </div>
 
+  <div class="ev-jumpnav">
+    <button type="button" class="jump-chip" data-jump="rsvpCard">RSVP</button>
+    <button type="button" class="jump-chip" data-jump="guestCard">Guests</button>
+    <button type="button" class="jump-chip" data-jump="dayCard">Day of</button>
+    <button type="button" class="jump-chip" data-jump="pollsCard">Polls</button>
+    <button type="button" class="jump-chip" data-jump="playlistCard">Playlist</button>
+    <button type="button" class="jump-chip" data-jump="photosCard">Photos</button>
+    <button type="button" class="jump-chip" data-jump="wall">Wall</button>
+  </div>
+
   ${ev.notes ? `<div class="ev-card-glass ev-notes">${esc(ev.notes).replace(/\n/g, "<br>")}</div>` : ""}
 
-  <div class="ev-card-glass">${rsvpBtns}</div>
+  <div class="ev-card-glass" id="rsvpCard">${rsvpBtns}</div>
 
-  <div class="ev-card-glass">
+  <div class="ev-card-glass" id="guestCard">
     <div class="glass-head">Guest list <span>${(ev.invitedUids || []).length} invited</span></div>
     ${guestList || `<p class="muted-th">No guests yet.</p>`}
     ${manage ? `<button class="btn-th ghost small" id="addPeopleBtn">＋ Add people</button>` : ""}
@@ -1641,6 +1654,7 @@ function wireEventPage(ev) {
   const id = ev.id;
   markPeeked("#/e/" + ev.id);
   wireDay(ev); loadWeather(ev); maybePostRecap(ev);
+  document.querySelectorAll("[data-jump]").forEach(b => b.onclick = () => { const t = el(b.dataset.jump); if (t) t.scrollIntoView({ behavior: "smooth", block: "start" }); });
   document.querySelectorAll("[data-viewprofile]").forEach(el2 => el2.onclick = () => openProfileDialog(el2.dataset.viewprofile));
   const dup = $("[data-dup]"); if (dup) dup.onclick = () => duplicateEvent(ev);
   // Group members who joined after the event was created aren't in invitedUids
