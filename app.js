@@ -27,6 +27,24 @@ const NATIVE = !!(CAP && CAP.isNativePlatform && CAP.isNativePlatform());
 // The iOS shell already keeps the web view below the status bar and above the
 // home indicator, so the CSS safe-area padding would double up there.
 if (NATIVE) document.documentElement.classList.add("native");
+
+// A phone hitting the plain web site (not the native app -- NATIVE covers that,
+// since the app shell also loads this same origin) belongs in the App Store,
+// not the mobile web build. Full-screen block, no way to continue in browser.
+const APP_STORE_URL = "https://apps.apple.com/app/id6810875052";
+const BLOCKED_MOBILE_WEB = !NATIVE && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+if (BLOCKED_MOBILE_WEB) {
+  document.getElementById("app").innerHTML = `
+  <div class="auth-wrap">
+    <div class="auth-bg"></div>
+    <div class="auth-card card">
+      <div class="brand xl">Friend<span class="tilt">l</span>y</div>
+      <p class="auth-lede">Friendly is best on the app. Taking you to the App Store…</p>
+      <a class="btn primary lg" href="${APP_STORE_URL}">Get the Friendly app</a>
+    </div>
+  </div>`;
+  location.href = APP_STORE_URL;
+}
 // Native plugins: the shell loads this site remotely, so no bundled JS registers the
 // plugins. Capacitor.Plugins is empty until registerPlugin() is called for a plugin
 // the native side reports as available.
@@ -228,7 +246,6 @@ function birthdayCard() {
   const b = list.find(x => !dismissed.includes(x.uid + ":" + x.date)); if (!b) return "";
   return `<div class="card notif-card"><span class="notif-ico">🎂</span><div style="flex:1"><b>${esc(first(b.name))}'s birthday is ${b.days === 0 ? "today" : b.days === 1 ? "tomorrow" : "in " + b.days + " days"}</b><div class="muted sm">${esc(fmtDay({ date: b.date }))}. A month out is the sweet spot to plan something.</div></div><span class="btnrow" style="gap:6px"><button class="btn primary small" data-bplan="${b.uid}">Plan something</button><button class="btn ghost small" data-bdismiss="${b.uid}:${b.date}">Later</button></span></div>`;
 }
-const APP_STORE_URL = "https://apps.apple.com/app/id6810875052";
 function smsLink(numbers, body) { const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?"; return "sms:" + numbers.map(n => n.replace(/[^+\d]/g, "")).join(",") + sep + "body=" + encodeURIComponent(body); }
 // Address autocomplete via Google Places (New). Active only once `mapsKey` is
 // set in firebase-config.js; without it the field stays a plain text box.
@@ -419,6 +436,7 @@ function avatar(uid, cls = "") { const info = S.contacts.get(uid) || {}; const n
 
 // ---------- render root ----------
 function render() {
+  if (BLOCKED_MOBILE_WEB) return;
   const root = el("app");
   // The loading screen stays up for at least two seconds so it never flashes.
   if (!S.ready || Date.now() - BOOT_AT < SPLASH_MIN) {
@@ -1361,7 +1379,10 @@ function eventInner(ev) {
     if (!g[k].length) return "";
     const label = { going: "Going", maybe: "Maybe", waitlist: "Waitlist", pending: "Awaiting approval", no: "Can't make it", none: "Invited" }[k];
     return `<div class="guest-group"><div class="guest-label">${label} · ${g[k].length}</div><div class="guest-chips">${g[k].map(u => `
-      <span class="guest-chip"><span data-viewprofile="${u}" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px">${avatar(u)}${esc(first(nameOf(u)))}</span>${(ev.plusOnes || {})[u] ? `<i class="plusone">+${ev.plusOnes[u]}</i>` : ""}
+      <span class="guest-chip"><span data-viewprofile="${u}" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px">${avatar(u)}${esc(first(nameOf(u)))}</span>${(ev.plusOnes || {})[u] ? (() => {
+        const n = ev.plusOnes[u]; const raw = (ev.plusNames || {})[u]; const names = (Array.isArray(raw) ? raw : (raw ? [raw] : [])).filter(Boolean);
+        return `<i class="plusone">+${n}${names.length ? ` (${names.map(esc).join(", ")})` : ""}</i>`;
+      })() : ""}
       ${manage && (k === "pending") ? `<button class="approve" data-approve="${u}" title="Approve">✓</button>` : ""}
       ${manage && (k === "waitlist") ? `<button class="approve" data-promote="${u}" title="Move in">↑</button>` : ""}</span>`).join("")}</div></div>`;
   }).join("");
