@@ -1479,7 +1479,8 @@ function eventInner(ev) {
         return `<i class="plusone">+${n}${names.length ? ` (${names.map(esc).join(", ")})` : ""}</i>`;
       })() : ""}
       ${manage && (k === "pending") ? `<button class="approve" data-approve="${u}" title="Approve">✓</button>` : ""}
-      ${manage && (k === "waitlist") ? `<button class="approve" data-promote="${u}" title="Move in">↑</button>` : ""}</span>`).join("")}</div></div>`;
+      ${manage && (k === "waitlist") ? `<button class="approve" data-promote="${u}" title="Move in">↑</button>` : ""}
+      ${manage && u !== me && u !== ev.hostId ? `<button class="approve remove" data-removeguest="${u}" title="Remove from guest list">✕</button>` : ""}</span>`).join("")}</div></div>`;
   }).join("");
 
   const cost = [...S.expenses.values()].filter(x => x.eventId === ev.id).reduce((t, x) => t + x.amountCents, 0);
@@ -1795,6 +1796,7 @@ function wireEventPage(ev) {
   document.querySelectorAll("[data-hype]").forEach(b => b.onclick = () => setHype(ev, b.dataset.hype));
   document.querySelectorAll("[data-approve]").forEach(b => b.onclick = () => hostSetRsvp(ev, b.dataset.approve, "going"));
   document.querySelectorAll("[data-promote]").forEach(b => b.onclick = () => hostSetRsvp(ev, b.dataset.promote, "going"));
+  document.querySelectorAll("[data-removeguest]").forEach(b => b.onclick = () => removeGuest(ev, b.dataset.removeguest));
   if (el("saveAnswers")) el("saveAnswers").onclick = () => saveAnswers(ev);
   // Saves as they type (debounced) instead of waiting for blur: a name typed
   // here otherwise had a real chance of vanishing unsaved, since ANY change to
@@ -1966,6 +1968,14 @@ async function setPlus(ev, delta) {
 async function setHype(ev, emoji) {
   const me = myUid(); const cur = (ev.hypes || {})[me]; const next = cur === emoji ? null : emoji;
   try { await updateDoc(doc(db, "events", ev.id), { [`hypes.${me}`]: next }); } catch (e) { toast(e.message); }
+}
+// Host/co-host takes someone off the guest list: drops their invite and
+// everything keyed to them (RSVP, plus-ones, answers, hype, name).
+async function removeGuest(ev, uid) {
+  if (!confirm(`Remove ${first(nameOf(uid))} from the guest list?`)) return;
+  const up = { invitedUids: arrayRemove(uid), cohostUids: arrayRemove(uid) };
+  for (const k of ["rsvps", "plusOnes", "plusNames", "hypes", "answers", "names"]) up[`${k}.${uid}`] = deleteField();
+  try { await updateDoc(doc(db, "events", ev.id), up); toast(first(nameOf(uid)) + " removed"); } catch (e) { toast(e.message); }
 }
 async function hostSetRsvp(ev, uid, status) { try { await updateDoc(doc(db, "events", ev.id), { [`rsvps.${uid}`]: status }); toast(first(nameOf(uid)) + " is in"); } catch (e) { toast(e.message); } }
 async function saveAnswers(ev) {
@@ -2364,7 +2374,8 @@ function profileBody() {
   <div class="card" style="padding:14px 16px"><p class="muted sm" style="margin:0 0 10px">Subscribe once and every event you're invited to appears in your calendar and stays up to date when plans change.</p>
     <div class="btnrow"><button class="btn primary small" id="calSubscribe">Add to iPhone / Apple Calendar</button><button class="btn small" id="calCopy">Copy link for Google Calendar</button></div>
     <p class="muted sm" style="margin:8px 0 0">Google Calendar: Other calendars → ＋ → From URL → paste the link. Calendars refresh on their own schedule (usually within a few hours).</p></div>
-  <button class="btn danger-ghost" id="signOut" style="margin-top:20px">Sign out</button>
+  <div class="section-head" style="margin-top:22px"><h2>Account</h2></div>
+  <button class="btn" id="signOut" style="width:100%;justify-content:center;font-weight:700;border:1.5px solid var(--line);background:var(--surface)">Sign out</button>
   <div class="section-head" style="margin-top:22px"><h2>Blocked people</h2></div>
   <div class="card">${(p.blockedUids || []).length ? p.blockedUids.map(u => `<div class="member-row">${avatar(u, "lg")}<div style="flex:1;min-width:0"><b>${esc(nameOf(u))}</b><div class="muted sm">You don't see anything they post.</div></div><button class="btn small" data-unblock="${u}">Unblock</button></div>`).join("") : `<p class="muted sm" style="padding:14px 16px;margin:0">Nobody blocked. Use ⋯ on a message or photo to report it or block the person.</p>`}</div>
   <div class="section-head" style="margin-top:22px"><h2>Delete account</h2></div>
@@ -2491,7 +2502,7 @@ function wireActivity() {
 function meetingBody(ev) {
   const me = myUid(); const myR = (ev.rsvps || {})[me]; const invited = (ev.invitedUids || []).includes(me); const manage = canManage(ev);
   const g = statusGroups(ev);
-  const row = (label, uids) => uids.length ? `<div class="muted sm" style="margin:8px 0 4px;font-weight:600">${label} · ${uids.length}</div>${uids.map(u => `<div class="member-row" data-viewprofile="${u}" style="padding:6px 0;cursor:pointer">${avatar(u, "sm")}<span>${esc(nameOf(u))}${u === ev.hostId ? " · organizer" : ""}</span></div>`).join("")}` : "";
+  const row = (label, uids) => uids.length ? `<div class="muted sm" style="margin:8px 0 4px;font-weight:600">${label} · ${uids.length}</div>${uids.map(u => `<div class="member-row" style="padding:6px 0"><span data-viewprofile="${u}" style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;cursor:pointer">${avatar(u, "sm")}<span>${esc(nameOf(u))}${u === ev.hostId ? " · organizer" : ""}</span></span>${manage && u !== me && u !== ev.hostId ? `<button class="btn ghost small" data-removeguest="${u}" title="Remove from invite list">✕</button>` : ""}</div>`).join("")}` : "";
   return `
   <button class="link-back" data-go="#/">‹ Back</button>
   <div class="group-hero"><span class="li" style="width:52px;height:52px;font-size:24px">📅</span>
@@ -2525,6 +2536,7 @@ function wireMeeting(ev) {
   }
   document.querySelectorAll("[data-rsvp]").forEach(b => b.onclick = () => setRsvp(ev, b.dataset.rsvp));
   document.querySelectorAll("[data-viewprofile]").forEach(el2 => el2.onclick = () => openProfileDialog(el2.dataset.viewprofile));
+  document.querySelectorAll("[data-removeguest]").forEach(b => b.onclick = () => removeGuest(ev, b.dataset.removeguest));
   const j = $("[data-join]"); if (j) j.onclick = () => joinViaLink(ev, j);
   const cal = $("[data-cal]"); if (cal) cal.onclick = () => downloadIcs(ev);
   if (el("addPeopleBtn")) el("addPeopleBtn").onclick = () => openEventInviteDialog(ev);

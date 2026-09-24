@@ -304,6 +304,7 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .guest-chip{display:inline-flex;align-items:center;gap:6px;background:var(--th-chip);border-radius:999px;padding:3px 10px 3px 3px;font-size:13px;font-weight:600;color:var(--th-ink)}
 .guest-chip .plusone{font-style:normal;font-size:10px;background:var(--sun);color:#3a2a06;border-radius:999px;padding:0 5px;font-weight:700}
 .guest-chip .approve{width:20px;height:20px;border-radius:50%;background:var(--good);color:#fff;font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+.guest-chip .approve.remove{background:var(--bad)}
 
 .wall-list{display:flex;flex-direction:column;gap:11px;margin-bottom:12px}
 .wall-msg{display:flex;gap:9px;align-items:flex-start}
