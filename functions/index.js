@@ -180,8 +180,8 @@ function buildIcs(id, ev, method, attendees, host, seq) {
     "UID:" + id + "@officialfriendly.com", "SEQUENCE:" + seq, "DTSTAMP:" + new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, ""), dt,
     "SUMMARY:" + icsEsc((ev.kind === "meeting" ? "" : (ev.emoji ? ev.emoji + " " : "")) + ev.title),
     ev.location ? "LOCATION:" + icsEsc(ev.location) : null,
-    "DESCRIPTION:" + icsEsc((ev.notes ? ev.notes + "\n\n" : "") + "RSVP and details in Friendly: " + SITE + "/#/e/" + id),
-    "URL:" + SITE + "/#/e/" + id,
+    "DESCRIPTION:" + icsEsc((ev.notes ? ev.notes + "\n\n" : "") + "RSVP and details in Friendly: " + FN_BASE + "/share/p/" + id),
+    "URL:" + FN_BASE + "/share/p/" + id,
     host.email ? `ORGANIZER;CN=${icsEsc(host.name)}:mailto:${host.email}` : null,
     ...attendees.map(a => `ATTENDEE;CN=${icsEsc(a.name)};ROLE=REQ-PARTICIPANT;RSVP=TRUE;PARTSTAT=NEEDS-ACTION:mailto:${a.email}`),
     "STATUS:" + (method === "CANCEL" ? "CANCELLED" : "CONFIRMED"), "END:VEVENT", "END:VCALENDAR"
@@ -281,21 +281,58 @@ exports.share = onRequest({ region: "us-central1", invoker: "public", memory: "2
     res.set("Cache-Control", "public, max-age=600"); res.type("image/jpeg").send(Buffer.from(c[1], "base64")); return;
   }
   const target = SITE + "/#/e/" + id;
-  if (!p) { res.redirect(302, target); return; }
+  // No Universal Links are registered yet, so we can't silently open the native
+  // app -- the honest thing on a phone is to offer the App Store instead of
+  // guessing. Desktop just goes straight to the web RSVP page, like before.
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(req.get("user-agent") || "");
+  if (!p) {
+    if (!isMobile) { res.redirect(302, target); return; }
+    res.set("Cache-Control", "no-store");
+    res.type("html").send(mobileGateHtml({ title: "You're invited!", desc: "Open your invite in Friendly.", target }));
+    return;
+  }
   const title = (p.kind === "meeting" ? "📅 " : (p.emoji ? p.emoji + " " : "")) + p.title;
   const when = humanWhen({ date: p.date, time: p.time, endTime: p.endTime });
   const desc = when + (p.location ? " · " + p.location : "") + (p.hostName ? " · hosted by " + p.hostName : "") + (p.going ? " · " + p.going + " going" : "");
   const img = p.cover ? FN_BASE + "/share/p/" + id + "/cover.jpg" : SITE + "/icons/icon-512.png";
-  res.set("Cache-Control", "public, max-age=300");
-  res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${htmlEsc(title)}</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta property="og:type" content="website"><meta property="og:site_name" content="Friendly">
+  const ogTags = `<meta property="og:type" content="website"><meta property="og:site_name" content="Friendly">
 <meta property="og:title" content="${htmlEsc(title)}"><meta property="og:description" content="${htmlEsc(desc)}">
 <meta property="og:image" content="${img}"><meta property="og:url" content="${FN_BASE}/share/p/${id}">
-<meta name="twitter:card" content="${p.cover ? "summary_large_image" : "summary"}"><meta name="twitter:title" content="${htmlEsc(title)}"><meta name="twitter:description" content="${htmlEsc(desc)}"><meta name="twitter:image" content="${img}">
+<meta name="twitter:card" content="${p.cover ? "summary_large_image" : "summary"}"><meta name="twitter:title" content="${htmlEsc(title)}"><meta name="twitter:description" content="${htmlEsc(desc)}"><meta name="twitter:image" content="${img}">`;
+  res.set("Cache-Control", isMobile ? "no-store" : "public, max-age=300");
+  if (isMobile) { res.type("html").send(mobileGateHtml({ title, desc, target, extraHead: ogTags })); return; }
+  res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${htmlEsc(title)}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+${ogTags}
 <meta http-equiv="refresh" content="0;url=${target}"><script>location.replace(${JSON.stringify(target)});</script></head>
 <body style="font-family:-apple-system,system-ui,sans-serif;padding:24px;color:#2A2019"><p>Opening your invite… <a href="${target}">Tap here if it doesn't open.</a></p></body></html>`);
 });
+// Shown instead of the instant redirect on a phone: there's no Universal Link
+// registered (see comment above), so we can't tell if Friendly is installed.
+// Offer the App Store as the clear first move, with the web invite one tap away.
+const APP_STORE_URL = "https://apps.apple.com/app/id6810875052";
+function mobileGateHtml({ title, desc, target, extraHead = "" }) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${htmlEsc(title)}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+${extraHead}
+<style>
+  body{font-family:-apple-system,system-ui,sans-serif;background:#FFFEFC;color:#2A2019;margin:0;padding:28px 20px;text-align:center}
+  .brand{font-size:22px;font-weight:800;margin:6px 0 18px}
+  .brand .tilt{color:#FF6B57}
+  h1{font-size:19px;margin:0 0 6px}
+  p.sub{color:#8C7C70;margin:0 0 26px;font-size:15px}
+  a.btn{display:block;text-decoration:none;border-radius:14px;padding:14px 18px;font-weight:700;font-size:16px;margin:0 0 12px}
+  a.primary{background:#FF6B57;color:#fff}
+  a.secondary{background:#FFF3E6;color:#2A2019}
+</style></head>
+<body>
+  <div class="brand">Friend<span class="tilt">l</span>y</div>
+  <h1>${htmlEsc(title)}</h1>
+  <p class="sub">${htmlEsc(desc)}</p>
+  <a class="btn primary" href="${APP_STORE_URL}">Get the Friendly app</a>
+  <a class="btn secondary" href="${target}">Continue in your browser</a>
+</body></html>`;
+}
 
 // Phone-based sign-in fell back to us: the account predates phone sign-in, so
 // it's still keyed by its real email in Firebase Auth. We look the account up

@@ -1513,8 +1513,15 @@ function dayInner(ev) {
       ${S.profile && S.profile.calToken ? "" : `<button type="button" class="btn-th small" id="addCal">📆 Add to calendar</button>`}
     </div>
     <div class="glass-sub">Bring list <button type="button" class="btn-th ghost small" id="addBring">＋ Add</button></div>
-    ${items.length ? items.map(c => { const who = ((c.reactions || {}).claim || []); return `<div class="day-row"><span style="flex:1;min-width:0"><b>${esc(c.item)}</b>${c.qty ? ` <span class="muted-th sm">× ${esc(c.qty)}</span>` : ""}${who.length ? `<div class="muted-th sm">${who.map(u => esc(first(nameOf(u)))).join(", ")} ${who.length === 1 ? "has" : "have"} it</div>` : ""}</span>
-        <button type="button" class="btn-th small ${who.includes(me) ? "accent" : ""}" data-claim="${c.id}">${who.includes(me) ? "✓ Bringing it" : "I'll bring it"}</button>${c.authorId === me || canManage(ev) ? `<button type="button" class="wall-del" data-delc="${c.id}" title="Remove">✕</button>` : ""}</div>`; }).join("") : `<p class="muted-th sm" style="margin:2px 0 8px">Nothing on the list yet. Add what's needed and people claim it.</p>`}
+    ${items.length ? items.map(c => {
+      const who = ((c.reactions || {}).claim || []); const claimQty = (c.reactions || {}).claimQty || {};
+      const qtyOf = u => claimQty[u] || 1; const iAmIn = who.includes(me); const myQty = qtyOf(me);
+      return `<div class="day-row"><span style="flex:1;min-width:0"><b>${esc(c.item)}</b>${c.qty ? ` <span class="muted-th sm">× ${esc(c.qty)}</span>` : ""}${who.length ? `<div class="muted-th sm">${who.map(u => esc(first(nameOf(u))) + (qtyOf(u) > 1 ? ` (${qtyOf(u)})` : "")).join(", ")} ${who.length === 1 ? "has" : "have"} it</div>` : ""}</span>
+        <span class="btnrow" style="gap:6px;align-items:center">
+        ${iAmIn ? `<span class="qty-stepper"><button type="button" class="btn-th small" data-claimqty="${c.id}|-1" ${myQty <= 1 ? "disabled" : ""}>−</button><b class="qty-num">${myQty}</b><button type="button" class="btn-th small" data-claimqty="${c.id}|1">+</button></span>` : ""}
+        <button type="button" class="btn-th small ${iAmIn ? "accent" : ""}" data-claim="${c.id}">${iAmIn ? "✓ Bringing it" : "I'll bring it"}</button>
+        </span>${c.authorId === me || canManage(ev) ? `<button type="button" class="wall-del" data-delc="${c.id}" title="Remove">✕</button>` : ""}</div>`;
+    }).join("") : `<p class="muted-th sm" style="margin:2px 0 8px">Nothing on the list yet. Add what's needed and people claim it.</p>`}
     <div class="glass-sub">Carpool <button type="button" class="btn-th ghost small" id="addRide">🚗 Offer a ride</button></div>
     ${rides.length ? rides.map(c => { const riders = ((c.reactions || {}).ride || []); const left = Math.max(0, (c.seats || 0) - riders.length); const inCar = riders.includes(me); const driver = c.authorId === me; return `<div class="day-row"><span style="flex:1;min-width:0"><b>${esc(first(c.authorName || nameOf(c.authorId)))} is driving</b>${c.from ? ` <span class="muted-th sm">from ${esc(c.from)}</span>` : ""}<div class="muted-th sm">${left} seat${left === 1 ? "" : "s"} left${riders.length ? " · " + riders.map(u => esc(first(nameOf(u)))).join(", ") : ""}${c.note ? " · " + esc(c.note) : ""}</div></span>
         ${driver ? `<button type="button" class="wall-del" data-delc="${c.id}" title="Remove">✕</button>` : `<button type="button" class="btn-th small ${inCar ? "accent" : ""}" data-ride="${c.id}" ${!inCar && !left ? "disabled" : ""}>${inCar ? "✓ Riding" : left ? "Need a seat" : "Full"}</button>`}</div>`; }).join("") : `<p class="muted-th sm" style="margin:2px 0 4px">No rides offered yet.</p>`}`;
@@ -1534,7 +1541,17 @@ function wireDay(ev) {
   });
   document.querySelectorAll("[data-claim]").forEach(b => b.onclick = async () => {
     const c = S.comments.find(x => x.id === b.dataset.claim); const has = c && ((c.reactions || {}).claim || []).includes(me);
-    try { await updateDoc(doc(subCol(ev, "comments"), b.dataset.claim), { "reactions.claim": has ? arrayRemove(me) : arrayUnion(me) }); } catch (e) { toast(e.message); }
+    const patch = { "reactions.claim": has ? arrayRemove(me) : arrayUnion(me) };
+    if (has) patch[`reactions.claimQty.${me}`] = deleteField();
+    try { await updateDoc(doc(subCol(ev, "comments"), b.dataset.claim), patch); } catch (e) { toast(e.message); }
+  });
+  // How many of a bring-list item someone's personally covering, once they've claimed it.
+  document.querySelectorAll("[data-claimqty]").forEach(b => b.onclick = async () => {
+    const [id, delta] = b.dataset.claimqty.split("|");
+    const c = S.comments.find(x => x.id === id); if (!c) return;
+    const cur = ((c.reactions || {}).claimQty || {})[me] || 1;
+    const next = Math.max(1, cur + Number(delta));
+    try { await updateDoc(doc(subCol(ev, "comments"), id), { [`reactions.claimQty.${me}`]: next }); } catch (e) { toast(e.message); }
   });
   if (el("addRide")) el("addRide").onclick = () => dialog(`<h3>Offer a ride</h3><div class="two"><label class="field"><span>Seats</span><input id="rSeats" inputmode="numeric" value="3"></label><label class="field"><span>Leaving from</span><input id="rFrom" placeholder="Downtown, 6:30" maxlength="60"></label></div><label class="field"><span>Note <span class="muted">(optional)</span></span><input id="rNote" placeholder="Back by 11, no smoking" maxlength="80"></label>`, "Offer", async () => {
     const seats = Math.max(1, Math.min(8, parseInt(el("rSeats").value, 10) || 1));
