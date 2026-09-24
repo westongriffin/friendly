@@ -1349,7 +1349,10 @@ function eventInner(ev) {
     </div>
     ${myR === "going" || myR === "waitlist" ? `<div class="plus"><span>Bringing</span>
       <button data-plus="-1" ${myPlus <= 0 ? "disabled" : ""}>−</button><b>+${myPlus}</b><button data-plus="1">＋</button></div>
-    ${myPlus > 0 ? `<input class="plus-name" id="plusName" maxlength="60" placeholder="Who's coming with you?" value="${esc((ev.plusNames || {})[me] || "")}">` : ""}` : ""}
+    ${myPlus > 0 ? (() => {
+      const raw = (ev.plusNames || {})[me]; const names = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+      return Array.from({ length: myPlus }, (_, i) => `<input class="plus-name" data-plusidx="${i}" maxlength="40" placeholder="Guest ${i + 1}'s name" value="${esc(names[i] || "")}">`).join("");
+    })() : ""}` : ""}
     ${myR === "pending" ? `<p class="pending-note">⏳ Waiting for the host to approve you.</p>` : ""}
     ${full && myR !== "going" ? `<p class="full-note">This event is full. RSVP to join the waitlist.</p>` : ""}
     ${questionsBlock(ev, me, myR)}` : ev.openLink ? `<p class="not-invited">You're invited! Join the guest list to RSVP.</p><div class="rsvp"><button class="rb going" data-join>Join this event</button></div>` : `<p class="not-invited">You're viewing this event but aren't on the guest list.</p>`;
@@ -1671,7 +1674,12 @@ function wireEventPage(ev) {
   document.querySelectorAll("[data-approve]").forEach(b => b.onclick = () => hostSetRsvp(ev, b.dataset.approve, "going"));
   document.querySelectorAll("[data-promote]").forEach(b => b.onclick = () => hostSetRsvp(ev, b.dataset.promote, "going"));
   if (el("saveAnswers")) el("saveAnswers").onclick = () => saveAnswers(ev);
-  if (el("plusName")) el("plusName").onchange = () => updateDoc(doc(db, "events", ev.id), { [`plusNames.${myUid()}`]: el("plusName").value.trim() }).then(() => toast("Saved")).catch(e => toast(e.message));
+  document.querySelectorAll("[data-plusidx]").forEach(inp => inp.onchange = () => {
+    const raw = (ev.plusNames || {})[myUid()]; const names = Array.isArray(raw) ? [...raw] : (raw ? [raw] : []);
+    const idx = +inp.dataset.plusidx; while (names.length <= idx) names.push("");
+    names[idx] = inp.value.trim();
+    updateDoc(doc(db, "events", ev.id), { [`plusNames.${myUid()}`]: names }).then(() => toast("Saved")).catch(e => toast(e.message));
+  });
   if (el("viewAnswers")) el("viewAnswers").onclick = () => showAnswers(ev);
   if (el("nudgeBtn")) el("nudgeBtn").onclick = () => nudge(ev, el("nudgeBtn"));
   const share = $("[data-share]"); if (share) share.onclick = () => shareEvent(ev);
@@ -1809,7 +1817,12 @@ async function attemptRsvp(ev, status) {
 }
 async function setPlus(ev, delta) {
   const me = myUid(); const cur = ((ev.plusOnes || {})[me]) || 0; const n = Math.max(0, cur + delta);
-  try { await updateDoc(doc(db, "events", ev.id), { [`plusOnes.${me}`]: n }); } catch (e) { toast(e.message); }
+  const patch = { [`plusOnes.${me}`]: n };
+  if (delta < 0) {
+    const raw = (ev.plusNames || {})[me]; const names = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+    if (names.length > n) patch[`plusNames.${me}`] = names.slice(0, n);
+  }
+  try { await updateDoc(doc(db, "events", ev.id), patch); } catch (e) { toast(e.message); }
 }
 async function setHype(ev, emoji) {
   const me = myUid(); const cur = (ev.hypes || {})[me]; const next = cur === emoji ? null : emoji;
