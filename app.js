@@ -540,7 +540,7 @@ function renderAuth(root) {
       <form id="authForm" class="stack">
         <label class="field ${authMode === "in" ? "hidden" : ""}" id="nameField"><span>Your name</span>
           <input id="aName" maxlength="40" placeholder="Sam Rivera" autocomplete="name"></label>
-        <label class="field"><span>Phone number</span>
+        <label class="field"><span id="aPhoneLabel">Phone number</span>
           <input id="aPhone" name="username" type="tel" required inputmode="tel" placeholder="+1 555 123 4567" autocomplete="${authMode === "in" ? "username" : "tel"}"></label>
         <label class="field"><span>Password</span>
           <input id="aPass" name="password" type="password" required minlength="6" placeholder="At least 6 characters" autocomplete="${authMode === "in" ? "current-password" : "new-password"}"></label>
@@ -553,6 +553,16 @@ function renderAuth(root) {
     </div>
   </div>`;
   startParticles(el("authbg"), "confetti");
+  // The phone keypad on iPhone has no "@", so a long-press (or double-tap) on
+  // the "Phone number" label quietly switches the field to an email keyboard.
+  const lbl = el("aPhoneLabel");
+  if (lbl) {
+    const toEmailMode = () => { const i = el("aPhone"); if (!i || i.type === "email") return; i.type = "email"; i.inputMode = "email"; i.placeholder = "you@example.com"; i.autocomplete = "username"; i.value = ""; i.focus(); };
+    let hold = null;
+    lbl.addEventListener("pointerdown", e => { e.preventDefault(); hold = setTimeout(toEmailMode, 600); });
+    ["pointerup", "pointercancel", "pointerleave"].forEach(ev => lbl.addEventListener(ev, () => clearTimeout(hold)));
+    lbl.addEventListener("dblclick", e => { e.preventDefault(); toEmailMode(); });
+  }
   el("segIn").onclick = () => { authMode = "in"; renderAuth(root); };
   el("segUp").onclick = () => { authMode = "up"; renderAuth(root); };
   el("authSwap").onclick = () => { authMode = authMode === "in" ? "up" : "in"; renderAuth(root); };
@@ -571,6 +581,13 @@ function renderAuth(root) {
   el("authForm").onsubmit = async e => {
     e.preventDefault();
     const phone = el("aPhone").value.trim(), pass = el("aPass").value, name = el("aName").value.trim();
+    // Unadvertised: accounts from before phone sign-in still have their real
+    // email as the Firebase identifier. Typing that email (instead of a phone
+    // number) signs them in directly, even if their profile has no phone saved.
+    if (authMode === "in" && phone.includes("@")) {
+      try { await signInWithEmailAndPassword(auth, phone.toLowerCase(), pass); } catch (err) { toast(authError(err)); }
+      return;
+    }
     const e164 = toE164(phone); if (!e164) return toast("Enter a valid phone number.");
     const authEmail = phoneAuthEmail(e164);
     try {
