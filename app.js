@@ -936,14 +936,41 @@ const groupInviteText = g => `Hey! I added you to our group "${g.name}" on Frien
 // iOS sometimes narrows a multi-recipient sms: link to an existing thread with just the
 // first person, so with more than one new guest we let the host pick: one group text, or
 // tap through each person.
+// Guided one-after-another send: iOS won't let any app fire off several real
+// texts with one tap (only the Messages app can actually send, and only with
+// a person physically tapping Send there), so this is the closest thing to
+// "one click, all individual invites go out" -- it opens Messages pre-filled
+// for person 1, and the moment the person returns to Friendly (a real
+// hidden->visible round trip, not just any visibilitychange fire) it opens
+// person 2, and so on. The message itself is editable up front so there's one
+// clear place to review it before anything goes out.
 function openTextInviteDialog(texted, text) {
+  let idx = -1, active = false, wasHidden = false;
+  const rowsHtml = () => texted.map((p, i) => `<div class="member-row" data-row="${i}"><div style="flex:1;min-width:0"><b>${esc(p.name)}</b><div class="muted sm mono">${esc(p.e164)}</div></div>${i < idx ? `<span class="muted sm">✓ Sent</span>` : i === idx && active ? `<span class="sm" style="font-weight:700;color:var(--accent)">Sending…</span>` : `<button type="button" class="btn small" data-textone="${i}">Text</button>`}</div>`).join("");
   dialog(`<h3>Text your invite</h3>
-    <p class="muted" style="margin-top:-6px">iPhone's Messages app doesn't always open a new group text with everyone — if it lands in an existing conversation with just one person, check the "To:" field and add the rest before sending. Texting people one at a time is more reliable.</p>
-    <button type="button" class="btn primary" id="textAll" style="width:100%;margin-bottom:12px">💬 Text all ${texted.length} at once</button>
-    <div class="stack">${texted.map((p, i) => `<div class="member-row"><div style="flex:1;min-width:0"><b>${esc(p.name)}</b><div class="muted sm mono">${esc(p.e164)}</div></div><button type="button" class="btn small" data-textone="${i}">Text</button></div>`).join("")}</div>
-    <p class="muted sm" style="margin:10px 0 0">You can always come back and text stragglers from the group's "Invited" list.</p>`, null, null);
-  el("textAll").onclick = () => { location.href = smsLink(texted.map(p => p.e164), text); };
-  document.querySelectorAll("[data-textone]").forEach(b => b.onclick = () => { const p = texted[+b.dataset.textone]; location.href = smsLink([p.e164], text); });
+    <p class="muted" style="margin-top:-6px">Edit the message if you want, then send it to everyone one at a time -- iPhone only lets you send from Messages yourself, so this walks you through each person: it opens Messages, you tap Send, and coming back here opens the next one.</p>
+    <label class="field"><span>Message</span><textarea id="txtMsg" maxlength="480">${esc(text)}</textarea></label>
+    <button type="button" class="btn primary" id="textAll" style="width:100%;margin:10px 0 12px">💬 Send to all ${texted.length}, one at a time</button>
+    <div class="stack" id="txtRows">${rowsHtml()}</div>
+    <p class="muted sm" style="margin:10px 0 0">You can always come back and text stragglers from the "Invited" list.</p>`, null, null);
+  const currentText = () => el("txtMsg").value;
+  const renderRows = () => { const box = el("txtRows"); if (box) box.innerHTML = rowsHtml(); wireRowButtons(); };
+  function wireRowButtons() { document.querySelectorAll("[data-textone]").forEach(b => b.onclick = () => { const p = texted[+b.dataset.textone]; location.href = smsLink([p.e164], currentText()); }); }
+  function advance() {
+    idx++;
+    renderRows();
+    if (idx >= texted.length) { active = false; el("textAll").textContent = "✓ Sent to everyone"; el("textAll").disabled = true; return; }
+    setTimeout(() => { location.href = smsLink([texted[idx].e164], currentText()); }, 350);
+  }
+  const onVis = () => {
+    if (!active) return;
+    if (document.visibilityState === "hidden") { wasHidden = true; return; }
+    if (document.visibilityState === "visible" && wasHidden) { wasHidden = false; advance(); }
+  };
+  document.addEventListener("visibilitychange", onVis);
+  const cancelBtn = el("dlgCancel"); if (cancelBtn) cancelBtn.addEventListener("click", () => document.removeEventListener("visibilitychange", onVis), { once: true });
+  el("textAll").onclick = () => { if (active) return; active = true; idx = -1; advance(); };
+  wireRowButtons();
 }
 async function acceptInvite(gid, btn) {
   const g = S.pendingInvites.get(gid) || (S.pendingInvitesPhone && S.pendingInvitesPhone.get(gid)); if (!g) return;
