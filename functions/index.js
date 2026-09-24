@@ -26,7 +26,52 @@ const db = getFirestore();
 // the private key is a Functions secret (firebase functions:secrets:set VAPID_PRIVATE_KEY).
 const VAPID_PUBLIC = "BAG0yqJjd5-thc9sQ3g9oG95zpXkbsUTLn2uJ0_nzx2n9IZ4cSgrQ5pLhTuVVexRrnUBNSOYLJDmyDs-paqWTN8";
 const VAPID_PRIVATE = defineSecret("VAPID_PRIVATE_KEY");
-const PUSH = { secrets: [VAPID_PRIVATE] };   // spread into every function that calls notify()
+// iPhone pushes go straight to Apple (APNs over HTTP/2, token auth) rather than
+// through FCM: the app has no Firebase iOS SDK, so its push plugin hands back a
+// raw APNs device token (64 hex chars), which is exactly what APNs wants and
+// exactly what FCM can't use. The .p8 is the Functions secret APNS_KEY.
+const APNS_KEY = defineSecret("APNS_KEY");
+const APNS_KEY_ID = "657K4Q24NF", APNS_TEAM_ID = "L7H9872BR2", APNS_TOPIC = "com.officialfriendly.app";
+const PUSH = { secrets: [VAPID_PRIVATE, APNS_KEY] };   // spread into every function that calls notify()
+const isApnsToken = t => /^[0-9a-f]{64}$/i.test(t);
+let apnsJwt = { token: "", at: 0 };
+function apnsAuth() {
+  const key = APNS_KEY.value(); if (!key) return "";
+  if (Date.now() - apnsJwt.at < 45 * 60 * 1000) return apnsJwt.token;   // Apple: reuse 20-60 min
+  const b64 = o => Buffer.from(JSON.stringify(o)).toString("base64url");
+  const unsigned = b64({ alg: "ES256", kid: APNS_KEY_ID }) + "." + b64({ iss: APNS_TEAM_ID, iat: Math.floor(Date.now() / 1000) });
+  const sig = require("crypto").sign("sha256", Buffer.from(unsigned), { key, dsaEncoding: "ieee-p1363" }).toString("base64url");
+  apnsJwt = { token: unsigned + "." + sig, at: Date.now() };
+  return apnsJwt.token;
+}
+// Sends one alert to each APNs token; resolves to the tokens Apple says are dead.
+function apnsSend(tokens, title, body, url) {
+  const auth = apnsAuth(); if (!auth || !tokens.length) return Promise.resolve([]);
+  const http2 = require("http2");
+  return new Promise(resolve => {
+    const dead = []; let left = tokens.length;
+    const client = http2.connect("https://api.push.apple.com");
+    client.on("error", err => { logger.warn("apns connect: " + err.message); resolve(dead); });
+    const payload = JSON.stringify({ aps: { alert: { title, body }, sound: "default", "mutable-content": 0 }, url });
+    const finish = () => { if (--left === 0) { client.close(); resolve(dead); } };
+    for (const t of tokens) {
+      const req = client.request({ ":method": "POST", ":path": "/3/device/" + t, authorization: "bearer " + auth, "apns-topic": APNS_TOPIC, "apns-push-type": "alert", "apns-priority": "10", "content-type": "application/json" });
+      let resBody = "", status = 0;
+      req.on("response", h => { status = h[":status"]; });
+      req.on("data", d => { resBody += d; });
+      req.on("end", () => {
+        if (status !== 200) {
+          let reason = ""; try { reason = JSON.parse(resBody).reason || ""; } catch {}
+          if (status === 410 || reason === "BadDeviceToken" || reason === "Unregistered" || reason === "DeviceTokenNotForTopic") dead.push(t);
+          else logger.warn("apns " + status + " " + reason);
+        }
+        finish();
+      });
+      req.on("error", err => { logger.warn("apns req: " + err.message); finish(); });
+      req.end(payload);
+    }
+  });
+}
 
 // ---- AI cover art via Vertex (Gemini image models, in your own project) ----
 // Firestore-triggered: no public HTTP endpoint needed. The app creates
@@ -162,7 +207,7 @@ exports.onReceiptRequest = onDocumentCreated({ document: "receiptRequests/{id}",
 // records for it, which is all Mailgun needs).
 const MAILGUN_API_KEY = defineSecret("MAILGUN_API_KEY");
 const MAILGUN_API = "https://api.mailgun.net/v3/mail.officialfriendly.com";
-const MAIL = { secrets: [VAPID_PRIVATE, MAILGUN_API_KEY] };
+const MAIL = { secrets: [VAPID_PRIVATE, APNS_KEY, MAILGUN_API_KEY] };
 // Shown as "<Host name> via Friendly"; replies and calendar responses go to the host.
 const MAIL_FROM = name => `${String(name || "Friendly").replace(/[<>"]/g, "")} via Friendly <invites@mail.officialfriendly.com>`;
 const SITE = "https://officialfriendly.com";
@@ -282,6 +327,7 @@ exports.share = onRequest({ region: "us-central1", invoker: "public", memory: "2
     res.set("Cache-Control", "public, max-age=600"); res.type("image/jpeg").send(Buffer.from(c[1], "base64")); return;
   }
   const target = SITE + "/#/e/" + id;
+  const openUrl = SITE + "/?p=" + id;   // Universal Link: opens the app if installed
   // No Universal Links are registered yet, so we can't silently open the native
   // app -- the honest thing on a phone is to offer the App Store instead of
   // guessing. Desktop just goes straight to the web RSVP page, like before.
@@ -289,7 +335,7 @@ exports.share = onRequest({ region: "us-central1", invoker: "public", memory: "2
   if (!p) {
     if (!isMobile) { res.redirect(302, target); return; }
     res.set("Cache-Control", "no-store");
-    res.type("html").send(mobileGateHtml({ title: "You're invited!", desc: "Open your invite in Friendly.", target }));
+    res.type("html").send(mobileGateHtml({ title: "You're invited!", desc: "Open your invite in Friendly.", target, openUrl }));
     return;
   }
   const title = (p.kind === "meeting" ? "📅 " : (p.emoji ? p.emoji + " " : "")) + p.title;
@@ -301,7 +347,7 @@ exports.share = onRequest({ region: "us-central1", invoker: "public", memory: "2
 <meta property="og:image" content="${img}"><meta property="og:url" content="${FN_BASE}/share/p/${id}">
 <meta name="twitter:card" content="${p.cover ? "summary_large_image" : "summary"}"><meta name="twitter:title" content="${htmlEsc(title)}"><meta name="twitter:description" content="${htmlEsc(desc)}"><meta name="twitter:image" content="${img}">`;
   res.set("Cache-Control", isMobile ? "no-store" : "public, max-age=300");
-  if (isMobile) { res.type("html").send(mobileGateHtml({ title, desc, target, extraHead: ogTags })); return; }
+  if (isMobile) { res.type("html").send(mobileGateHtml({ title, desc, target, openUrl, extraHead: ogTags })); return; }
   res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${htmlEsc(title)}</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 ${ogTags}
@@ -312,7 +358,7 @@ ${ogTags}
 // registered (see comment above), so we can't tell if Friendly is installed.
 // Offer the App Store as the clear first move, with the web invite one tap away.
 const APP_STORE_URL = "https://apps.apple.com/app/id6810875052";
-function mobileGateHtml({ title, desc, target, extraHead = "" }) {
+function mobileGateHtml({ title, desc, target, openUrl, extraHead = "" }) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${htmlEsc(title)}</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 ${extraHead}
@@ -330,8 +376,8 @@ ${extraHead}
   <div class="brand">Friend<span class="tilt">l</span>y</div>
   <h1>${htmlEsc(title)}</h1>
   <p class="sub">${htmlEsc(desc)}</p>
-  <a class="btn primary" href="${APP_STORE_URL}">Get the Friendly app</a>
-  <a class="btn secondary" href="${target}">Continue in your browser</a>
+  <a class="btn primary" href="${openUrl || target}">Open in Friendly</a>
+  <a class="btn secondary" href="${APP_STORE_URL}">Get the Friendly app</a>
 </body></html>`;
 }
 
@@ -457,13 +503,17 @@ async function notify(uids, title, body, url = "/", extra = {}) {
     .catch(err => logger.warn("activity: " + err.message));
   const category = NOTIF_CATEGORY[extra.type];
   const snaps = await db.getAll(...ids.map(id => db.doc("users/" + id)));
-  const tokenOwner = {}, tokens = [], subs = [];
+  const tokenOwner = {}, tokens = [], apns = [], subs = [];
   snaps.forEach(s => {
     if (category && s.get(`notifPrefs.${category}`) === false) return;
-    (s.get("pushTokens") || []).forEach(t => { tokens.push(t); tokenOwner[t] = s.id; });
+    (s.get("pushTokens") || []).forEach(t => { (isApnsToken(t) ? apns : tokens).push(t); tokenOwner[t] = s.id; });
     (s.get("webPush") || []).forEach(sub => subs.push({ sub, uid: s.id }));
   });
   const jobs = [];
+  if (apns.length) jobs.push(apnsSend(apns, title, body, url).then(async dead => {
+    const byUser = {}; dead.forEach(t => { (byUser[tokenOwner[t]] = byUser[tokenOwner[t]] || []).push(t); });
+    await Promise.all(Object.entries(byUser).map(([uid, ts]) => db.doc("users/" + uid).update({ pushTokens: FieldValue.arrayRemove(...ts) }).catch(() => {})));
+  }));
   if (tokens.length) jobs.push(getMessaging().sendEachForMulticast({
     tokens, notification: { title, body }, data: { url }, apns: { payload: { aps: { sound: "default" } } }
   }).then(async res => {

@@ -34,6 +34,9 @@ if (NATIVE) document.documentElement.classList.add("native");
 // link for it -- so it's exempt from the App Store block below.
 const RESET_PARAMS = new URLSearchParams(location.search);
 const RESET_OOB = RESET_PARAMS.get("mode") === "resetPassword" ? RESET_PARAMS.get("oobCode") : null;
+// Invite links as Universal Links use the query form (https://officialfriendly.com/?p=<eventId>),
+// since iOS matches app links on path + query, not on a #hash. Turn it into the app's route.
+if (/^[a-f0-9]{8,64}$/i.test(RESET_PARAMS.get("p") || "")) history.replaceState(null, "", location.pathname + "#/e/" + RESET_PARAMS.get("p"));
 
 // A phone hitting the plain web site (not the native app -- NATIVE covers that,
 // since the app shell also loads this same origin) belongs in the App Store,
@@ -61,6 +64,19 @@ const plugin = n => {
   try { if (CAP.isPluginAvailable && CAP.isPluginAvailable(n) && CAP.registerPlugin) { const p = CAP.registerPlugin(n); if (CAP.Plugins) CAP.Plugins[n] = p; return p; } } catch {}
   return null;
 };
+// Inside the native app, a tapped Universal Link arrives here instead of as a page load.
+function wireAppLinks() {
+  const AppPlugin = plugin("App"); if (!AppPlugin || !AppPlugin.addListener) return;
+  AppPlugin.addListener("appUrlOpen", ({ url }) => {
+    try {
+      const u = new URL(url); const p = u.searchParams.get("p");
+      if (p) location.hash = "#/e/" + p;
+      else if (u.searchParams.get("mode") === "resetPassword") location.href = url;
+      else if (u.hash && u.hash.length > 1) location.hash = u.hash;
+    } catch {}
+  });
+}
+if (NATIVE) wireAppLinks();
 async function registerPush(uid) {
   const Push = plugin("PushNotifications"); if (!Push) return;
   try {

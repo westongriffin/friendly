@@ -1,1 +1,14 @@
-{"webcredentials":{"apps":["L7H9872BR2.com.officialfriendly.app"]}}
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["L7H9872BR2.com.officialfriendly.app"],
+        "components": [
+          { "/": "/", "?": { "p": "*" }, "comment": "invite link: /?p=<eventId>" },
+          { "/": "/", "?": { "mode": "resetPassword" }, "comment": "password reset link" }
+        ]
+      }
+    ]
+  },
+  "webcredentials": { "apps": ["L7H9872BR2.com.officialfriendly.app"] }
+}
