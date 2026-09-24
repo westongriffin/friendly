@@ -1755,11 +1755,22 @@ function wireEventPage(ev) {
   document.querySelectorAll("[data-approve]").forEach(b => b.onclick = () => hostSetRsvp(ev, b.dataset.approve, "going"));
   document.querySelectorAll("[data-promote]").forEach(b => b.onclick = () => hostSetRsvp(ev, b.dataset.promote, "going"));
   if (el("saveAnswers")) el("saveAnswers").onclick = () => saveAnswers(ev);
-  document.querySelectorAll("[data-plusidx]").forEach(inp => inp.onchange = () => {
-    const raw = (ev.plusNames || {})[myUid()]; const names = Array.isArray(raw) ? [...raw] : (raw ? [raw] : []);
-    const idx = +inp.dataset.plusidx; while (names.length <= idx) names.push("");
-    names[idx] = inp.value.trim();
-    updateDoc(doc(db, "events", ev.id), { [`plusNames.${myUid()}`]: names }).then(() => toast("Saved")).catch(e => toast(e.message));
+  // Saves as they type (debounced) instead of waiting for blur: a name typed
+  // here otherwise had a real chance of vanishing unsaved, since ANY change to
+  // the event doc (anyone else's RSVP, a hype, another guest's own plus-one)
+  // re-renders this whole page from scratch via the events listener -- wiping
+  // whatever hadn't been blurred yet. A blur handler flushes immediately too.
+  let plusNameTimer = null;
+  document.querySelectorAll("[data-plusidx]").forEach(inp => {
+    const save = () => {
+      clearTimeout(plusNameTimer);
+      const raw = (ev.plusNames || {})[myUid()]; const names = Array.isArray(raw) ? [...raw] : (raw ? [raw] : []);
+      const idx = +inp.dataset.plusidx; while (names.length <= idx) names.push("");
+      names[idx] = inp.value.trim();
+      updateDoc(doc(db, "events", ev.id), { [`plusNames.${myUid()}`]: names }).catch(e => toast(e.message));
+    };
+    inp.oninput = () => { clearTimeout(plusNameTimer); plusNameTimer = setTimeout(save, 600); };
+    inp.onblur = save;
   });
   if (el("viewAnswers")) el("viewAnswers").onclick = () => showAnswers(ev);
   if (el("nudgeBtn")) el("nudgeBtn").onclick = () => nudge(ev, el("nudgeBtn"));
