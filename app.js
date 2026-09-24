@@ -2375,7 +2375,7 @@ function profileBody() {
     <div class="btnrow"><button class="btn primary small" id="calSubscribe">Add to iPhone / Apple Calendar</button><button class="btn small" id="calCopy">Copy link for Google Calendar</button></div>
     <p class="muted sm" style="margin:8px 0 0">Google Calendar: Other calendars → ＋ → From URL → paste the link. Calendars refresh on their own schedule (usually within a few hours).</p></div>
   <div class="section-head" style="margin-top:22px"><h2>Account</h2></div>
-  <button class="btn" id="signOut" style="width:100%;justify-content:center;font-weight:700;border:1.5px solid var(--line);background:var(--surface)">Sign out</button>
+  <button class="btn danger-ghost" id="signOut" style="width:100%;justify-content:center;font-weight:700;border:1.5px solid var(--bad)">Sign out</button>
   <div class="section-head" style="margin-top:22px"><h2>Blocked people</h2></div>
   <div class="card">${(p.blockedUids || []).length ? p.blockedUids.map(u => `<div class="member-row">${avatar(u, "lg")}<div style="flex:1;min-width:0"><b>${esc(nameOf(u))}</b><div class="muted sm">You don't see anything they post.</div></div><button class="btn small" data-unblock="${u}">Unblock</button></div>`).join("") : `<p class="muted sm" style="padding:14px 16px;margin:0">Nobody blocked. Use ⋯ on a message or photo to report it or block the person.</p>`}</div>
   <div class="section-head" style="margin-top:22px"><h2>Delete account</h2></div>
