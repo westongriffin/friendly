@@ -700,16 +700,21 @@ exports.onRsvp = onDocumentUpdated({ document: "events/{id}", ...MAIL }, async e
     if (a[changed] === "going" && (b[changed] === "waitlist" || b[changed] === "pending"))
       await notify([changed], "You're in! " + after.title, b[changed] === "waitlist" ? "A spot opened up and it's yours." : "The host approved you.", "/#/e/" + id, { type: "rsvp" });
   }
+  const added = (after.invitedUids || []).filter(u => !(before.invitedUids || []).includes(u));
+  // Someone joined through a shared link (not added by the host, not a group
+  // member added automatically): tell the host and co-hosts, since nothing else would.
+  const linkJoins = added.filter(u => (after.joinedVia || {})[u] === "link" && u !== after.hostId);
+  if (linkJoins.length) {
+    const nm = await names(linkJoins);
+    for (const u of linkJoins) await notify([after.hostId, ...(after.cohostUids || [])].filter(h => h !== u), firstName(nm[u]) + " joined via your link", after.title, "/#/e/" + id, { type: "rsvp", actorId: u });
+  }
   // Edits to the essentials -> bump the sequence once and re-send invites.
   const essentials = ["title", "date", "time", "endTime", "location", "notes"];
   if (essentials.some(k => (before[k] || "") !== (after[k] || ""))) {
     const seq = Number(after.sequence || 0) + 1;
     await e.data.after.ref.update({ sequence: seq });
     await sendInviteEmails(id, { ...after, sequence: seq }, "REQUEST");
-  } else {
-    const added = (after.invitedUids || []).filter(u => !(before.invitedUids || []).includes(u));
-    if (added.length) await sendInviteEmails(id, after, "REQUEST", added);
-  }
+  } else if (added.length) await sendInviteEmails(id, after, "REQUEST", added);
   await writePreview(id, after);
 });
 

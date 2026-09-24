@@ -1001,6 +1001,10 @@ function pickPeopleDialog({ title, blurb, exclude, submitLabel = "Add & send", o
   const addPicked = (name, phone) => {
     const e164 = toE164(phone); if (!e164) return toast(`Couldn't read a phone number for ${name || "that contact"}.`);
     if (picked.some(p => p.e164 === e164)) return;
+    // Already on this event/group (the picker hides them, but a typed or address-book
+    // number wouldn't otherwise be recognized and would text them a second invite).
+    const dup = [...S.contacts.entries()].find(([u, i]) => exclude.has(u) && toE164(i.phone) === e164);
+    if (dup) return toast(`${first(dup[1].name || "") || "They"} ${dup[0] === me ? "-- that's you" : "is already on the list"}.`);
     const hit = byPhone(e164); picked.push({ name: name || (hit ? hit[1].name : "") || "", phone, e164, uid: hit ? hit[0] : null }); renderPicked();
   };
   const renderPicked = () => { const box = el("invChosen"); if (box) box.innerHTML = picked.map((p, i) => `<div class="inv-hit"><div style="flex:1;min-width:0"><b>${esc(p.name || p.e164)}</b><div class="muted sm">${p.uid ? "On Friendly · added right away" : "Gets a text with the join link"}${p.e164 ? " · " + esc(p.e164) : ""}</div></div><button type="button" class="btn ghost small" data-unpick="${i}">✕</button></div>`).join("") || `<p class="muted sm">Nobody picked yet.</p>`; box.querySelectorAll("[data-unpick]").forEach(b => b.onclick = () => { picked.splice(+b.dataset.unpick, 1); renderPicked(); }); };
@@ -2095,7 +2099,9 @@ function openEventInviteDialog(ev) {
 async function uninviteEventPhone(ev, e164) { try { await updateDoc(doc(db, "events", ev.id), { invitedPhones: (ev.invitedPhones || []).filter(p => p !== e164), [`invitedPhoneNames.${e164}`]: deleteField() }); } catch (e) { toast(e.message); } }
 async function joinViaLink(ev, btn) {
   if (btn) { btn.disabled = true; btn.textContent = "Joining…"; }
-  const patch = { invitedUids: arrayUnion(myUid()), [`names.${myUid()}`]: S.profile.name };
+  // joinedVia marks a link join so the host gets a "joined via your link" heads-up
+  // (group members added automatically don't set it).
+  const patch = { invitedUids: arrayUnion(myUid()), [`names.${myUid()}`]: S.profile.name, [`joinedVia.${myUid()}`]: "link" };
   // selfJoin() in firestore.rules lets a joiner also clear their own entry from
   // the host's invitedPhones tracking list, but only their own -- never anyone else's.
   const myPhone = S.profile.phoneE164;
@@ -2498,7 +2504,7 @@ const isPeeked = a => { const tail = "#" + (String(a.url || "").split("#")[1] ||
 const unreadCount = () => (S.activity || []).filter(a => a.createdAt > seenAt() && !isPeeked(a)).length;
 const newCountFor = urlTail => (S.activity || []).filter(a => a.createdAt > seenAt() && !isPeeked(a) && String(a.url || "").endsWith(urlTail)).length;
 const isNewEvent = ev => (S.activity || []).some(a => a.createdAt > seenAt() && !isPeeked(a) && String(a.url || "").endsWith("#/e/" + ev.id));
-const actIcon = a => /waiting on your RSVP/.test(a.title) ? "📣" : /mentioned you/.test(a.title) ? "＠" : /to a meeting/.test(a.title) ? "📅" : /You're in!/.test(a.title) ? "🎟️" : /still owe/.test(a.title) ? "💸" : /invited you/.test(a.title) ? "🎟️" : /^Today:/.test(a.title) ? "⏰" : /reported/i.test(a.title) ? "⚑" : /is going|might come|can't make|joined the waitlist|requested/.test(a.title) ? "✅" : "💬";
+const actIcon = a => /joined via your link/.test(a.title) ? "🔗" : /waiting on your RSVP/.test(a.title) ? "📣" : /mentioned you/.test(a.title) ? "＠" : /to a meeting/.test(a.title) ? "📅" : /You're in!/.test(a.title) ? "🎟️" : /still owe/.test(a.title) ? "💸" : /invited you/.test(a.title) ? "🎟️" : /^Today:/.test(a.title) ? "⏰" : /reported/i.test(a.title) ? "⚑" : /is going|might come|can't make|joined the waitlist|requested/.test(a.title) ? "✅" : "💬";
 function notifCard() {
   if (NATIVE || localStorage.getItem("friendlyPushDismissed")) return "";
   const st = pushState(); if (st !== "off") return "";
