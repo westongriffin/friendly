@@ -439,10 +439,29 @@ function rebuildContacts() {
 // are only known by the names the event carries (see noteNames).
 const nameHint = uid => (S.nameHints && S.nameHints.get(uid)) || "";
 const nameOf = uid => (S.contacts.get(uid) || {}).name || nameHint(uid) || "Someone";
-function avatar(uid, cls = "") { const info = S.contacts.get(uid) || {}; const name = info.name || nameHint(uid); if (info.photo) return `<span class="avatar ${cls} has-img"><img src="${info.photo}" alt=""></span>`; return `<span class="avatar ${cls}" style="background:${colorFor(uid)}">${esc(initials(name || "?"))}</span>`; }
+function avatar(uid, cls = "") { const info = S.contacts.get(uid) || {}; const name = info.name || nameHint(uid); if (info.photo) return `<span class="avatar ${cls} has-img"><img src="${esc(info.photo)}" alt=""></span>`; return `<span class="avatar ${cls}" style="background:${colorFor(uid)}">${esc(initials(name || "?"))}</span>`; }
 
 // ---------- render root ----------
-function render() {
+// Every live listener re-renders by replacing innerHTML, which would drop
+// whatever the person is typing (an RSVP answer, a wall post, their profile)
+// the moment anyone else's activity lands. Snapshot the focused text field
+// before a re-render and put its value, caret and focus back afterwards.
+function withInputKept(fn) {
+  const a = document.activeElement; let snap = null;
+  if (a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA") && !["checkbox", "radio", "file", "submit", "button"].includes(a.type) && !a.closest("dialog")) {
+    const data = [...a.attributes].find(x => x.name.startsWith("data-"));
+    const key = a.id ? "#" + CSS.escape(a.id) : data ? `${a.tagName.toLowerCase()}[${data.name}="${CSS.escape(data.value)}"]` : null;
+    if (key) snap = { key, value: a.value, s: a.selectionStart, e: a.selectionEnd };
+  }
+  fn();
+  if (!snap) return;
+  const n = document.querySelector(snap.key); if (!n) return;
+  if (n.value !== snap.value) n.value = snap.value;
+  n.focus({ preventScroll: true });
+  try { if (snap.s != null) n.setSelectionRange(snap.s, snap.e); } catch {}
+}
+function render() { withInputKept(renderNow); }
+function renderNow() {
   if (BLOCKED_MOBILE_WEB) return;
   const root = el("app");
   // The loading screen stays up for at least two seconds so it never flashes.
@@ -628,7 +647,7 @@ function inviteBanner() {
   return `<div class="stack" style="margin-bottom:16px">${invites.map(g => {
     const host = ((g.members || {})[g.ownerId] || {}).name || nameOf(g.ownerId);
     return `<div class="card invite-row">
-      <span class="ge" style="background:${g.color || "#FFE0B2"}">${esc(g.emoji || "🎉")}</span>
+      <span class="ge" style="background:${esc(g.color || "#FFE0B2")}">${esc(g.emoji || "🎉")}</span>
       <div style="flex:1;min-width:0"><b>${esc(g.name)}</b><div class="muted sm">${esc(host)} invited you to this group</div></div>
       <button class="btn small primary" data-accept="${g.id}">Join</button>
     </div>`; }).join("")}</div>`;
@@ -786,11 +805,11 @@ function eventCard(ev) {
   const myR = (ev.rsvps || {})[myUid()];
   const rsvpDot = myR ? `<span class="you-pill ${myR}">${{ going: "You're going", maybe: "Maybe", no: "Can't go", waitlist: "Waitlisted", pending: "Pending" }[myR] || ""}</span>` : "";
   return `
-  <a class="ev-card t-${th.id} ${ev.cover ? "has-cover" : ""}" data-ev="${ev.id}" style="--th-accent:${th.accent};--th-ink:${th.ink};--th-on-accent:${th.onAccent}">
-    ${ev.cover ? `<img class="cover-img" src="${ev.cover}" alt="" loading="lazy">` : `<div class="ev-card-bg"></div>`}
+  <a class="ev-card t-${esc(th.id)} ${ev.cover ? "has-cover" : ""}" data-ev="${ev.id}" style="--th-accent:${esc(th.accent)};--th-ink:${esc(th.ink)};--th-on-accent:${esc(th.onAccent)}">
+    ${ev.cover ? `<img class="cover-img" src="${esc(ev.cover)}" alt="" loading="lazy">` : `<div class="ev-card-bg"></div>`}
     <div class="ev-card-body">
       ${ev.cover ? "" : `<div class="ev-card-emoji">${esc(ev.emoji || "🎉")}</div>`}
-      <div class="ev-card-title" style="font-family:${th.font},system-ui">${esc(ev.title)}</div>
+      <div class="ev-card-title" style="font-family:${esc(th.font)},system-ui">${esc(ev.title)}</div>
       <div class="ev-card-date">${MONTHS[d.getMonth()]} ${d.getDate()}${ev.time ? " · " + fmtTime(ev.time) : ""}</div>
       <div class="ev-card-foot">
         <span class="mini-guests">${guests.map(u => avatar(u, "xs")).join("")}${(ev.invitedUids || []).length > 5 ? `<span class="more">+${ev.invitedUids.length - 5}</span>` : ""}</span>
@@ -826,7 +845,7 @@ function groupsBody() {
 function groupRow(g) {
   const n = (g.memberUids || []).length;
   return `<a class="card group-row" data-group="${g.id}">
-    <span class="ge lg" style="background:${g.color || "#FFE0B2"}">${esc(g.emoji || "🎉")}</span>
+    <span class="ge lg" style="background:${esc(g.color || "#FFE0B2")}">${esc(g.emoji || "🎉")}</span>
     <div style="flex:1;min-width:0"><b>${esc(g.name)}${newCountFor("#/g/" + g.id) ? `<span class="new-count">${newCountFor("#/g/" + g.id)} new</span>` : ""}</b><div class="muted sm">${n} member${n === 1 ? "" : "s"}${g.ownerId === myUid() ? " · you host" : ""}</div></div>
     <span class="chev">›</span></a>`;
 }
@@ -845,7 +864,7 @@ function groupPageBody(gid) {
   const host = hostUids.includes(myUid());
   return `
   <button class="link-back" data-go="#/groups">‹ Groups</button>
-  <div class="group-hero"><span class="ge xl" style="background:${g.color || "#FFE0B2"}">${esc(g.emoji || "🎉")}</span>
+  <div class="group-hero"><span class="ge xl" style="background:${esc(g.color || "#FFE0B2")}">${esc(g.emoji || "🎉")}</span>
     <div><h1>${esc(g.name)}</h1><div class="muted">${members.length} member${members.length === 1 ? "" : "s"}</div></div></div>
   <div class="btnrow">
     <button class="btn primary" data-go="#/new">＋ Plan for this group</button>
@@ -901,10 +920,11 @@ function wireGroupPage() {
   document.querySelectorAll("[data-textinvite]").forEach(b => b.onclick = () => { location.href = smsLink([b.dataset.textinvite], groupInviteText(g)); });
   // Live group chat + polls, using the event-page components against groups/{id}/…
   // (S.evSubs is cleared on every render, so these never leak across pages.)
-  const pseudo = { id: g.id, _col: ["groups", g.id], _manage: true, title: g.name };
+  // _manage mirrors the rules: only the owner/hosts may remove other people's polls.
+  const pseudo = { id: g.id, _col: ["groups", g.id], _manage: g.ownerId === myUid() || (g.hostUids || []).includes(myUid()), title: g.name };
   S.comments = []; S.polls = [];
   const sub = (name, fn) => S.evSubs.push(onSnapshot(subCol(pseudo, name), snap => fn(snap.docs.map(d => ({ id: d.id, ...d.data() }))), e => toast(e.message)));
-  sub("comments", rows => { S.comments = rows.sort((a, b) => a.createdAt - b.createdAt); const b = el("wall"); if (b) { b.innerHTML = wallInner(pseudo, "Group chat"); wireWall(pseudo); } });
+  sub("comments", rows => { S.comments = rows.sort((a, b) => a.createdAt - b.createdAt); const b = el("wall"); if (b) withInputKept(() => { b.innerHTML = wallInner(pseudo, "Group chat"); wireWall(pseudo); }); });
   sub("polls", rows => { S.polls = rows.sort((a, b) => a.createdAt - b.createdAt); const b = el("pollsCard"); if (b) { b.innerHTML = pollsInner(pseudo, "Poll the group: dates, places, ideas."); wirePolls(pseudo); } });
 }
 
@@ -1164,7 +1184,7 @@ function composeBody() {
       <details class="adv"><summary>Co-hosts &amp; approval</summary>
         <span class="field-label" style="margin-top:10px">Co-hosts (can edit &amp; manage)</span>
         <div class="check-grid" id="cCohosts">${contactChecks("coh", compose.cohosts)}</div>
-        <label class="switch"><input type="checkbox" id="cApproval"><span>Approve guests before they're in</span></label>
+        <label class="switch"><input type="checkbox" id="cApproval" ${compose.approval ? "checked" : ""}><span>Approve guests before they're in</span></label>
       </details>
       </div>
     </div>
@@ -1261,6 +1281,9 @@ function syncCompose() {
   compose.end = el("cEnd").value; compose.where = el("cWhere").value; compose.notes = el("cNotes").value;
   compose.cap = el("cCap").value; if (el("cApproval")) compose.approval = el("cApproval").checked;
   if (el("cRepeat")) compose.repeat = el("cRepeat").value;
+  // Co-host ticks live only in the DOM otherwise, so any re-render (picking a
+  // theme, adding people) used to quietly clear them.
+  if (document.querySelector("input[name=coh]")) compose.cohosts = new Set([...document.querySelectorAll("input[name=coh]:checked")].map(i => i.value));
   saveDraft();
 }
 function wireCompose() {
@@ -1272,6 +1295,7 @@ function wireCompose() {
     el("cPvDate").textContent = dv ? evDate({ date: dv }).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }) + (tv ? " · " + fmtTime(tv) : "") : "Pick a date";
   };
   ["cTitle", "cDate", "cTime", "cEnd", "cWhere", "cNotes", "cCap"].forEach(id => el(id).oninput = () => { syncCompose(); upd(); }); upd();
+  document.querySelectorAll("input[name=coh], #cApproval, #cRepeat").forEach(i => i.onchange = syncCompose);
   attachPlaces(el("cWhere"));
   wireCover();
   document.querySelectorAll("[data-theme]").forEach(b => b.onclick = () => { syncCompose(); compose.theme = b.dataset.theme; render(); });
@@ -1371,10 +1395,10 @@ function cleanupEvent() { S.evSubs.forEach(fn => fn()); S.evSubs = []; eventBgSt
 function renderEventPage(root, id) {
   cleanupEvent();
   const ev = S.events.get(id);
-  if (!ev) { root.innerHTML = shell(`<div class="card empty"><b>Loading event…</b><p class="muted">If this stays, you may not have access.</p><button class="btn" data-go="#/">Home</button></div>`); wireShell(); getDoc(doc(db, "events", id)).then(d => { if (d.exists()) { S.events.set(id, { id, ...d.data() }); render(); } }); return; }
+  if (!ev) { root.innerHTML = shell(`<div class="card empty"><b>Loading event…</b><p class="muted">If this stays, you may not have access.</p><button class="btn" data-go="#/">Home</button></div>`); wireShell(); getDoc(doc(db, "events", id)).then(d => { if (d.exists()) { S.events.set(id, { id, ...d.data() }); render(); } }).catch(() => {}); return; }
   if (ev.kind === "meeting") { root.innerHTML = shell(meetingBody(ev)); wireShell(); wireMeeting(ev); return; }
   const th = themeOf(ev.theme, ev.customTheme);
-  root.innerHTML = `<div class="event-page t-${th.id}" id="evPage" style="--th-font:${th.font},system-ui;--th-ink:${th.ink};--th-sub:${th.sub};--th-accent:${th.accent};--th-on-accent:${th.onAccent};--th-chip:${th.chip};--th-card:${th.card}">
+  root.innerHTML = `<div class="event-page t-${esc(th.id)}" id="evPage" style="--th-font:${esc(th.font)},system-ui;--th-ink:${esc(th.ink)};--th-sub:${esc(th.sub)};--th-accent:${esc(th.accent)};--th-on-accent:${esc(th.onAccent)};--th-chip:${esc(th.chip)};--th-card:${esc(th.card)}">
     <canvas class="event-bg-canvas" id="evCanvas"></canvas>
     <div class="event-scroll">${eventInner(ev)}</div>
   </div>`;
@@ -1384,7 +1408,7 @@ function renderEventPage(root, id) {
   S.evSubs.forEach(fn => fn()); S.evSubs = [];
   S.comments = []; S.photos = []; S.polls = []; S.songs = [];
   const sub = (name, fn) => S.evSubs.push(onSnapshot(collection(db, "events", id, name), snap => fn(snap.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.warn("listener event/" + name + ":", err.code || err.message)));
-  sub("comments", rows => { S.comments = rows.sort((a, b) => a.createdAt - b.createdAt); const b = el("wall"); if (b) { b.innerHTML = wallInner(ev); wireWall(ev); } const dc = el("dayCard"); if (dc) { dc.innerHTML = dayInner(ev); wireDay(ev); } });
+  sub("comments", rows => { S.comments = rows.sort((a, b) => a.createdAt - b.createdAt); withInputKept(() => { const b = el("wall"); if (b) { b.innerHTML = wallInner(ev); wireWall(ev); } const dc = el("dayCard"); if (dc) { dc.innerHTML = dayInner(ev); wireDay(ev); } }); });
   sub("photos", rows => { S.photos = rows.sort((a, b) => b.createdAt - a.createdAt); const b = el("photosCard"); if (b) { b.innerHTML = photosInner(ev); wirePhotos(ev); } });
   sub("polls", rows => { S.polls = rows.sort((a, b) => a.createdAt - b.createdAt); const b = el("pollsCard"); if (b) { b.innerHTML = pollsInner(ev); wirePolls(ev); } });
   sub("songs", rows => { S.songs = rows.sort((a, b) => (Object.keys(b.votes || {}).length - Object.keys(a.votes || {}).length) || a.createdAt - b.createdAt); const b = el("playlistCard"); if (b) { b.innerHTML = playlistInner(ev); wirePlaylist(ev); } });
@@ -1531,7 +1555,7 @@ function wallParticipants(ev) {
     : ev._col && ev._col[0] === "expenses" ? ((S.expenses.get(ev.id) || {}).involved || []) : (ev.invitedUids || []);
   return ids.filter(u => u !== myUid()).map(u => ({ uid: u, name: first(nameOf(u)) })).filter(p => p.name !== "Someone");
 }
-function lightbox(src) { const box = document.createElement("div"); box.className = "lightbox"; box.innerHTML = `<img src="${src}" alt="">`; box.onclick = () => box.remove(); document.body.appendChild(box); }
+function lightbox(src) { const box = document.createElement("div"); box.className = "lightbox"; box.innerHTML = `<img src="${esc(src)}" alt="">`; box.onclick = () => box.remove(); document.body.appendChild(box); }
 function wallInner(ev, title = "Party wall") {
   const all = S.comments.filter(c => !c.kind && visibleContent(c)); const me = myUid();
   if (replyTo && replyTo.ctx !== ev.id) replyTo = null;
@@ -1542,7 +1566,7 @@ function wallInner(ev, title = "Party wall") {
     const rx = Object.entries(c.reactions || {}).filter(([k, us]) => rshow(k) && us && us.length);
     const who = first(c.authorName || nameOf(c.authorId));
     return `<div class="wall-msg${topId ? " reply" : ""}">${avatar(c.authorId, "sm")}<div style="flex:1;min-width:0"><div class="wall-who">${esc(who)} <i>${ago(c.createdAt)}</i></div>
-      ${c.gif ? `<img class="wall-img wall-gif" src="${esc(c.gif)}" alt="GIF">` : ""}${c.img ? `<img class="wall-img" src="${c.img}" alt="">` : ""}${c.text ? `<div class="wall-text">${renderText(c.text, c.mentions)}</div>` : ""}
+      ${c.gif ? `<img class="wall-img wall-gif" src="${esc(c.gif)}" alt="GIF">` : ""}${c.img ? `<img class="wall-img" src="${esc(c.img)}" alt="">` : ""}${c.text ? `<div class="wall-text">${renderText(c.text, c.mentions)}</div>` : ""}
       <div class="react-row">${rx.map(([k, us]) => `<button type="button" class="react ${us.includes(me) ? "on" : ""}" data-react="${c.id}|${k}">${rshow(k)} ${us.length}</button>`).join("")}<button type="button" class="react add" data-reactpick="${c.id}" title="React">＋</button><button type="button" class="react add" data-reply="${topId || c.id}|${esc(who)}">↩ Reply</button></div>
       ${(kids[c.id] || []).map(r => msg(r, c.id)).join("")}</div>
       ${c.authorId === me || isAdmin() ? `<button class="wall-del" data-delc="${c.id}" title="Delete">✕</button>` : `<button class="wall-del" data-more="comment|${c.id}" title="Report or block">⋯</button>`}</div>`;
@@ -1796,16 +1820,18 @@ function pollsInner(ev, hint = "Add a poll to help decide: food, time, theme.") 
       const n = Object.values(p.votes || {}).filter(v => v === i).length;
       const pct = total ? Math.round(n / total * 100) : 0;
       return `<div class="poll-opt ${mine === i ? "mine" : ""}" data-vote="${p.id}|${i}"><div class="poll-bar" style="transform:scaleX(${total ? n / total : 0})"></div><div class="poll-opt-in"><span>${esc(o)}</span><span>${pct}%</span></div></div>`;
-    }).join("")}<div class="muted-th sm" style="margin-top:4px">${total} vote${total === 1 ? "" : "s"}${manage ? ` · <a data-delpoll="${p.id}">remove</a>` : ""}${planBtn(ev, p)}</div></div>`;
+    }).join("")}<div class="muted-th sm" style="margin-top:4px">${total} vote${total === 1 ? "" : "s"}${manage || p.authorId === me ? ` · <a data-delpoll="${p.id}">remove</a>` : ""}${planBtn(ev, p)}</div></div>`;
   }).join("");
-  return `<div class="glass-head">Polls${manage ? ` <a class="btn-th ghost small" id="addPoll">＋ Add</a>` : `<span>${S.polls.length}</span>`}</div><div class="scroll-cap">${list || `<p class="muted-th">${manage ? esc(hint) : "No polls yet."}</p>`}</div>`;
+  // Group polls: any member can add one (the rules allow it); removing someone else's is host-only.
+  const canAdd = manage || (ev._col && ev._col[0] === "groups");
+  return `<div class="glass-head">Polls${canAdd ? ` <a class="btn-th ghost small" id="addPoll">＋ Add</a>` : `<span>${S.polls.length}</span>`}</div><div class="scroll-cap">${list || `<p class="muted-th">${manage ? esc(hint) : "No polls yet."}</p>`}</div>`;
 }
 // Group date polls: the leading dated option can become an event in one tap.
 function planBtn(ev, p) {
   if (!(ev._col && ev._col[0] === "groups") || !p.dates) return "";
   const counts = {}; Object.values(p.votes || {}).forEach(i => counts[i] = (counts[i] || 0) + 1);
   const lead = Object.keys(p.dates).sort((a, b) => (counts[b] || 0) - (counts[a] || 0))[0]; if (lead == null) return "";
-  return ` · <a data-plan="${p.dates[lead]}|${esc(p.q)}">📅 Plan it for ${esc(p.options[lead])}</a>`;
+  return ` · <a data-plan="${esc(p.dates[lead])}|${esc(p.q)}">📅 Plan it for ${esc(p.options[lead])}</a>`;
 }
 function wirePolls(ev) {
   document.querySelectorAll("[data-plan]").forEach(a => a.onclick = () => { const [date, q] = a.dataset.plan.split("|"); resetCompose(); compose.date = date; compose.groupId = ev._col ? ev.id : ""; compose.title = ""; go("#/new"); toast("Date set to " + date + ", pick a title"); });
@@ -1869,7 +1895,7 @@ function addSongDialog(ev) {
 // ----- Photo wall -----
 function photosInner(ev) {
   const ps = S.photos.filter(visibleContent);
-  const tiles = ps.map(p => `<div class="photo-tile"><img src="${p.img}" data-photo="${p.id}" alt="" loading="lazy">${p.addedBy === myUid() || isAdmin() ? `<button class="photo-act" data-delphoto="${p.id}" title="Remove">✕</button>` : `<button class="photo-act" data-more="photo|${p.id}" title="Report">⚑</button>`}</div>`).join("");
+  const tiles = ps.map(p => `<div class="photo-tile"><img src="${esc(p.img)}" data-photo="${p.id}" alt="" loading="lazy">${p.addedBy === myUid() || isAdmin() ? `<button class="photo-act" data-delphoto="${p.id}" title="Remove">✕</button>` : `<button class="photo-act" data-more="photo|${p.id}" title="Report">⚑</button>`}</div>`).join("");
   return `<div class="glass-head">Photos <span>${ps.length}</span></div><div class="photo-grid"><button class="photo-add" id="addPhoto">＋</button>${tiles || ""}</div>${ps.length ? "" : `<p class="muted-th" style="margin-top:8px">Share pics from the night.</p>`}`;
 }
 function wirePhotos(ev) {
@@ -2144,7 +2170,7 @@ function wireExpensePage() {
   S.comments = [];
   S.evSubs.push(onSnapshot(subCol(pseudo, "comments"), snap => {
     S.comments = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.createdAt - b.createdAt);
-    const b = el("wall"); if (b) { b.innerHTML = wallInner(pseudo, "Discussion"); wireWall(pseudo); }
+    const b = el("wall"); if (b) withInputKept(() => { b.innerHTML = wallInner(pseudo, "Discussion"); wireWall(pseudo); });
   }, e => toast(e.message)));
 }
 function payVenmo(uid, cents, txn) { const v = (S.contacts.get(uid) || {}).venmo; if (!v) return; window.open(`https://venmo.com/${encodeURIComponent(v.replace(/^@/, ""))}?txn=${txn}&amount=${(cents / 100).toFixed(2)}&note=${encodeURIComponent("Friendly 🤝")}`, "_blank"); if (txn === "pay") markPaid(myUid(), uid, cents, "Venmo"); else toast("Request sent in Venmo."); }
@@ -2493,7 +2519,7 @@ function wireMeeting(ev) {
   const dl = $("[data-del]"); if (dl) dl.onclick = () => delEvent(ev);
   const pseudo = { id: ev.id, _col: ["events", ev.id], _manage: false, title: ev.title };
   S.comments = [];
-  S.evSubs.push(onSnapshot(subCol(pseudo, "comments"), snap => { S.comments = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.createdAt - b.createdAt); const w = el("wall"); if (w) { w.innerHTML = wallInner(pseudo, "Notes & questions"); wireWall(pseudo); } }, err => toast(err.message)));
+  S.evSubs.push(onSnapshot(subCol(pseudo, "comments"), snap => { S.comments = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.createdAt - b.createdAt); const w = el("wall"); if (w) withInputKept(() => { w.innerHTML = wallInner(pseudo, "Notes & questions"); wireWall(pseudo); }); }, err => toast(err.message)));
 }
 // Host asks the guests who haven't answered to RSVP (Cloud Function delivers).
 async function nudge(ev, btn) {
@@ -2521,7 +2547,7 @@ async function renderPreview(root, id) {
   if (!p) { card.innerHTML = `<b>This invite needs a sign-in.</b><p class="muted" style="margin:6px 0 0">Sign in or create an account below and the event will open.</p>`; }
   else {
     const when = fmtWhen({ date: p.date, time: p.time, endTime: p.endTime });
-    card.innerHTML = `${p.cover ? `<img class="pv-cover" src="${p.cover}" alt="">` : ""}<div class="pv-body">
+    card.innerHTML = `${p.cover ? `<img class="pv-cover" src="${esc(p.cover)}" alt="">` : ""}<div class="pv-body">
       <p class="muted sm" style="margin:0 0 4px">${esc(p.hostName || "A friend")} invited you${p.kind === "meeting" ? " to a meeting" : ""}</p>
       <h2 style="margin:0 0 6px">${p.kind === "meeting" ? "📅" : esc(p.emoji || "🎉")} ${esc(p.title)}</h2>
       <p style="margin:0 0 4px">${esc(when)}</p>${p.location ? `<p class="muted" style="margin:0 0 4px">📍 ${esc(p.location)}</p>` : ""}
@@ -2544,7 +2570,7 @@ function photosPageBody() {
   const evs = [...S.events.values()].filter(ev => (S.memories.get(ev.id) || []).length).sort((a, b) => b.date.localeCompare(a.date));
   const ago1 = yearAgoEvents().filter(ev => (S.memories.get(ev.id) || []).length);
   const section = (ev, label) => `<div class="section-head" style="margin-top:18px"><h2>${label ? label + " · " : ""}${esc(ev.emoji || "")} ${esc(ev.title)}</h2><a class="muted sm" data-go="#/e/${ev.id}">${esc(fmtWhen(ev))} ›</a></div>
-    <div class="photo-grid mem-grid">${(S.memories.get(ev.id) || []).map(p => `<img src="${p.img}" data-mem="${p.id}" alt="" loading="lazy">`).join("")}</div>`;
+    <div class="photo-grid mem-grid">${(S.memories.get(ev.id) || []).map(p => `<img src="${esc(p.img)}" data-mem="${p.id}" alt="" loading="lazy">`).join("")}</div>`;
   return `<button class="link-back" data-go="#/profile">‹ Profile</button>
   <div class="section-head"><h2>Memories</h2><span class="muted sm">${evs.reduce((t, ev) => t + S.memories.get(ev.id).length, 0)} photos</span></div>
   ${S._memLoading ? `<p class="muted">Gathering photos…</p>` : ""}

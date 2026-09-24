@@ -60,15 +60,41 @@ service cloud.firestore {
         && request.resource.data.ownerId == uid()
         && uid() in request.resource.data.memberUids;
 
-      // Owner manages the group; an invited user may accept (adds only self to
-      // memberUids, keeping everyone already a member); a member may update the
-      // denormalized data (e.g. their own display fields) or leave.
+      // Hosts (owner + hostUids) manage the group. A plain member may only touch
+      // their own entry in `members`, remove themselves from memberUids/hostUids
+      // (leave), never anyone else's -- before this, any member could rename the
+      // group, kick everyone, or make themselves owner. An invited user may
+      // accept: add only self to memberUids and clear only their own invite.
+      function isGroupHost() {
+        return uid() == resource.data.ownerId || uid() in resource.data.get('hostUids', []);
+      }
+      function ownMembersEntry() {
+        return request.resource.data.get('members', {}).diff(resource.data.get('members', {})).affectedKeys().hasOnly([uid()]);
+      }
+      function memberSelfEdit() {
+        let keys = request.resource.data.diff(resource.data).affectedKeys();
+        return keys.hasOnly(['members', 'memberUids', 'hostUids'])
+          && (!('members' in keys) || ownMembersEntry())
+          && (!('memberUids' in keys) || (
+               resource.data.memberUids.hasAll(request.resource.data.memberUids)
+               && request.resource.data.memberUids.size() == resource.data.memberUids.size() - 1
+               && !(uid() in request.resource.data.memberUids)))
+          && (!('hostUids' in keys) || (
+               resource.data.get('hostUids', []).hasAll(request.resource.data.get('hostUids', []))
+               && !(uid() in request.resource.data.get('hostUids', []))));
+      }
+      function acceptInvite() {
+        let keys = request.resource.data.diff(resource.data).affectedKeys();
+        return keys.hasOnly(['memberUids', 'members', 'invitedEmails', 'invitedPhones', 'invitedPhoneNames'])
+          && request.resource.data.memberUids.hasAll(resource.data.memberUids)
+          && request.resource.data.memberUids.size() == resource.data.memberUids.size() + 1
+          && uid() in request.resource.data.memberUids
+          && (!('members' in keys) || ownMembersEntry());
+      }
       allow update: if signedIn() && (
-        uid() == resource.data.ownerId
-        || uid() in resource.data.memberUids
-        || ((email() in resource.data.invitedEmails || phoneInvited())
-            && request.resource.data.memberUids.hasAll(resource.data.memberUids)
-            && uid() in request.resource.data.memberUids)
+        isGroupHost()
+        || (uid() in resource.data.memberUids && memberSelfEdit())
+        || ((email() in resource.data.invitedEmails || phoneInvited()) && acceptInvite())
       );
 
       allow delete: if signedIn() && uid() == resource.data.ownerId;
@@ -156,12 +182,18 @@ service cloud.firestore {
         || ((openLink() || viaGroup()) && selfJoin());
       allow delete: if signedIn() && uid() == resource.data.hostId;
 
-      // Party wall — anyone who can see the event can post; react; delete your own.
+      // The event's host or a co-host, for cleaning up other people's items
+      // (bring list, rides, wall posts, polls) -- the UI already showed them ✕.
+      function isEventHost() {
+        let e = get(/databases/$(database)/documents/events/$(eventId)).data;
+        return signedIn() && (uid() == e.hostId || uid() in e.get('cohostUids', []));
+      }
+      // Party wall — anyone who can see the event can post; react; delete your own (hosts: anyone's).
       match /comments/{commentId} {
         allow read: if canReadEvent();
         allow update: if canReadEvent() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']);
         allow create: if canReadEvent() && request.resource.data.authorId == uid();
-        allow delete: if isAdmin() || (signedIn() && resource.data.authorId == uid());
+        allow delete: if isAdmin() || isEventHost() || (signedIn() && resource.data.authorId == uid());
       }
       // Photos — event guests add and view; remove your own.
       match /photos/{photoId} {
@@ -175,7 +207,7 @@ service cloud.firestore {
         allow create: if canReadEvent() && request.resource.data.authorId == uid();
         allow update: if canReadEvent()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes']);
-        allow delete: if isAdmin() || (signedIn() && resource.data.authorId == uid());
+        allow delete: if isAdmin() || isEventHost() || (signedIn() && resource.data.authorId == uid());
       }
       // Playlist — guests add songs and toggle upvotes (votes map only).
       match /songs/{songId} {
