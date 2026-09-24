@@ -1898,12 +1898,16 @@ async function attemptRsvp(ev, status) {
 }
 async function setPlus(ev, delta) {
   const me = myUid(); const cur = ((ev.plusOnes || {})[me]) || 0; const n = Math.max(0, cur + delta);
-  const patch = { [`plusOnes.${me}`]: n };
-  if (delta < 0) {
-    const raw = (ev.plusNames || {})[me]; const names = Array.isArray(raw) ? raw : (raw ? [raw] : []);
-    if (names.length > n) patch[`plusNames.${me}`] = names.slice(0, n);
-  }
-  try { await updateDoc(doc(db, "events", ev.id), patch); } catch (e) { toast(e.message); }
+  // Two separate writes: firestore.rules' onlyOwn() only allows a non-host guest
+  // to touch ONE top-level field per update, so plusOnes and plusNames can't be
+  // combined into a single updateDoc call without getting rejected for guests.
+  try {
+    await updateDoc(doc(db, "events", ev.id), { [`plusOnes.${me}`]: n });
+    if (delta < 0) {
+      const raw = (ev.plusNames || {})[me]; const names = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+      if (names.length > n) await updateDoc(doc(db, "events", ev.id), { [`plusNames.${me}`]: names.slice(0, n) });
+    }
+  } catch (e) { toast(e.message); }
 }
 async function setHype(ev, emoji) {
   const me = myUid(); const cur = (ev.hypes || {})[me]; const next = cur === emoji ? null : emoji;
