@@ -2373,6 +2373,7 @@ function profileBody() {
   <div class="profile-hero"><button type="button" class="avatar-edit" id="photoBtn" title="Change photo">${avatar(myUid(), "xxl")}<span class="cam">📷</span></button><div><h1>${esc(p.name)}</h1><div class="muted mono">${esc(p.email || "")}</div></div></div>
   <div class="form-card card">
     <label class="field"><span>Name</span><input id="pName" value="${esc(p.name)}" maxlength="40"></label>
+    <label class="field"><span>Email <span class="muted">(calendar invites, password reset)</span></span><input id="pEmail" type="email" value="${esc(p.email || "")}" placeholder="you@example.com" autocomplete="email"></label>
     <div class="two"><label class="field"><span>Venmo</span><input id="pVenmo" value="${esc(p.venmo || "")}" placeholder="@sam-rivera"></label>
     <label class="field"><span>Phone (Apple Cash)</span><input id="pPhone" value="${esc(p.phone || "")}" placeholder="+1 555 123 4567"></label></div>
     <label class="field"><span>Birthday <span class="muted">(so your groups can plan something)</span></span><input id="pBday" type="date" value="${esc(p.birthday || "")}"></label>
@@ -2425,7 +2426,8 @@ function wireProfile() {
     const venmo = el("pVenmo").value.trim(), phone = el("pPhone").value.trim();
     try {
       const birthday = (el("pBday") || {}).value || "";
-      await updateDoc(doc(db, "users", myUid()), { name, venmo, phone, phoneE164: toE164(phone), birthday });
+      const email = (el("pEmail") || {}).value || ""; if (email && !email.includes("@")) return toast("That email doesn't look right.");
+      await updateDoc(doc(db, "users", myUid()), { name, venmo, phone, phoneE164: toE164(phone), birthday, email: email.trim().toLowerCase() });
       // propagate name/contact into each group's denormalized members map
       for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}`]: { name, venmo, phone, photo: S.profile.photo || "", birthday } }).catch(() => {});
       toast("Profile saved");
