@@ -363,6 +363,50 @@ exports.phoneSignIn = onRequest({ region: "us-central1", invoker: "public", memo
   } catch (e) { logger.error("phoneSignIn", e); res.status(500).json({ error: "Server error" }); }
 });
 
+// Forgot password: look the account up by phone, and if it has a real email on
+// file, email a Firebase password-reset link there (never to the synthetic
+// <digits>@phone.officialfriendly.com auth address, which isn't a real inbox).
+// Always responds the same way whether or not an account/email was found, so
+// this can't be used to check which phone numbers have accounts.
+exports.requestPasswordReset = onRequest({ region: "us-central1", invoker: "public", memory: "256MiB", secrets: [MAILGUN_API_KEY] }, async (req, res) => {
+  res.set("Access-Control-Allow-Origin", SITE);
+  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
+  const { phoneE164 } = req.body || {};
+  if (!phoneE164) { res.status(400).json({ error: "Missing phoneE164" }); return; }
+  try {
+    const key = MAILGUN_API_KEY.value();
+    const snap = key && key !== "unset" ? await db.collection("users").where("phoneE164", "==", phoneE164).limit(1).get() : null;
+    const userDoc = snap && !snap.empty ? snap.docs[0] : null;
+    const toEmail = userDoc ? String(userDoc.get("email") || "").toLowerCase().trim() : "";
+    if (userDoc && toEmail.includes("@")) {
+      const authUser = await getAuth().getUser(userDoc.id).catch(() => null);
+      if (authUser && authUser.email) {
+        // generatePasswordResetLink always points at the firebaseapp.com hosted
+        // action handler regardless of actionCodeSettings -- pull out just the
+        // oobCode and build our own link so it opens Friendly's own reset screen.
+        const raw = await getAuth().generatePasswordResetLink(authUser.email, { url: SITE + "/" });
+        const oobCode = new URL(raw).searchParams.get("oobCode");
+        const link = `${SITE}/?mode=resetPassword&oobCode=${encodeURIComponent(oobCode)}`;
+        const html = `<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#2A2019">
+          <h2 style="margin:0 0 14px;font-size:22px">Reset your Friendly password</h2>
+          <p style="margin:0 0 20px">Tap below to choose a new one. This link works once and expires soon.</p>
+          <p style="margin:0 0 20px"><a href="${link}" style="background:#FF6B57;color:#fff;text-decoration:none;padding:12px 18px;border-radius:12px;font-weight:600;display:inline-block">Reset password</a></p>
+          <p style="color:#8C7C70;font-size:13px">Didn't ask for this? You can ignore this email -- your password stays the same.</p>
+        </div>`;
+        const form = new FormData();
+        form.append("from", MAIL_FROM("Friendly")); form.append("to", toEmail);
+        form.append("subject", "Reset your Friendly password"); form.append("html", html);
+        const r = await fetch(MAILGUN_API + "/messages", { method: "POST", headers: { Authorization: "Basic " + Buffer.from("api:" + key).toString("base64") }, body: form });
+        if (!r.ok) logger.warn("mailgun password reset " + r.status + ": " + (await r.text()).slice(0, 200));
+      }
+    }
+  } catch (e) { logger.error("requestPasswordReset", e); }
+  res.json({ ok: true });
+});
+
 // Calendar subscription: /cal?u=<uid>&t=<token> is a live .ics feed of every
 // event the user is invited to (subscribe once in iPhone/Google Calendar).
 // The token lives on the user's profile; the app makes it on first use.

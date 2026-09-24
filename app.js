@@ -5,7 +5,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/fireba
 import {
   getAuth, onAuthStateChanged, createUserWithEmailAndPassword,
   signInWithEmailAndPassword, signInWithCustomToken, signOut, deleteUser, reauthenticateWithCredential, EmailAuthProvider,
-  sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink
+  sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink,
+  verifyPasswordResetCode, confirmPasswordReset
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection,
@@ -28,11 +29,17 @@ const NATIVE = !!(CAP && CAP.isNativePlatform && CAP.isNativePlatform());
 // home indicator, so the CSS safe-area padding would double up there.
 if (NATIVE) document.documentElement.classList.add("native");
 
+// A password-reset link (mailed to the user, opened from wherever their inbox
+// is) has to keep working in a plain mobile browser -- there's no native deep
+// link for it -- so it's exempt from the App Store block below.
+const RESET_PARAMS = new URLSearchParams(location.search);
+const RESET_OOB = RESET_PARAMS.get("mode") === "resetPassword" ? RESET_PARAMS.get("oobCode") : null;
+
 // A phone hitting the plain web site (not the native app -- NATIVE covers that,
 // since the app shell also loads this same origin) belongs in the App Store,
 // not the mobile web build. Full-screen block, no way to continue in browser.
 const APP_STORE_URL = "https://apps.apple.com/app/id6810875052";
-const BLOCKED_MOBILE_WEB = !NATIVE && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+const BLOCKED_MOBILE_WEB = !NATIVE && !RESET_OOB && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 if (BLOCKED_MOBILE_WEB) {
   document.getElementById("app").innerHTML = `
   <div class="auth-wrap">
@@ -443,6 +450,7 @@ function render() {
     if (S.ready && !splashTimer) splashTimer = setTimeout(() => { splashTimer = null; render(); }, SPLASH_MIN - (Date.now() - BOOT_AT) + 20);
     if (root.querySelector(".splash")) return;
     root.innerHTML = `<div class="splash"><div class="brand splash-brand">Friend<span class="tilt">l</span>y</div><div class="splash-row"><span class="splash-av" style="background:#F08A4B">SR</span><span class="splash-av" style="background:#3B82F6">AK</span><span class="splash-av" style="background:#25A56A">JP</span><span class="splash-av" style="background:#C84B7A">MT</span></div><p>Getting everyone here…</p></div>`; return; }
+  if (RESET_OOB) { renderResetPassword(root); return; }
   if (!S.user) { if (S.route.name === "event") { renderPreview(root, S.route.id); return; } if (S.route.name === "join") { try { localStorage.setItem("friendlyJoin", S.route.id); } catch {} } renderAuth(root); return; }
   if (!S.profile) { root.innerHTML = `<div class="splash"><div class="brand splash-brand">Friend<span class="tilt">l</span>y</div><div class="splash-row"><span class="splash-av" style="background:#F08A4B">SR</span><span class="splash-av" style="background:#3B82F6">AK</span><span class="splash-av" style="background:#25A56A">JP</span><span class="splash-av" style="background:#C84B7A">MT</span></div><p>Setting up your profile…</p></div>`; return; }
   if (S.profile.onboarded === false) { root.innerHTML = onboardingBody(); wireOnboarding(); return; }
@@ -520,6 +528,7 @@ function renderAuth(root) {
         <button class="btn primary lg" type="submit">${authMode === "in" ? "Sign in" : "Create account"}</button>
         ${authMode === "up" ? `<label class="cbox" style="margin:12px 0 0;align-items:flex-start"><input type="checkbox" id="aTerms" style="margin-top:3px"><span class="sm">I agree to the <a href="./terms.html" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">Terms of Use</a> and <a href="./privacy.html" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">Privacy Policy</a>. No harassment or objectionable content; accounts that post it are removed.</span></label>` : ""}
       </form>
+      ${authMode === "in" ? `<p class="auth-foot" style="margin-top:8px"><a id="forgotPass">Forgot password?</a></p>` : ""}
       <p class="auth-foot">${authMode === "in" ? "New here?" : "Already have an account?"}
         <a id="authSwap">${authMode === "in" ? "Create an account" : "Sign in"}</a></p>
     </div>
@@ -528,6 +537,18 @@ function renderAuth(root) {
   el("segIn").onclick = () => { authMode = "in"; renderAuth(root); };
   el("segUp").onclick = () => { authMode = "up"; renderAuth(root); };
   el("authSwap").onclick = () => { authMode = authMode === "in" ? "up" : "in"; renderAuth(root); };
+  if (el("forgotPass")) el("forgotPass").onclick = () => {
+    dialog(`<h3>Reset your password</h3><p class="muted" style="margin-top:-6px">Enter the phone number on your account. If it has an email on file, we'll send a reset link there.</p>
+      <label class="field"><span>Phone number</span><input id="rpPhone" type="tel" inputmode="tel" placeholder="+1 555 123 4567" value="${esc(el("aPhone") ? el("aPhone").value.trim() : "")}"></label>`, "Send reset link", async () => {
+      const e164 = toE164(el("rpPhone").value.trim()); if (!e164) return toast("Enter a valid phone number.");
+      const btn = el("dlgOk"); btn.disabled = true; btn.textContent = "Sending…";
+      try {
+        await fetch(FN_BASE + "/requestPasswordReset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phoneE164: e164 }) });
+        closeDialog();
+        toast("If that number has an account with an email on file, a reset link is on its way.");
+      } catch { btn.disabled = false; btn.textContent = "Send reset link"; toast("Couldn't send that right now, try again."); }
+    });
+  };
   el("authForm").onsubmit = async e => {
     e.preventDefault();
     const phone = el("aPhone").value.trim(), pass = el("aPass").value, name = el("aName").value.trim();
@@ -562,6 +583,39 @@ function authError(err) {
   if (c.includes("weak-password")) return "Password needs at least 6 characters.";
   if (c.includes("invalid-email")) return "That doesn't look like a valid phone number.";
   return "Couldn't do that: " + (err.message || c);
+}
+
+// ---------- password reset (from the emailed link, ?mode=resetPassword&oobCode=...) ----------
+let resetState = "checking"; // "checking" | "ready" | "invalid" | "done"
+function renderResetPassword(root) {
+  if (resetState === "checking" && !renderResetPassword._started) {
+    renderResetPassword._started = true;
+    verifyPasswordResetCode(auth, RESET_OOB).then(() => { resetState = "ready"; render(); })
+      .catch(() => { resetState = "invalid"; render(); });
+  }
+  const goHome = () => { location.href = location.origin + location.pathname; };
+  const shell = inner => `<div class="auth-wrap"><canvas id="authbg" class="auth-bg"></canvas><div class="auth-card card"><div class="brand xl">Friend<span class="tilt">l</span>y</div>${inner}</div></div>`;
+  if (resetState === "checking") { root.innerHTML = shell(`<p class="auth-lede">Checking your reset link…</p>`); startParticles(el("authbg"), "confetti"); return; }
+  if (resetState === "invalid") {
+    root.innerHTML = shell(`<p class="auth-lede">This reset link is invalid or has expired. Request a new one from the sign-in screen.</p><button class="btn primary lg" id="resetBack">Back to sign in</button>`);
+    startParticles(el("authbg"), "confetti"); el("resetBack").onclick = goHome; return;
+  }
+  if (resetState === "done") {
+    root.innerHTML = shell(`<p class="auth-lede">Password updated. Sign in with your new password.</p><button class="btn primary lg" id="resetBack">Sign in</button>`);
+    startParticles(el("authbg"), "confetti"); el("resetBack").onclick = goHome; return;
+  }
+  root.innerHTML = shell(`<p class="auth-lede">Choose a new password.</p>
+    <form id="resetForm" class="stack">
+      <label class="field"><span>New password</span><input id="rNewPass" type="password" required minlength="6" placeholder="At least 6 characters" autocomplete="new-password"></label>
+      <button class="btn primary lg" type="submit">Save new password</button>
+    </form>`);
+  startParticles(el("authbg"), "confetti");
+  el("resetForm").onsubmit = async e => {
+    e.preventDefault();
+    const pass = el("rNewPass").value;
+    try { await confirmPasswordReset(auth, RESET_OOB, pass); resetState = "done"; render(); }
+    catch (err) { toast(authError(err)); }
+  };
 }
 
 // ---------- app shell ----------
@@ -1580,10 +1634,16 @@ function dayInner(ev) {
     ${items.length ? items.map(c => {
       const who = ((c.reactions || {}).claim || []); const claimQty = (c.reactions || {}).claimQty || {};
       const qtyOf = u => claimQty[u] || 1; const iAmIn = who.includes(me); const myQty = qtyOf(me);
-      return `<div class="day-row"><span style="flex:1;min-width:0"><b>${esc(c.item)}</b>${c.qty ? ` <span class="muted-th sm">× ${esc(c.qty)}</span>` : ""}${who.length ? `<div class="muted-th sm">${who.map(u => esc(first(nameOf(u))) + (qtyOf(u) > 1 ? ` (${qtyOf(u)})` : "")).join(", ")} ${who.length === 1 ? "has" : "have"} it</div>` : ""}</span>
+      const totalClaimed = who.reduce((t, u) => t + qtyOf(u), 0);
+      const target = parseInt(c.qty, 10); const hasTarget = Number.isFinite(target) && target > 0;
+      const remaining = hasTarget ? Math.max(0, target - totalClaimed) : 0;
+      const covered = hasTarget && remaining <= 0;
+      return `<div class="day-row"><span style="flex:1;min-width:0"><b>${esc(c.item)}</b>${c.qty ? ` <span class="muted-th sm">× ${esc(c.qty)}</span>` : ""}
+        ${who.length ? `<div class="muted-th sm">${who.map(u => esc(first(nameOf(u))) + " is bringing " + qtyOf(u)).join(", ")}</div>` : ""}
+        ${hasTarget ? `<div class="muted-th sm" ${covered ? `style="color:var(--good)"` : ""}>${covered ? "✓ Covered" : remaining + " more needed"}</div>` : ""}</span>
         <span class="btnrow" style="gap:6px;align-items:center">
         ${iAmIn ? `<span class="qty-stepper"><button type="button" class="btn-th small" data-claimqty="${c.id}|-1" ${myQty <= 1 ? "disabled" : ""}>−</button><b class="qty-num">${myQty}</b><button type="button" class="btn-th small" data-claimqty="${c.id}|1">+</button></span>` : ""}
-        <button type="button" class="btn-th small ${iAmIn ? "accent" : ""}" data-claim="${c.id}">${iAmIn ? "✓ Bringing it" : "I'll bring it"}</button>
+        ${iAmIn ? `<button type="button" class="btn-th small accent" data-claim="${c.id}">✓ Bringing it</button>` : covered ? "" : `<button type="button" class="btn-th small" data-claim="${c.id}">I'll bring it</button>`}
         </span>${c.authorId === me || canManage(ev) ? `<button type="button" class="wall-del" data-delc="${c.id}" title="Remove">✕</button>` : ""}</div>`;
     }).join("") : `<p class="muted-th sm" style="margin:2px 0 8px">Nothing on the list yet. Add what's needed and people claim it.</p>`}
     <div class="glass-sub">Carpool <button type="button" class="btn-th ghost small" id="addRide">🚗 Offer a ride</button></div>
