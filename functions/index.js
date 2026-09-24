@@ -7,6 +7,7 @@
 // credentials:  firebase functions:config:set twilio.sid=... twilio.token=... twilio.from=+1...
 const { onDocumentCreated, onDocumentUpdated, onDocumentDeleted } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const functionsV1 = require("firebase-functions/v1");
 const { onRequest } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const webpush = require("web-push");
@@ -503,6 +504,86 @@ exports.onEventCreated = onDocumentCreated({ document: "events/{id}", ...MAIL },
 exports.onEventDeleted = onDocumentDeleted({ document: "events/{id}", ...MAIL }, async e => {
   const ev = e.data && e.data.data(); if (!ev) return;
   await Promise.all([sendInviteEmails(e.params.id, ev, "CANCEL"), db.doc("previews/" + e.params.id).delete().catch(() => {})]);
+});
+
+// ---- Deleted accounts: scrub (or migrate) their memberships everywhere ----
+// The app's own delete flow only removed the person from groups, never from
+// events, and an account deleted from the Firebase console cleaned up nothing.
+// The leftover uid then kept matching that person's phone number in the "Add
+// people" picker, so re-inviting them silently re-added the dead account
+// instead of texting the new one. `replacement` is the same person's new
+// account (matched by phone), in which case memberships move to it instead.
+const toE164 = p => { const d = String(p || "").trim(); if (!d) return ""; const n = d.replace(/\D/g, ""); if (d.startsWith("+")) return "+" + n; if (n.length === 10) return "+1" + n; if (n.length === 11 && n[0] === "1") return "+" + n; return n ? "+" + n : ""; };
+async function scrubUid(uid, replacement) {
+  const nu = replacement && replacement.uid;
+  const groups = await db.collection("groups").where("memberUids", "array-contains", uid).get();
+  for (const g of groups.docs) {
+    const d = g.data(); const up = {};
+    const rest = (d.memberUids || []).filter(u => u !== uid);
+    up.memberUids = nu && !rest.includes(nu) ? [...rest, nu] : rest;
+    const hosts = (d.hostUids || []).filter(u => u !== uid);
+    up.hostUids = nu && (d.hostUids || []).includes(uid) && !hosts.includes(nu) ? [...hosts, nu] : hosts;
+    const members = { ...(d.members || {}) }; const old = members[uid]; delete members[uid];
+    if (nu && old) members[nu] = { ...old, name: replacement.name || old.name };
+    up.members = members;
+    if (d.ownerId === uid) up.ownerId = nu || up.hostUids[0] || rest[0] || null;
+    if (!up.memberUids.length) { await g.ref.delete(); continue; }
+    await g.ref.update(up);
+  }
+  const events = await db.collection("events").where("invitedUids", "array-contains", uid).get();
+  for (const e of events.docs) {
+    const d = e.data(); const up = {};
+    const rest = (d.invitedUids || []).filter(u => u !== uid);
+    up.invitedUids = nu && !rest.includes(nu) ? [...rest, nu] : rest;
+    const co = (d.cohostUids || []).filter(u => u !== uid);
+    up.cohostUids = nu && (d.cohostUids || []).includes(uid) && !co.includes(nu) ? [...co, nu] : co;
+    for (const k of ["rsvps", "plusOnes", "plusNames", "hypes", "answers", "names"]) {
+      const m = { ...(d[k] || {}) }; if (!(uid in m)) continue;
+      const v = m[uid]; delete m[uid]; if (nu) m[nu] = k === "names" ? (replacement.name || v) : v; up[k] = m;
+    }
+    if (d.hostId === uid && nu) up.hostId = nu;
+    await e.ref.update(up);
+  }
+  return { groups: groups.size, events: events.size };
+}
+// In-app deletion removes users/{uid} first; console deletion fires the auth trigger.
+exports.onUserDeleted = onDocumentDeleted({ document: "users/{uid}" }, async e => {
+  const n = await scrubUid(e.params.uid); logger.info("scrubbed deleted user " + e.params.uid, n);
+});
+exports.onAuthUserDeleted = functionsV1.auth.user().onDelete(async user => {
+  await db.doc("users/" + user.uid).delete().catch(() => {});
+  const n = await scrubUid(user.uid); logger.info("scrubbed auth-deleted user " + user.uid, n);
+});
+// One-off repair for accounts deleted before the triggers above existed: find
+// every uid still referenced by a group or event whose Firebase Auth user is
+// gone, migrate it to the same person's new account (matched by phone) when
+// there is one, otherwise scrub it. Guarded by a secret; returns a summary.
+const MAINT_KEY = defineSecret("MAINT_KEY");
+exports.scrubOrphans = onRequest({ region: "us-central1", invoker: "public", memory: "512MiB", timeoutSeconds: 300, secrets: [MAINT_KEY] }, async (req, res) => {
+  if (!MAINT_KEY.value() || String(req.query.key || "") !== MAINT_KEY.value()) { res.status(403).send("forbidden"); return; }
+  const uids = new Set();
+  (await db.collection("groups").get()).forEach(g => (g.get("memberUids") || []).forEach(u => uids.add(u)));
+  (await db.collection("events").get()).forEach(e => (e.get("invitedUids") || []).forEach(u => uids.add(u)));
+  const all = [...uids]; const gone = [];
+  for (let i = 0; i < all.length; i += 100) {
+    const r = await getAuth().getUsers(all.slice(i, i + 100).map(uid => ({ uid })));
+    r.notFound.forEach(x => gone.push(x.uid));
+  }
+  const report = [];
+  for (const uid of gone) {
+    let replacement = null;
+    const oldDoc = await db.doc("users/" + uid).get();
+    let phone = oldDoc.exists ? (oldDoc.get("phoneE164") || toE164(oldDoc.get("phone"))) : "";
+    if (!phone) {
+      const g = await db.collection("groups").where("memberUids", "array-contains", uid).limit(1).get();
+      const m = g.empty ? null : (g.docs[0].get("members") || {})[uid]; phone = m && m.phone ? toE164(m.phone) : "";
+    }
+    if (phone) { const q = await db.collection("users").where("phoneE164", "==", phone).limit(1).get(); if (!q.empty && q.docs[0].id !== uid) replacement = { uid: q.docs[0].id, name: q.docs[0].get("name") || "" }; }
+    const n = await scrubUid(uid, replacement);
+    if (oldDoc.exists) await oldDoc.ref.delete().catch(() => {});
+    report.push({ uid, migratedTo: replacement ? replacement.uid : null, ...n });
+  }
+  res.json({ checked: all.length, gone: gone.length, report });
 });
 
 // Someone nudged the guests who haven't answered.
