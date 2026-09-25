@@ -329,11 +329,38 @@ ${text}`;
   const cap = parseInt(out.capacity, 10); if (cap > 0 && cap !== current.capacity) patch.capacity = Math.min(500, cap);
   return { patch, unclear: sv(out.unclear, 200), summary: sv(out.summary, 300) || "Here's what I'll change." };
 }
+// mode "ask": a question, answered from the user's own plans (a compact context the app sends) and what the app can do.
+const APP_FACTS = `Friendly is an app for friend groups: plan events (themes, AI-painted covers, RSVPs with plus-ones, guest list, bring list, carpool, polls, playlist, photo wall, party wall, hype, RSVP questions, waitlists and capacity, "on my way / running late" on the day, calendar invites by email and calendar sync), plain meetings, groups (invite by phone, group chat, birthdays reminded a month out), and money (shared expenses, receipt scanning that itemizes, "fewest payments" settling, Venmo one-tap pay, mark as paid). Dot, the helper, can be tapped in the bottom-right corner on any page to: plan an event from a spoken description, set up an expense from a description, change an event you host by describing the change, or answer questions. Tapping the yellow dot in the logo gives a tip. Hosts can nudge people who haven't answered, duplicate an event, add co-hosts, and remove guests. Notifications are turned on from the profile. The app is free.`;
+async function answerQuestion(d) {
+  const q = sv(d.text, 600); if (q.length < 2) throw new Error("no question");
+  const ctx = d.context && typeof d.context === "object" ? d.context : {};
+  const events = (Array.isArray(ctx.events) ? ctx.events : []).slice(0, 15).map(e => ({ id: sv(e.id, 40), title: sv(e.title, 80), date: sv(e.date, 10), time: sv(e.time, 5), location: sv(e.location, 80), kind: sv(e.kind, 8), going: parseInt(e.going, 10) || 0, invited: parseInt(e.invited, 10) || 0, unanswered: parseInt(e.unanswered, 10) || 0, me: sv(e.me, 10), host: sv(e.host, 30), mine: !!e.mine }));
+  const groups = (Array.isArray(ctx.groups) ? ctx.groups : []).slice(0, 12).map(g => ({ id: sv(g.id, 40), name: sv(g.name, 60), members: parseInt(g.members, 10) || 0 }));
+  const money = ctx.money && typeof ctx.money === "object" ? { iOwe: sv(ctx.money.iOwe, 12), owed: sv(ctx.money.owed, 12), pairs: (Array.isArray(ctx.money.pairs) ? ctx.money.pairs : []).slice(0, 8).map(x => sv(x, 80)) } : {};
+  const prompt = `${DOT} Answer the user's question in Dot's voice: warm, brief (one to three short sentences), specific. Use ONLY the user's data below and the app facts; if the answer isn't there, say you don't know and say where in the app they could look. Never invent events, people or numbers. ${whenContext(d)}
+The user's first name: ${sv(ctx.me, 30) || "friend"}.
+Upcoming events (JSON): ${JSON.stringify(events)}
+Groups (JSON): ${JSON.stringify(groups)}
+Money: ${JSON.stringify(money)}
+App facts: ${APP_FACTS}
+If one or two of these would help, return actions: kind "open_event" with the event id (label = the event title), or kind "plan" (label "Plan something"), "expense" (label "Add an expense"), "money", "groups", or "profile". Otherwise return no actions.
+
+Question:
+${q}`;
+  const schema = { type: "OBJECT", required: ["answer"], properties: { answer: str, actions: { type: "ARRAY", items: { type: "OBJECT", required: ["kind", "label"], properties: { kind: { type: "STRING", enum: ["open_event", "plan", "expense", "money", "groups", "profile"] }, label: str, id: str } } } } };
+  const out = await askGemini(prompt, schema, 0.3);
+  const ids = new Set(events.map(e => e.id));
+  return {
+    answer: sv(out.answer, 600) || "I'm not sure about that one.",
+    actions: (Array.isArray(out.actions) ? out.actions : []).slice(0, 2).map(a => ({ kind: sv(a && a.kind, 12), label: sv(a && a.label, 40), id: sv(a && a.id, 40) }))
+      .filter(a => a.kind && a.label && (a.kind !== "open_event" || ids.has(a.id)))
+  };
+}
 exports.onPlanRequest = onDocumentCreated({ document: "planRequests/{id}", region: "us-central1", timeoutSeconds: 60, memory: "256MiB" }, async e => {
   const d = e.data && e.data.data(); if (!d || !d.text) return;
   const ref = e.data.ref;
   try {
-    const data = d.mode === "expense" ? await draftExpense(d) : d.mode === "edit" ? await draftEdit(d) : await draftPlan(d);
+    const data = d.mode === "expense" ? await draftExpense(d) : d.mode === "edit" ? await draftEdit(d) : d.mode === "ask" ? await answerQuestion(d) : await draftPlan(d);
     await ref.update({ status: "done", data });
   }
   catch (err) { logger.error("plan draft failed: " + err.message); await ref.update({ status: "error", error: "couldn't work that out" }); }

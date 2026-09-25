@@ -32,12 +32,14 @@
   const confetti = (cx, cy) => `<g class="conf">` + [[CORAL, -38, -30], ["#25A56A", 34, -34], ["#3B82F6", -30, 26], [SUN, 40, 22], [CORAL, 0, -46], ["#25A56A", 44, -6]]
     .map(([c, dx, dy]) => `<rect x="${cx - 3}" y="${cy - 4}" width="6" height="8" rx="1.5" fill="${c}" style="--dx:${dx}px;--dy:${dy}px"/>`).join("") + `</g>`;
 
-  function svg({ mood = "idle", size = 96, still = false } = {}) {
+  function svg({ mood = "idle", size = 96, still = false, wave = false } = {}) {
     const cx = 60, cy = 56, glow = (mood === "happy" || mood === "party") ? .78 : .6;
+    // a small raised hand on the right, only when asked for; it pivots from where it meets the body
+    const hand = wave ? `<path class="hand" d="M${cx + 34} ${cy + 4} L${cx + 47} ${cy - 16}" stroke="${SUN}" stroke-width="13" stroke-linecap="round" fill="none" style="transform-origin:${cx + 34}px ${cy + 4}px"/>` : "";
     const body = `<path transform="translate(${cx} ${cy}) scale(4.2)" d="${SHAPES.pebble}" fill="${SUN}"/>
       <ellipse cx="${cx - 17}" cy="${cy - 21}" rx="9" ry="5" fill="#fff" opacity=".45" transform="rotate(-35 ${cx - 17} ${cy - 21})"/>
       <circle cx="${cx - 23}" cy="${cy + 8}" r="5.2" fill="${CORAL}" opacity="${glow}"/><circle cx="${cx + 23}" cy="${cy + 8}" r="5.2" fill="${CORAL}" opacity="${glow}"/>`;
-    return `<svg viewBox="-4 -8 128 132" width="${size}" height="${size}" class="blip ${still ? "" : "idle"} blip-${mood}" aria-hidden="true">${mood === "party" ? confetti(cx, cy) : ""}<g transform="${mood === "thinking" ? `rotate(-7 ${cx} ${cy + 42})` : ""}"><g class="body">${body}${face(mood, cx, cy)}</g></g></svg>`;
+    return `<svg viewBox="-4 -8 128 132" width="${size}" height="${size}" class="blip ${still ? "" : "idle"} blip-${mood}" aria-hidden="true">${mood === "party" ? confetti(cx, cy) : ""}<g transform="${mood === "thinking" ? `rotate(-7 ${cx} ${cy + 42})` : ""}"><g class="body">${body}${hand}${face(mood, cx, cy)}</g></g></svg>`;
   }
 
   // ---- the origin morph -----------------------------------------------------------

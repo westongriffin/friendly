@@ -348,10 +348,21 @@ function dotIntro() {
   if (!seen) {
     try { localStorage.setItem("friendlyDotHello", "1"); } catch {}
     dotIntroPending = true;
-    setTimeout(() => { if (S.route.name === "home" && el("brandDot")) showLogoTip("Hi, I'm Dot. Tap me up here any time you want a tip."); setTimeout(() => { dotIntroPending = false; dotWatch(); }, 8000); }, 1600);
+    setTimeout(() => { if (S.route.name === "home" && el("brandDot")) showLogoTip("Hi, I'm Dot. Tap me down in the corner and I'll plan things for you. Tap me up here for a tip."); setTimeout(() => { dotIntroPending = false; dotWatch(); }, 8000); }, 1600);
     dotHopped = true; return;
   }
-  if (!dotHopped) { dotHopped = true; setTimeout(() => { const d = el("brandDot"); if (d && !dotTapped && !document.getElementById("logoTip")) { d.classList.add("hop"); setTimeout(() => d.classList.remove("hop"), 1400); } }, 25000); }
+  if (!dotHopped) { dotHopped = true; setTimeout(dotWave, 1400); }
+}
+// Dot grows out of the logo dot, smiles and waves, then goes back in. Once a session.
+function dotWave() {
+  const dotEl = el("brandDot"); if (!dotEl || !window.Blip || document.getElementById("logoTip") || document.getElementById("logoWave")) return;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const r = dotEl.getBoundingClientRect();
+  const w = document.createElement("div"); w.id = "logoWave"; w.style.left = r.left + "px"; w.style.top = r.top + "px";
+  w.innerHTML = window.Blip.svg({ mood: "happy", size: 64, wave: true });
+  document.body.appendChild(w); dotEl.classList.add("away");
+  requestAnimationFrame(() => w.classList.add("out"));
+  setTimeout(() => { w.classList.remove("out"); w.classList.add("back"); setTimeout(() => { w.remove(); const d = el("brandDot"); if (d) d.classList.remove("away"); }, 450); }, 2300);
 }
 document.addEventListener("click", () => { const x = el("edgeDot"); if (x && x.classList.contains("in")) { x.classList.remove("in"); x.querySelector(".edge-art").innerHTML = dot("idle", 66); } });
 window.addEventListener("offline", () => toast("You're offline. Changes will send when you're back.", null, null, "oops"));
@@ -980,14 +991,15 @@ function edgeMenu() {
     items.push(item("expense-here", "💸 An expense for this"));
     if (!mine) items.push(item("plan", "✨ Let me plan something new", "plan-btn"));
     items.push(item("event", "🎉 A new event"));
+    items.push(item("ask", "💬 Ask me anything"));
     return { title: mine ? "What should I do?" : "What are we making?", items };
   }
   if (r.name === "group") {
     const g = S.groups.get(r.id); if (!g) return null;
-    return { title: `For ${esc(g.name)}`, items: [item("plan", "✨ Let me plan it. Just tell me.", "plan-btn"), item("event", "🎉 An event for this group"), item("meeting", "📅 A meeting"), item("expense", "💸 An expense for this group")] };
+    return { title: `For ${esc(g.name)}`, items: [item("plan", "✨ Let me plan it. Just tell me.", "plan-btn"), item("event", "🎉 An event for this group"), item("meeting", "📅 A meeting"), item("expense", "💸 An expense for this group"), item("ask", "💬 Ask me anything")] };
   }
-  if (r.name === "groups") return { title: "What are we making?", items: [item("group", "👥 A new group"), item("plan", "✨ Let me plan something", "plan-btn"), item("event", "🎉 An event")] };
-  return { title: "What are we making?", items: [item("plan", "✨ Let me plan it. Just tell me.", "plan-btn"), item("event", "🎉 An event"), item("meeting", "📅 A meeting"), item("expense", "💸 An expense")] };
+  if (r.name === "groups") return { title: "What are we making?", items: [item("group", "👥 A new group"), item("plan", "✨ Let me plan something", "plan-btn"), item("event", "🎉 An event"), item("ask", "💬 Ask me anything")] };
+  return { title: "What are we making?", items: [item("plan", "✨ Let me plan it. Just tell me.", "plan-btn"), item("event", "🎉 An event"), item("meeting", "📅 A meeting"), item("expense", "💸 An expense"), item("ask", "💬 Ask me anything")] };
 }
 function edgeDotHtml() {
   const m = edgeMenu();
@@ -1010,6 +1022,7 @@ function wireEdgeDot() {
     else if (k === "expense-here") { const ev = S.events.get(r.id); openExpense(r.id, ev ? ev.invitedUids : null, ev ? ev.groupId : null); }
     else if (k === "edit") { const ev = S.events.get(r.id); if (ev) openPlanDialog("edit", { ev }); }
     else if (k === "group") openGroupDialog();
+    else if (k === "ask") openAskDialog();
   });
 }
 function wireShell() {
@@ -1129,7 +1142,7 @@ function homeBody() {
   ${birthdayCard()}
   <div class="section-head"><h2>${homeView === "calendar" ? "Calendar" : "Upcoming"}</h2><span class="btnrow" style="gap:8px"><button class="btn small" id="viewToggle" title="Switch view">${homeView === "calendar" ? "🗂 Cards" : "📅 Calendar"}</button><button class="btn primary small" data-go="#/new">＋ New event</button></span></div>
   ${filterBar}
-  ${homeView === "calendar" ? calendarBody([...upcoming, ...past]) : `<div class="ev-grid">${upcoming.length ? upcoming.map(eventCard).join("") : emptyState("🗓️", "No plans yet", "Create your first event: pick a theme and invite the crew.", "sleepy")}</div>
+  ${homeView === "calendar" ? calendarBody([...upcoming, ...past]) : `<div class="ev-grid">${upcoming.length ? upcoming.map(eventCard).join("") : emptyState("🗓️", "No plans yet", "Create your first event: pick a theme and invite the crew.", "sleepy") + (window.Blip && !isDemo() ? `<div style="text-align:center;margin:-6px 0 14px"><button type="button" class="btn tell-dot inline" id="homeTell">${dot("happy", 26)} Or just tell Dot the plan</button></div>` : "")}</div>
   ${past.length ? `<div class="section-head" style="margin-top:26px"><h2>Past</h2></div><div class="ev-grid dim">${past.map(eventCard).join("")}</div>` : ""}`}`;
 }
 function emptyState(emoji, title, sub, mood) { const art = mood && window.Blip ? window.Blip.svg({ mood, size: 84 }) : `<div class="big">${emoji}</div>`; return `<div class="card empty">${art}<b>${esc(title)}</b><p class="muted">${esc(sub)}</p></div>`; }
@@ -1162,6 +1175,7 @@ function eventCard(ev) {
 }
 function wireHome() {
   document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
+  if (el("homeTell")) el("homeTell").onclick = () => openPlanDialog("event", {});
   document.querySelectorAll("[data-filter]").forEach(b => b.onclick = () => { homeFilter = b.dataset.filter; calDay = null; render(); });
   document.querySelectorAll("[data-bplan]").forEach(b => b.onclick = () => { const x = upcomingBirthdays(400).find(y => y.uid === b.dataset.bplan); if (x) planBirthday(x); });
   document.querySelectorAll("[data-bdismiss]").forEach(b => b.onclick = () => { try { const d = JSON.parse(localStorage.getItem("friendlyBdayDismissed") || "[]"); d.push(b.dataset.bdismiss); localStorage.setItem("friendlyBdayDismissed", JSON.stringify(d.slice(-40))); } catch {} render(); });
@@ -1513,6 +1527,54 @@ function matchFriends(names) {
   }
   return { uids, unmatched };
 }
+// ---- Ask me anything: a question, answered from your own plans (titles, dates, counts, first names; never phone numbers or notes).
+function askContext() {
+  const me = myUid(), today = todayStr();
+  const events = [...S.events.values()].filter(e => e.date >= today).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || ""))).slice(0, 15).map(e => ({
+    id: e.id, title: e.title, date: e.date, time: e.time || "", location: e.location || "", kind: e.kind || "event",
+    going: goingCount(e), invited: (e.invitedUids || []).length, unanswered: (e.invitedUids || []).filter(u => !(e.rsvps || {})[u]).length,
+    me: (e.rsvps || {})[me] || "", host: first(e.hostName || nameOf(e.hostId)), mine: canManage(e)
+  }));
+  const groups = [...S.groups.values()].slice(0, 12).map(g => ({ id: g.id, name: g.name, members: (g.memberUids || []).length }));
+  let money = {};
+  try { const pairs = pairwise(); const iOwe = pairs.filter(p => p.from === me).reduce((t, p) => t + p.amount, 0), owed = pairs.filter(p => p.to === me).reduce((t, p) => t + p.amount, 0);
+    money = { iOwe: fmt$(iOwe), owed: fmt$(owed), pairs: pairs.filter(p => p.from === me || p.to === me).slice(0, 8).map(p => `${p.from === me ? "I" : first(nameOf(p.from))} owe${p.from === me ? "" : "s"} ${p.to === me ? "me" : first(nameOf(p.to))} ${fmt$(p.amount)}`) }; } catch {}
+  return { me: first(S.profile.name), events, groups, money };
+}
+function openAskDialog(prefill) {
+  if (isDemo()) return toast("Asking Dot is off in the demo.");
+  const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const micHint = (NATIVE || IOS) ? `Tap the mic on your keyboard to talk instead of type.` : Speech ? `<button type="button" class="btn small" id="planMic">🎤 Talk instead</button>` : "";
+  dialog(`<div class="dot-say">${dot("happy", 56)}<div class="say-bubble">Ask me anything about your plans, your groups, who owes what, or how something in Friendly works.</div></div>
+    <label class="field"><span>Your question</span><textarea id="planText" rows="3" maxlength="600" placeholder="Who hasn't answered for Friendsgiving? · What do I owe? · How do I add a co-host?">${esc(prefill || "")}</textarea></label>
+    <p class="muted sm" style="margin:-2px 0 0">${micHint}</p>`, "Ask", async () => {
+    const text = el("planText").value.trim(); if (text.length < 2) return toast("Ask me something.");
+    const ok = el("dlgOk"); ok.disabled = true; ok.textContent = "Thinking…";
+    const box = document.querySelector("#appDialog .dot-say"); if (box) box.innerHTML = `${dot("thinking", 56)}<div class="say-bubble">Let me check…</div>`;
+    try {
+      const res = await requestViaFirestore("planRequests", { mode: "ask", text, today: todayStr(), weekday: new Date().toLocaleDateString("en-US", { weekday: "long" }), tz: (Intl.DateTimeFormat().resolvedOptions().timeZone || ""), context: askContext() }, 60000);
+      const a = res.data || {};
+      const acts = (a.actions || []).map((x, i) => `<button type="button" class="btn small" data-ask-act="${i}">${esc(x.label)}</button>`).join("");
+      const inner = document.querySelector("#appDialog .dlg-inner");
+      if (inner) inner.innerHTML = `<div class="dot-say">${dot("happy", 56)}<div class="say-bubble"><b>${esc(a.answer || "I'm not sure about that one.")}</b>${acts ? `<div class="btnrow" style="margin-top:8px;gap:6px">${acts}</div>` : ""}</div></div>
+        <p class="muted sm" style="margin:0 0 10px">You asked: “${esc(text)}”</p>
+        <div class="dlg-actions"><button type="button" class="btn" id="askAgain">Ask another</button><button type="button" class="btn primary" id="askDone">Done</button></div>`;
+      el("askDone").onclick = closeDialog; el("askAgain").onclick = () => openAskDialog();
+      document.querySelectorAll("[data-ask-act]").forEach(b => b.onclick = () => { const x = (a.actions || [])[+b.dataset.askAct]; closeDialog(); if (!x) return;
+        if (x.kind === "open_event") go("#/e/" + x.id); else if (x.kind === "plan") openPlanDialog("event", {}); else if (x.kind === "expense") openExpense(null, null, null); else if (x.kind === "money") go("#/money"); else if (x.kind === "groups") go("#/groups"); else if (x.kind === "profile") go("#/profile"); });
+    }
+    catch (e) { ok.disabled = false; ok.textContent = "Ask"; if (box) box.innerHTML = `${dot("oops", 56)}<div class="say-bubble">Hmm, that didn't go through. Try again?</div>`; toast("I couldn't answer that: " + e.message); }
+  });
+  setTimeout(() => { const t = el("planText"); if (t) t.focus(); }, 60);
+  const mic = el("planMic");
+  if (mic && Speech) {
+    const rec = new Speech(); rec.lang = navigator.language || "en-US"; rec.continuous = true; rec.interimResults = true; let on = false, base = "";
+    mic.onclick = () => { if (on) { rec.stop(); return; } base = el("planText").value.trim(); try { rec.start(); on = true; mic.textContent = "■ Stop"; } catch {} };
+    rec.onresult = ev => { let t = ""; for (const r of ev.results) t += r[0].transcript + " "; el("planText").value = (base + " " + t).trim(); };
+    rec.onend = () => { on = false; mic.textContent = "🎤 Talk instead"; };
+    rec.onerror = () => { on = false; mic.textContent = "🎤 Talk instead"; };
+  }
+}
 function applyPlan(p, said) {
   resetCompose(); compose._restored = true;
   compose.kind = p.kind === "meeting" ? "meeting" : "event";
@@ -1604,7 +1666,7 @@ function composeBody() {
       <button type="button" class="${compose.kind === "meeting" ? "on" : ""}" data-kind="meeting">📅 Meeting</button>
     </div>
     ${compose._fromDraft ? `<p class="muted sm" style="margin:-4px 0 10px">Restored your draft · <a id="discardDraft" style="color:var(--accent);font-weight:600">Discard</a></p>` : ""}
-    ${compose._plan ? planCard() : ""}
+    ${compose._plan ? planCard() : (window.Blip && !isDemo() && !compose._fromDraft && !compose.title ? `<button type="button" class="btn tell-dot" id="composeTell">${dot("happy", 26)} Or just tell Dot: “Taco night Friday at 7, invite the crew, bring a side.”</button>` : "")}
     <p class="muted sm draft-status" id="draftStatus" style="margin:-4px 0 10px;min-height:1.4em"></p>
     ${compose.kind === "meeting" ? `<p class="muted sm" style="margin:-4px 0 12px">A plain calendar entry: title, time, place, who. Everyone gets a calendar invite by email.</p>` : ""}
     <div class="${compose.kind === "meeting" ? "hidden" : ""}">
@@ -1771,6 +1833,7 @@ function syncCompose() {
 function wireCompose() {
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
   if (el("planRedo")) el("planRedo").onclick = () => openPlanDialog("event", {});
+  if (el("composeTell")) el("composeTell").onclick = () => openPlanDialog("event", { groupId: compose.groupId });
   document.querySelectorAll("[data-idea]").forEach(b => b.onclick = () => applyIdea(+b.dataset.idea));
   composeStop = startParticles(el("cCanvas"), compose.theme, compose.customTheme);
   const upd = () => {
