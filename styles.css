@@ -573,3 +573,5 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 #logoTip .logo-tip-bubble::before{content:"";position:absolute;left:-7px;top:16px;border:7px solid transparent;border-right-color:var(--surface);border-left:0}
 #logoTip .tip-actions{display:flex;gap:6px;margin-top:9px}
 #logoTip .tip-actions .btn{padding:6px 12px;font-size:13px}
+.plan-card{margin:0 0 14px}
+.edge-menu .plan-btn{background:linear-gradient(90deg,#FFF1CC,var(--surface2));border:1px solid var(--sun)}

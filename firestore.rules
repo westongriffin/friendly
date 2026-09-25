@@ -287,6 +287,14 @@ service cloud.firestore {
         && request.resource.data.status == "pending" && !isDemoUser();
     }
 
+    // ---- "Let me plan it" (same pattern: client writes what it heard, a function writes back a draft) ----
+    match /planRequests/{reqId} {
+      allow read, delete: if signedIn() && uid() == resource.data.uid;
+      allow create: if signedIn() && request.resource.data.uid == uid()
+        && request.resource.data.status == "pending" && !isDemoUser()
+        && request.resource.data.text is string && request.resource.data.text.size() <= 1500;
+    }
+
     // ---- Settlements ----
     // Doc shape: { from, to, amountCents, involved:[from,to], note, addedBy, createdAt }
     match /settlements/{settlementId} {

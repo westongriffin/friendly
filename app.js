@@ -967,7 +967,7 @@ function shell(body) {
   </nav>
   <main class="wrap">${updateBanner()}${inviteBanner()}${body}</main>
   ${["new", "group", "expense", "profile"].includes(tab) ? "" : window.Blip ? `<div class="fab-scrim"></div><div class="edge-dot" id="edgeDot" role="button" aria-label="${tab === "groups" ? "New group" : "Make something"}">
-    ${tab === "groups" ? "" : `<div class="edge-menu"><b>What are we making?</b><button type="button" data-make="event">🎉 An event</button><button type="button" data-make="meeting">📅 A meeting</button><button type="button" data-make="expense">💸 An expense</button></div>`}
+    ${tab === "groups" ? "" : `<div class="edge-menu"><b>What are we making?</b><button type="button" data-make="plan" class="plan-btn">✨ Let me plan it. Just tell me.</button><button type="button" data-make="event">🎉 An event</button><button type="button" data-make="meeting">📅 A meeting</button><button type="button" data-make="expense">💸 An expense</button></div>`}
     <span class="edge-art">${dot("idle", 66)}</span></div>` : `<div class="fab-scrim"></div><button class="fab" id="fabBtn" title="${tab === "groups" ? "New group" : "Create event"}">＋</button>`}`;
 }
 function wireShell() {
@@ -986,7 +986,8 @@ function wireShell() {
     ed.querySelectorAll("[data-make]").forEach(b => b.onclick = e => {
       e.stopPropagation(); ed.classList.remove("in");
       const k = b.dataset.make;
-      if (k === "event") { if (compose.kind === "meeting") resetCompose(); go("#/new"); }
+      if (k === "plan") openPlanDialog();
+      else if (k === "event") { if (compose.kind === "meeting") resetCompose(); go("#/new"); }
       else if (k === "meeting") { resetCompose(); compose.kind = "meeting"; go("#/new"); }
       else openExpense(null, null);
     });
@@ -1431,7 +1432,77 @@ async function leaveGroup(g) {
 const compose = { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji",
   title: "", date: "", time: "", end: "", where: "", notes: "", cap: "", approval: false,
   questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "" };
-function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", repeat: "", _restored: false, _fromDraft: false }); }
+function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", repeat: "", _restored: false, _fromDraft: false, _plan: null }); }
+// ---- "Let me plan it": say the plan, Dot drafts it, you review it in the composer. Nothing is created or sent until you tap Create.
+function planContext(text) {
+  const d = new Date(), pad = n => String(n).padStart(2, "0");
+  const people = [...new Set([...S.contacts.values()].map(c => c && c.name).filter(Boolean))].filter(n => n !== S.profile.name).slice(0, 150);
+  const groups = [...S.groups.values()].map(g => g.name).filter(Boolean).slice(0, 40);
+  return { text: text.slice(0, 1500), today: todayStr(), weekday: d.toLocaleDateString("en-US", { weekday: "long" }), now: pad(d.getHours()) + ":" + pad(d.getMinutes()), tz: (Intl.DateTimeFormat().resolvedOptions().timeZone || ""), people, groups };
+}
+function openPlanDialog() {
+  if (isDemo()) return toast("Planning by voice is off in the demo -- try New event instead.");
+  const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const micHint = (NATIVE || IOS) ? `Tap the mic on your keyboard to talk instead of type.` : Speech ? `<button type="button" class="btn small" id="planMic">🎤 Talk instead</button>` : "";
+  dialog(`<div class="dot-say">${dot("happy", 56)}<div class="say-bubble">Tell me the plan like you'd text a friend: what, when, where, who, what to bring. I'll fill everything in, and you check it before anything sends.</div></div>
+    <label class="field"><span>The plan</span><textarea id="planText" rows="5" maxlength="1500" placeholder="Taco night at my place next Friday at 7. Invite the Fruit Basket crew, everyone brings a side, cap it at 12."></textarea></label>
+    <p class="muted sm" style="margin:-2px 0 0">${micHint}</p>`, "Take it from here", async () => {
+    const text = el("planText").value.trim(); if (text.length < 8) return toast("Tell me a little more.");
+    const ok = el("dlgOk"); ok.disabled = true; ok.textContent = "Working on it…";
+    const box = document.querySelector("#appDialog .dot-say"); if (box) box.innerHTML = `${dot("thinking", 56)}<div class="say-bubble">Got it. Working out the details…</div>`;
+    try { const res = await requestViaFirestore("planRequests", planContext(text), 60000); closeDialog(); applyPlan(res.data || {}, text); }
+    catch (e) { ok.disabled = false; ok.textContent = "Take it from here"; if (box) box.innerHTML = `${dot("oops", 56)}<div class="say-bubble">Hmm, that didn't go through. Try again?</div>`; toast("I couldn't work that out: " + e.message); }
+  });
+  setTimeout(() => { const t = el("planText"); if (t) t.focus(); }, 60);
+  const mic = el("planMic");
+  if (mic && Speech) {
+    const rec = new Speech(); rec.lang = navigator.language || "en-US"; rec.continuous = true; rec.interimResults = true; let on = false, base = "";
+    mic.onclick = () => { if (on) { rec.stop(); return; } base = el("planText").value.trim(); try { rec.start(); on = true; mic.textContent = "■ Stop"; } catch {} };
+    rec.onresult = ev => { let t = ""; for (const r of ev.results) t += r[0].transcript + " "; el("planText").value = (base + " " + t).trim(); };
+    rec.onend = () => { on = false; mic.textContent = "🎤 Talk instead"; };
+    rec.onerror = () => { on = false; mic.textContent = "🎤 Talk instead"; };
+  }
+}
+function applyPlan(p, said) {
+  resetCompose(); compose._restored = true;
+  compose.kind = p.kind === "meeting" ? "meeting" : "event";
+  compose.title = String(p.title || "").slice(0, 80);
+  if (p.emoji) compose.emoji = String(p.emoji).slice(0, 4);
+  if (p.theme && THEMES.some(t => t.id === p.theme)) compose.theme = p.theme;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(p.date || "")) compose.date = p.date;
+  if (/^\d{2}:\d{2}$/.test(p.time || "")) compose.time = p.time;
+  if (/^\d{2}:\d{2}$/.test(p.endTime || "")) compose.end = p.endTime;
+  compose.where = String(p.location || "").slice(0, 200); compose.notes = String(p.notes || "").slice(0, 1000);
+  if (p.capacity > 0) compose.cap = String(Math.min(500, p.capacity));
+  compose.questions = (p.questions || []).slice(0, 5).map(q => ({ id: newId().slice(0, 6), q: String(q).slice(0, 120) }));
+  const gname = String(p.group || "").trim().toLowerCase();
+  const g = gname && [...S.groups.values()].find(x => (x.name || "").trim().toLowerCase() === gname);
+  if (g) compose.groupId = g.id;
+  // guests by name: a unique full-name match, else a unique first-name match; anything else is reported, never guessed
+  const unmatched = [];
+  const contacts = [...S.contacts.entries()].filter(([uid, c]) => uid !== myUid() && c && c.name);
+  for (const raw of (p.guests || []).slice(0, 30)) {
+    const n = String(raw).trim().toLowerCase(); if (!n) continue;
+    let hits = contacts.filter(([, c]) => c.name.trim().toLowerCase() === n);
+    if (!hits.length) hits = contacts.filter(([, c]) => c.name.trim().toLowerCase().split(/\s+/)[0] === n.split(/\s+/)[0]);
+    if (hits.length === 1) compose.invitees.add(hits[0][0]); else unmatched.push(String(raw).trim());
+  }
+  compose._plan = {
+    summary: String(p.summary || "Here's what I heard."),
+    missing: (p.missing || []).filter(m => ["date", "time", "location", "guests"].includes(m)),
+    unmatched, said,
+    bring: (p.bring || []).slice(0, 12).map(b => ({ item: String(b.item || "").slice(0, 60), qty: String(b.qty || "").slice(0, 20) })).filter(b => b.item)
+  };
+  go("#/new");
+}
+function planCard() {
+  const p = compose._plan, need = { date: "a date", time: "a time", location: "where it is", guests: "who's coming" };
+  const miss = p.missing.map(m => need[m]).filter(Boolean), bits = [];
+  if (miss.length) bits.push(`I didn't catch ${miss.join(" or ")}. Fill that in below.`);
+  if (p.unmatched.length) bits.push(`I couldn't find ${p.unmatched.join(", ")} in your friends. Add them by phone under Who's invited.`);
+  if (p.bring.length) bits.push(`I'll put ${p.bring.length === 1 ? p.bring[0].item : p.bring.length + " items"} on the bring list once it's created.`);
+  return `<div class="dot-say plan-card">${dot(miss.length ? "thinking" : "happy", 56)}<div class="say-bubble"><b>${esc(p.summary)}</b>${bits.length ? `<div class="muted sm" style="margin-top:4px">${bits.map(esc).join(" ")}</div>` : ""}<div style="margin-top:6px"><a id="planRedo" style="color:var(--accent);font-weight:600">Say it again</a></div></div></div>`;
+}
 function composeBody() {
   restoreDraft();
   const emojis = ["🎉", "🍕", "🌮", "🍻", "🎂", "🎬", "🎮", "🏖️", "🥾", "⚽", "🎲", "🍜", "🎃", "🎄", "🕺", "🔥"];
@@ -1445,6 +1516,7 @@ function composeBody() {
       <button type="button" class="${compose.kind === "meeting" ? "on" : ""}" data-kind="meeting">📅 Meeting</button>
     </div>
     ${compose._fromDraft ? `<p class="muted sm" style="margin:-4px 0 10px">Restored your draft · <a id="discardDraft" style="color:var(--accent);font-weight:600">Discard</a></p>` : ""}
+    ${compose._plan ? planCard() : ""}
     <p class="muted sm draft-status" id="draftStatus" style="margin:-4px 0 10px;min-height:1.4em"></p>
     ${compose.kind === "meeting" ? `<p class="muted sm" style="margin:-4px 0 12px">A plain calendar entry: title, time, place, who. Everyone gets a calendar invite by email.</p>` : ""}
     <div class="${compose.kind === "meeting" ? "hidden" : ""}">
@@ -1610,6 +1682,7 @@ function syncCompose() {
 }
 function wireCompose() {
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
+  if (el("planRedo")) el("planRedo").onclick = openPlanDialog;
   composeStop = startParticles(el("cCanvas"), compose.theme, compose.customTheme);
   const upd = () => {
     el("cPvTitle").textContent = el("cTitle").value.trim() || "Your event";
@@ -1696,7 +1769,9 @@ async function createEvent() {
   try {
     el("createEventBtn").disabled = true; el("createEventBtn").textContent = "Creating…";
     await setDoc(doc(db, "events", id), ev);
+    const planBring = compose._plan ? compose._plan.bring : [];
     composeStop(); resetCompose(); try { localStorage.removeItem("friendlyDraft"); } catch {}
+    for (const b of planBring) { try { await addDoc(collection(db, "events", id, "comments"), { kind: "bring", item: b.item, qty: b.qty, authorId: myUid(), authorName: S.profile.name, text: "", createdAt: Date.now() }); } catch {} }
     go("#/e/" + id);
     const made = (ev.kind === "meeting" ? "Meeting" : "Event") + " created, invites are on their way";
     // Hosts with Calendar sync get it automatically; everyone else gets a one-tap add.

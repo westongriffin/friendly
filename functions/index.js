@@ -198,6 +198,82 @@ exports.onReceiptRequest = onDocumentCreated({ document: "receiptRequests/{id}",
   catch (err) { logger.error("receipt read failed: " + err.message); await ref.update({ status: "error", error: "couldn't read that receipt", image: FieldValue.delete() }); }
 });
 
+// ---- "Let me plan it": planRequests/{id} holds what the user said (typed or dictated);
+//      we write back a structured event draft the app pours into the composer.
+//      The user always reviews it before anything is created or sent.
+const PLAN_MODEL = "gemini-2.5-flash";
+const THEME_IDS = ["confetti", "citrus", "bubblegum", "sunset", "golden", "blossom", "garden", "aurora", "midnight", "cosmic", "rave", "disco", "y2k", "retro"];
+async function draftPlan(d) {
+  const text = String(d.text || "").slice(0, 1500).trim(); if (text.length < 4) throw new Error("nothing to plan");
+  const clean = (arr, n, len) => (Array.isArray(arr) ? arr : []).slice(0, n).map(x => String(x || "").replace(/[\r\n;]+/g, " ").slice(0, len)).filter(Boolean);
+  const people = clean(d.people, 150, 40), groups = clean(d.groups, 40, 40);
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(d.today || "") ? d.today : new Date().toISOString().slice(0, 10);
+  const instructions = `You are Dot, the helper inside Friendly, an app friends use to plan get-togethers and split costs.
+Turn what the user said into an event draft. Today is ${today} (${String(d.weekday || "").slice(0, 12)}), local time ${String(d.now || "").slice(0, 5)}, time zone ${String(d.tz || "").slice(0, 40)}.
+Rules:
+- Resolve relative dates ("next Friday", "tomorrow", "the 14th") to YYYY-MM-DD in the user's zone; a bare weekday means the next one coming. Times as 24-hour HH:MM. If a time is vague ("evening"), leave time empty.
+- Only include what the user actually said. Leave anything unknown empty and name it in "missing" using only: date, time, location, guests.
+- guests: the people the user named. When a name matches one of the user's friends below, use the friend's exact spelling. Do not add people who weren't mentioned.
+- group: if the user names one of their groups (or clearly means it, e.g. "the crew" when they have one group), set it to the group's exact name and do not list its members as guests. Otherwise empty.
+- bring: things people are asked to bring, one entry each, with a quantity only if stated.
+- capacity: a maximum head count if stated, else 0. questions: RSVP questions the host wants to ask, if any.
+- kind: "meeting" only for plain calendar meetings (work, practice, appointments, calls). Everything social is "event".
+- emoji: exactly one emoji that fits. theme: one id from ${THEME_IDS.join(", ")} matching the vibe (sunset or golden for dinners, confetti for parties and birthdays, garden or blossom for brunch and outdoors, midnight or cosmic for nights out, disco, rave or retro for dance and costume nights, citrus or bubblegum for playful daytime plans).
+- title: short and natural, the way the user would name it (e.g. "Taco Night", "Sam's 30th").
+- notes: the details that don't fit elsewhere (dress code, parking, what to expect), in the user's words, or empty.
+- summary: one warm sentence in Dot's voice, starting "Here's what I heard:", restating the plan in plain words. No emoji in the summary.
+Friends: ${people.join("; ") || "(none)"}.
+Groups: ${groups.join("; ") || "(none)"}.`;
+  const token = (await (await gauth.getClient()).getAccessToken()).token;
+  const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${LOCATION}/publishers/google/models/${PLAN_MODEL}:generateContent`;
+  const str = { type: "STRING" };
+  const body = {
+    contents: [{ role: "user", parts: [{ text: instructions + "\n\nWhat the user said:\n" + text }] }],
+    generationConfig: {
+      temperature: 0.2, responseMimeType: "application/json",
+      responseSchema: { type: "OBJECT", required: ["title", "kind", "summary"], properties: {
+        kind: { type: "STRING", enum: ["event", "meeting"] }, title: str, emoji: str, theme: { type: "STRING", enum: THEME_IDS },
+        date: str, time: str, endTime: str, location: str, notes: str, capacity: { type: "INTEGER" },
+        guests: { type: "ARRAY", items: str }, group: str,
+        bring: { type: "ARRAY", items: { type: "OBJECT", required: ["item"], properties: { item: str, qty: str } } },
+        questions: { type: "ARRAY", items: str },
+        missing: { type: "ARRAY", items: { type: "STRING", enum: ["date", "time", "location", "guests"] } },
+        summary: str
+      } }
+    }
+  };
+  const r = await fetch(url, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(PLAN_MODEL + " " + r.status + ": " + (await r.text()).slice(0, 160));
+  const j = await r.json();
+  const out = JSON.parse(((((j.candidates || [])[0] || {}).content || {}).parts || []).map(p => p.text || "").join(""));
+  // Validate every field before the app sees it: the model never gets to invent shapes.
+  const s = (v, n) => String(v || "").trim().slice(0, n);
+  const data = {
+    kind: out.kind === "meeting" ? "meeting" : "event",
+    title: s(out.title, 80) || "New plan",
+    emoji: s(out.emoji, 8).replace(/[A-Za-z0-9\s]/g, "").slice(0, 4),
+    theme: THEME_IDS.includes(out.theme) ? out.theme : "",
+    date: /^\d{4}-\d{2}-\d{2}$/.test(out.date || "") ? out.date : "",
+    time: /^\d{2}:\d{2}$/.test(out.time || "") ? out.time : "",
+    endTime: /^\d{2}:\d{2}$/.test(out.endTime || "") ? out.endTime : "",
+    location: s(out.location, 200), notes: s(out.notes, 1000),
+    capacity: Math.max(0, Math.min(500, parseInt(out.capacity, 10) || 0)),
+    guests: clean(out.guests, 30, 60), group: s(out.group, 60),
+    bring: (Array.isArray(out.bring) ? out.bring : []).slice(0, 12).map(b => ({ item: s(b && b.item, 60), qty: s(b && b.qty, 20) })).filter(b => b.item),
+    questions: clean(out.questions, 5, 120),
+    missing: clean(out.missing, 4, 12).filter(m => ["date", "time", "location", "guests"].includes(m)),
+    summary: s(out.summary, 300) || "Here's what I heard."
+  };
+  if (!data.date && !data.missing.includes("date")) data.missing.push("date");
+  return data;
+}
+exports.onPlanRequest = onDocumentCreated({ document: "planRequests/{id}", region: "us-central1", timeoutSeconds: 60, memory: "256MiB" }, async e => {
+  const d = e.data && e.data.data(); if (!d || !d.text) return;
+  const ref = e.data.ref;
+  try { const data = await draftPlan(d); await ref.update({ status: "done", data }); }
+  catch (err) { logger.error("plan draft failed: " + err.message); await ref.update({ status: "error", error: "couldn't work that out" }); }
+});
+
 // ---- Email calendar invites (iMIP over Resend) ----
 // One email per guest with an invite.ics (METHOD:REQUEST / CANCEL) so Gmail,
 // Apple Mail and Outlook show Accept/Decline and file it on the calendar.
