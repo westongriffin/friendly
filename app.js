@@ -114,7 +114,7 @@ async function checkForUpdate() {
 if (NATIVE) checkForUpdate();
 function updateBanner() {
   if (!updateAvail || updateDismissed) return "";
-  return `<div class="card notif-card update-bar" id="updateBar" role="button"><span class="li">🎉</span><div style="flex:1;min-width:0"><b>Friendly just got better!</b><div class="muted sm">Version ${esc(updateAvail.store)} is ready. Tap to update.</div></div><button type="button" class="btn ghost small" id="updateLater" title="Not now">✕</button></div>`;
+  return `<div class="card notif-card update-bar" id="updateBar" role="button"><span class="li ${window.Blip ? "blip-li" : ""}">${window.Blip ? window.Blip.svg({ mood: "party", size: 44 }) : "🎉"}</span><div style="flex:1;min-width:0"><b>Friendly just got better!</b><div class="muted sm">Version ${esc(updateAvail.store)} is ready. Tap to update.</div></div><button type="button" class="btn ghost small" id="updateLater" title="Not now">✕</button></div>`;
 }
 function wireUpdateBanner() {
   const bar = el("updateBar"); if (!bar) return;
@@ -539,17 +539,27 @@ function withInputKept(fn) {
   try { if (snap.s != null) n.setSelectionRange(snap.s, snap.e); } catch {}
 }
 function render() { withInputKept(renderNow); }
+// The loading screen: the wordmark flows into Blip (blip.js), then Blip idles until the app is ready.
+let splashStop = null;
+function splashInner(msg) { return window.Blip ? `<svg class="splash-blip"></svg><p>${esc(msg)}</p>` : `<div class="brand splash-brand">Friend<span class="tilt">l</span>y</div><p>${esc(msg)}</p>`; }
+function mountSplash(root, msg) {
+  const cur = root.querySelector(".splash");
+  if (cur && cur.querySelector(".splash-blip")) { const p = cur.querySelector("p"); if (p) p.textContent = msg; return; }
+  root.innerHTML = `<div class="splash">${splashInner(msg)}</div>`;
+  if (splashStop) { splashStop(); splashStop = null; }
+  const svg = root.querySelector(".splash-blip"); if (svg && window.Blip) splashStop = window.Blip.play(svg, { dur: 1.7, delay: .15 });
+}
 function renderNow() {
   if (BLOCKED_MOBILE_WEB) return;
   const root = el("app");
   // The loading screen stays up for at least two seconds so it never flashes.
   if (!S.ready || Date.now() - BOOT_AT < SPLASH_MIN) {
     if (S.ready && !splashTimer) splashTimer = setTimeout(() => { splashTimer = null; render(); }, SPLASH_MIN - (Date.now() - BOOT_AT) + 20);
-    if (root.querySelector(".splash")) return;
-    root.innerHTML = `<div class="splash"><div class="brand splash-brand">Friend<span class="tilt">l</span>y</div><div class="splash-row"><span class="splash-av" style="background:#F08A4B">SR</span><span class="splash-av" style="background:#3B82F6">AK</span><span class="splash-av" style="background:#25A56A">JP</span><span class="splash-av" style="background:#C84B7A">MT</span></div><p>Getting everyone here…</p></div>`; return; }
+    mountSplash(root, "Getting everyone here…"); return; }
+  if (splashStop && !root.querySelector(".splash-blip")) { splashStop(); splashStop = null; }
   if (RESET_OOB) { renderResetPassword(root); return; }
   if (!S.user) { if (S.route.name === "event") { renderPreview(root, S.route.id); return; } if (S.route.name === "join") { try { localStorage.setItem("friendlyJoin", S.route.id); } catch {} } renderAuth(root); return; }
-  if (!S.profile) { root.innerHTML = `<div class="splash"><div class="brand splash-brand">Friend<span class="tilt">l</span>y</div><div class="splash-row"><span class="splash-av" style="background:#F08A4B">SR</span><span class="splash-av" style="background:#3B82F6">AK</span><span class="splash-av" style="background:#25A56A">JP</span><span class="splash-av" style="background:#C84B7A">MT</span></div><p>Setting up your profile…</p></div>`; return; }
+  if (!S.profile) { mountSplash(root, "Setting up your profile…"); return; }
   if (S.profile.onboarded === false) { root.innerHTML = onboardingBody(); wireOnboarding(); return; }
   const r = S.route;
   if (r.name === "event") return renderEventPage(root, r.id);
@@ -890,32 +900,34 @@ function homeBody() {
   ${birthdayCard()}
   <div class="section-head"><h2>${homeView === "calendar" ? "Calendar" : "Upcoming"}</h2><span class="btnrow" style="gap:8px"><button class="btn small" id="viewToggle" title="Switch view">${homeView === "calendar" ? "🗂 Cards" : "📅 Calendar"}</button><button class="btn primary small" data-go="#/new">＋ New event</button></span></div>
   ${filterBar}
-  ${homeView === "calendar" ? calendarBody([...upcoming, ...past]) : `<div class="ev-grid">${upcoming.length ? upcoming.map(eventCard).join("") : emptyState("🗓️", "No plans yet", "Create your first event: pick a theme and invite the crew.")}</div>
+  ${homeView === "calendar" ? calendarBody([...upcoming, ...past]) : `<div class="ev-grid">${upcoming.length ? upcoming.map(eventCard).join("") : emptyState("🗓️", "No plans yet", "Create your first event: pick a theme and invite the crew.", "sleepy")}</div>
   ${past.length ? `<div class="section-head" style="margin-top:26px"><h2>Past</h2></div><div class="ev-grid dim">${past.map(eventCard).join("")}</div>` : ""}`}`;
 }
-function emptyState(emoji, title, sub) { return `<div class="card empty"><div class="big">${emoji}</div><b>${esc(title)}</b><p class="muted">${esc(sub)}</p></div>`; }
+function emptyState(emoji, title, sub, mood) { const art = mood && window.Blip ? window.Blip.svg({ mood, size: 84 }) : `<div class="big">${emoji}</div>`; return `<div class="card empty">${art}<b>${esc(title)}</b><p class="muted">${esc(sub)}</p></div>`; }
 
 function eventCard(ev) {
   if (ev.kind === "meeting") return meetingCard(ev);
   const th = themeOf(ev.theme, ev.customTheme);
   const d = evDate(ev);
   const going = goingCount(ev);
-  const guests = (ev.invitedUids || []).slice(0, 5);
+  const guests = (ev.invitedUids || []).slice(0, 3);
   const myR = (ev.rsvps || {})[myUid()];
   const rsvpDot = myR ? `<span class="you-pill ${myR}">${{ going: "You're going", maybe: "Maybe", no: "Can't go", waitlist: "Waitlisted", pending: "Pending" }[myR] || ""}</span>` : "";
+  const pills = `${isNewEvent(ev) ? `<span class="new-pill">New</span>` : ""}${rsvpDot}`;
   return `
   <a class="ev-card t-${esc(th.id)} ${ev.cover ? "has-cover" : ""}" data-ev="${ev.id}" style="--th-accent:${esc(th.accent)};--th-ink:${esc(th.ink)};--th-on-accent:${esc(th.onAccent)}">
     ${ev.cover ? `<img class="cover-img" src="${esc(ev.cover)}" alt="" loading="lazy">` : `<div class="ev-card-bg"></div>`}
     <div class="ev-card-body">
+      ${pills ? `<div class="ev-pills">${pills}</div>` : ""}
       ${ev.cover ? "" : `<div class="ev-card-emoji">${esc(ev.emoji || "🎉")}</div>`}
-      <div class="ev-card-title" style="font-family:${esc(th.font)},system-ui">${esc(ev.title)}</div>
-      <div class="ev-card-date">${MONTHS[d.getMonth()]} ${d.getDate()}${ev.time ? " · " + fmtTime(ev.time) : ""}</div>
-      <div class="ev-card-foot">
-        <span class="mini-guests">${guests.map(u => avatar(u, "xs")).join("")}${(ev.invitedUids || []).length > 5 ? `<span class="more">+${ev.invitedUids.length - 5}</span>` : ""}</span>
-        <span class="count">${going} going${ev.capacity > 0 ? " / " + ev.capacity : ""}</span>
+      <div class="ev-card-text">
+        <div class="ev-card-title" style="font-family:${esc(th.font)},system-ui">${esc(ev.title)}</div>
+        <div class="ev-card-date">${MONTHS[d.getMonth()]} ${d.getDate()}${ev.time ? " · " + fmtTime(ev.time) : ""}</div>
+        <div class="ev-card-foot">
+          <span class="mini-guests">${guests.map(u => avatar(u, "xs")).join("")}${(ev.invitedUids || []).length > 3 ? `<span class="more">+${ev.invitedUids.length - 3}</span>` : ""}</span>
+          <span class="count">${going} going${ev.capacity > 0 ? " / " + ev.capacity : ""}</span>
+        </div>
       </div>
-      ${rsvpDot}
-      ${isNewEvent(ev) ? `<span class="new-pill">New</span>` : ""}
     </div>
   </a>`;
 }
@@ -939,7 +951,7 @@ function groupsBody() {
   return `
   <div class="section-head"><h2>Your groups</h2><button class="btn primary small" id="newGroupBtn">＋ New group</button></div>
   <p class="muted" style="margin:0 0 14px">Groups are your circles. Invite people once, then plan with them again and again. Everything in a group stays private to its members.</p>
-  <div class="stack">${groups.length ? groups.map(groupRow).join("") : emptyState("👥", "No groups yet", "Create a group and invite friends by phone.")}</div>`;
+  <div class="stack">${groups.length ? groups.map(groupRow).join("") : emptyState("👥", "No groups yet", "Create a group and invite friends by phone.", "idle")}</div>`;
 }
 function groupRow(g) {
   const n = (g.memberUids || []).length;
@@ -2251,7 +2263,7 @@ function moneyBody() {
     if (r.kind === "s") return `<div class="ledger"><div class="li pay">⤴</div><div style="flex:1"><b>${esc(nameOf(r.from))} paid ${esc(nameOf(r.to))}</b><div class="muted sm">${r.note ? esc(r.note) + " · " : ""}${new Date(r.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(r.amountCents)}</span>${r.addedBy === me ? `<button class="btn ghost small" data-dels="${r.id}">✕</button>` : ""}</div>`;
     const n = (r.split || []).length || 1;
     return `<div class="ledger"><div class="li">🧾</div><div style="flex:1"><b>${esc(r.desc)}</b><div class="muted sm">${esc(nameOf(r.paidBy))} paid · ${r.shares ? "itemized, " + n + " people" : `split ${n} way${n > 1 ? "s" : ""}`} · ${new Date(r.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(r.amountCents)}</span><button class="btn ghost small" data-xopen="${r.id}" title="Details & discussion">💬</button>${r.addedBy === me ? `<button class="btn ghost small" data-dele="${r.id}">✕</button>` : ""}</div>`;
-  }).join("") : emptyState("💸", "No shared costs yet", "Add an expense after your next hangout.")}</div>`;
+  }).join("") : emptyState("💸", "No shared costs yet", "Add an expense after your next hangout.", "happy")}</div>`;
 }
 function wireMoney() {
   el("addExpense").onclick = () => openExpense(null, null);
@@ -2658,11 +2670,27 @@ async function nudge(ev, btn) {
   if (btn) { btn.disabled = false; btn.textContent = "Nudge non-responders"; }
 }
 function meetingCard(ev) {
+  // Same size as an event tile so the grid stays even; a plain surface, a coral edge and a
+  // "Meeting" tag are what set it apart.
   const d = evDate(ev); const myR = (ev.rsvps || {})[myUid()];
   const going = (ev.invitedUids || []).filter(u => (ev.rsvps || {})[u] === "going").length;
-  return `<a class="card meet-card" data-ev="${ev.id}"><span class="li">📅</span>
-    <div style="flex:1;min-width:0"><b>${esc(ev.title)}</b><div class="muted sm">${MONTHS[d.getMonth()]} ${d.getDate()}${ev.time ? " · " + fmtTime(ev.time) : ""}${ev.location ? " · " + esc(ev.location) : ""}</div><div class="muted sm">${going} accepted${ev.repeat ? " · ↻ repeats" : ""}</div></div>
-    ${myR ? `<span class="you-pill ${myR}">${{ going: "Accepted", maybe: "Maybe", no: "Declined" }[myR] || ""}</span>` : `<span class="chev">›</span>`}${isNewEvent(ev) ? `<span class="new-pill" style="position:static;margin-left:6px">New</span>` : ""}</a>`;
+  const guests = (ev.invitedUids || []).slice(0, 3);
+  const pills = `${isNewEvent(ev) ? `<span class="new-pill">New</span>` : ""}${myR ? `<span class="you-pill ${myR}">${{ going: "Accepted", maybe: "Maybe", no: "Declined" }[myR] || ""}</span>` : ""}`;
+  return `<a class="ev-card meet-tile" data-ev="${ev.id}">
+    <div class="ev-card-body">
+      ${pills ? `<div class="ev-pills">${pills}</div>` : ""}
+      <span class="meet-tag">📅 Meeting${ev.repeat ? " · ↻" : ""}</span>
+      <div class="ev-card-text">
+        <div class="ev-card-title">${esc(ev.title)}</div>
+        <div class="ev-card-date">${MONTHS[d.getMonth()]} ${d.getDate()}${ev.time ? " · " + fmtTime(ev.time) : ""}</div>
+        ${ev.location ? `<div class="ev-card-loc">📍 ${esc(ev.location)}</div>` : ""}
+        <div class="ev-card-foot">
+          <span class="mini-guests">${guests.map(u => avatar(u, "xs")).join("")}${(ev.invitedUids || []).length > 3 ? `<span class="more">+${ev.invitedUids.length - 3}</span>` : ""}</span>
+          <span class="count">${going} accepted</span>
+        </div>
+      </div>
+    </div>
+  </a>`;
 }
 
 // ---------- signed-out preview of a link invite ----------
@@ -2702,7 +2730,7 @@ function photosPageBody() {
   <div class="section-head"><h2>Memories</h2><span class="muted sm">${evs.reduce((t, ev) => t + S.memories.get(ev.id).length, 0)} photos</span></div>
   ${S._memLoading ? `<p class="muted">Gathering photos…</p>` : ""}
   ${ago1.map(ev => section(ev, "🕰️ One year ago")).join("")}
-  ${evs.length ? evs.map(ev => section(ev)).join("") : (S._memLoading ? "" : emptyState("📸", "No photos yet", "Photos added to your events' photo walls show up here, newest first."))}`;
+  ${evs.length ? evs.map(ev => section(ev)).join("") : (S._memLoading ? "" : emptyState("📸", "No photos yet", "Photos added to your events' photo walls show up here, newest first.", "sleepy"))}`;
 }
 function wirePhotosPage() {
   document.querySelectorAll("[data-mem]").forEach(im => im.onclick = () => lightbox(im.src));
@@ -2767,7 +2795,7 @@ function searchResults(q) {
   const evs = [...S.events.values()].filter(ev => hit(ev.title) || hit(ev.location) || hit(ev.notes)).sort((a, b) => b.date.localeCompare(a.date));
   const gs = [...S.groups.values()].filter(g => hit(g.name));
   const xs = [...S.expenses.values()].filter(x => hit(x.desc) || hit(x.merchant)).sort((a, b) => b.createdAt - a.createdAt);
-  if (!evs.length && !gs.length && !xs.length) return emptyState("🔍", "Nothing matched", "Try a different word: event titles, places, notes, groups, and expenses are searchable.");
+  if (!evs.length && !gs.length && !xs.length) return emptyState("🔍", "Nothing matched", "Try a different word: event titles, places, notes, groups, and expenses are searchable.", "thinking");
   return `${evs.length ? `<div class="section-head"><h2>Events</h2></div><div class="stack">${evs.map(ev => `<a class="card meet-card" data-ev="${ev.id}"><span class="li">${ev.kind === "meeting" ? "📅" : esc(ev.emoji || "🎉")}</span><div style="flex:1;min-width:0"><b>${esc(ev.title)}</b><div class="muted sm">${esc(fmtWhen(ev))}${ev.location ? " · " + esc(ev.location) : ""}</div></div><span class="chev">›</span></a>`).join("")}</div>` : ""}
     ${gs.length ? `<div class="section-head"><h2>Groups</h2></div><div class="stack">${gs.map(groupRow).join("")}</div>` : ""}
     ${xs.length ? `<div class="section-head"><h2>Expenses</h2></div><div class="card">${xs.map(x => `<div class="ledger"><div class="li">🧾</div><div style="flex:1;min-width:0"><b>${esc(x.desc)}</b><div class="muted sm">${esc(first(nameOf(x.paidBy)))} paid · ${new Date(x.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(x.amountCents)}</span><button class="btn ghost small" data-xopen="${x.id}">💬</button></div>`).join("")}</div>` : ""}`;

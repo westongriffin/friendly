@@ -93,7 +93,6 @@ img{max-width:100%}
 .act-row{display:flex;align-items:center;gap:12px;padding:12px 15px;border-top:1px solid var(--line)} .act-row:first-child{border-top:0} .act-row.new{background:var(--surface2)}
 .notif-card{display:flex;align-items:center;gap:12px;padding:13px 15px;margin-bottom:14px;flex-wrap:wrap}
 .kind-seg{margin-bottom:14px}
-.meet-card{display:flex;align-items:center;gap:12px;padding:13px 15px;cursor:pointer}
 .pv-wrap{position:relative;z-index:1;max-width:520px;margin:0 auto;padding:24px 16px}
 .pv-card{overflow:hidden;margin-bottom:16px} .pv-cover{width:100%;aspect-ratio:16/9;object-fit:cover;display:block} .pv-body{padding:16px 18px}
 /* chat: reactions, photos, mentions */
@@ -216,19 +215,24 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 /* ---------- HOME event cards ---------- */
 .ev-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px}
 .ev-grid.dim{opacity:.72}
-.ev-card{position:relative;border-radius:18px;overflow:hidden;min-height:190px;display:block;box-shadow:var(--shadow);border:1px solid rgba(0,0,0,.06);isolation:isolate;transition:transform .12s,box-shadow .12s}
+.ev-card{position:relative;border-radius:18px;overflow:hidden;min-height:200px;display:block;box-shadow:var(--shadow);border:1px solid rgba(0,0,0,.06);isolation:isolate;transition:transform .12s,box-shadow .12s}
 .ev-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-lg)}
 .ev-card-bg{position:absolute;inset:0;background:var(--paint,#eee);background-size:var(--bgsize,cover);z-index:-1}
-.ev-card-body{padding:15px;height:100%;display:flex;flex-direction:column;gap:3px;color:var(--th-ink,#222)}
-.ev-card-emoji{font-size:30px}
-.ev-card-title{font-weight:700;font-size:19px;line-height:1.12;margin-top:2px;letter-spacing:-.01em}
-.ev-card-date{font-size:12.5px;font-weight:600;opacity:.85}
-.ev-card-foot{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:10px}
-.mini-guests{display:flex;align-items:center}
+/* Text sits at the bottom of the tile over a scrim; status pills sit top-right, so nothing overlaps the title. */
+.ev-card-body{padding:14px;height:100%;display:flex;flex-direction:column;color:var(--th-ink,#222)}
+.ev-pills{position:absolute;top:10px;right:10px;display:flex;gap:6px;z-index:2;max-width:calc(100% - 20px);flex-wrap:wrap;justify-content:flex-end}
+.ev-pills .new-pill,.ev-pills .you-pill{position:static}
+.ev-card-emoji{font-size:30px;line-height:1}
+.ev-card-text{margin-top:auto;display:flex;flex-direction:column;gap:3px;min-width:0}
+.ev-card-title{font-weight:700;font-size:19px;line-height:1.12;letter-spacing:-.01em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.ev-card-date{font-size:12.5px;font-weight:600;opacity:.9}
+.ev-card-loc{font-size:12px;opacity:.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ev-card-foot{display:flex;align-items:center;gap:8px;padding-top:8px;min-width:0}
+.mini-guests{display:flex;align-items:center;flex:none}
 .mini-guests .avatar{margin-left:-6px} .mini-guests .avatar:first-child{margin-left:0}
-.mini-guests .more{font-size:11px;font-weight:700;margin-left:4px;opacity:.8}
-.ev-card-foot .count{font-size:11.5px;font-weight:700;background:rgba(255,255,255,.55);color:#3a2a1a;padding:2px 8px;border-radius:999px;backdrop-filter:blur(4px)}
-.you-pill{position:absolute;top:12px;right:12px;font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:999px;background:rgba(255,255,255,.85);color:#2a2a2a}
+.mini-guests .more{font-size:11px;font-weight:700;margin-left:4px;opacity:.85}
+.ev-card-foot .count{font-size:12px;font-weight:700;white-space:nowrap;opacity:.9;overflow:hidden;text-overflow:ellipsis}
+.you-pill{position:absolute;top:12px;right:12px;font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:999px;background:rgba(255,255,255,.85);color:#2a2a2a;white-space:nowrap}
 .you-pill.going{background:#2E9E6B;color:#fff} .you-pill.maybe{background:var(--sun);color:#3a2a06} .you-pill.no{background:#d23b5a;color:#fff}
 
 /* ---------- GROUPS ---------- */
@@ -361,9 +365,9 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .preview-cover::after{content:"";position:absolute;inset:0;background:linear-gradient(transparent 30%,rgba(0,0,0,.55))}
 .ev-card.has-cover .ev-card-bg{background:#222}
 .ev-card .cover-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:-1}
-.ev-card.has-cover::after{content:"";position:absolute;inset:0;background:linear-gradient(transparent 34%,rgba(0,0,0,.6));z-index:-1}
+.ev-card.has-cover::after{content:"";position:absolute;inset:0;background:linear-gradient(rgba(0,0,0,0) 30%,rgba(0,0,0,.3) 52%,rgba(0,0,0,.8));z-index:-1}
 .ev-card.has-cover .ev-card-body{color:#fff}
-.ev-card.has-cover .ev-card-foot .count{background:rgba(255,255,255,.25);color:#fff}
+.ev-card.has-cover .ev-card-title,.ev-card.has-cover .ev-card-date,.ev-card.has-cover .count,.ev-card.has-cover .more{text-shadow:0 1px 3px rgba(0,0,0,.55)}
 .event-cover{margin:0 0 4px;border-radius:20px;overflow:hidden;box-shadow:var(--shadow-lg);aspect-ratio:16/9}
 .event-cover img{width:100%;height:100%;object-fit:cover;display:block}
 
@@ -484,10 +488,13 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 /* Reports: long content paths wrap instead of running off the card */
 .member-row .mono,.member-row .muted.sm{overflow-wrap:anywhere;min-width:0}
 /* Meetings in the events grid: one full-width row, not a tall narrow card */
-.ev-grid .meet-card{grid-column:1/-1;position:relative}
-.meet-card .muted.sm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.meet-card .you-pill{position:static;flex:none;background:var(--good-bg);color:var(--good)}
-.meet-card .you-pill.no{background:#FBE7EC;color:var(--bad)} .meet-card .you-pill.maybe{background:var(--surface2);color:var(--ink)}
+.meet-card{display:flex;align-items:center;gap:12px;padding:13px 15px;cursor:pointer} .meet-card .muted.sm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ev-card.meet-tile{background:var(--surface);border:1px solid var(--line);color:var(--ink)}
+.ev-card.meet-tile::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--accent)}
+.ev-card.meet-tile .ev-card-body{padding-left:18px}
+.meet-tag{align-self:flex-start;font-size:11px;font-weight:700;background:var(--surface2);color:var(--ink);padding:3px 8px;border-radius:999px}
+.meet-tile .ev-card-date,.meet-tile .ev-card-loc,.meet-tile .count{color:var(--muted);opacity:1}
+.meet-tile .you-pill.going{background:var(--good-bg);color:var(--good)} .meet-tile .you-pill.no{background:#FBE7EC;color:var(--bad)} .meet-tile .you-pill.maybe{background:var(--surface2);color:var(--ink)}
 /* Demo banner: clear the status bar in the iPhone shell */
 /* Tab bar stays pinned while the page scrolls (clip on #app keeps sticky working) */
 .tabs{position:sticky;top:calc(env(safe-area-inset-top) + 6px);z-index:25}
@@ -498,3 +505,24 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .crop-wrap.rect{border-radius:14px}
 .crop-wrap canvas{display:block;cursor:grab;touch-action:none}
 .crop-wrap canvas:active{cursor:grabbing}
+
+/* ---- Blip, the mascot (markup from blip.js) ---- */
+.blip{display:block;overflow:visible}
+.blip.idle .body{animation:blip-squish 2.8s ease-in-out infinite;transform-box:fill-box;transform-origin:50% 100%}
+@keyframes blip-squish{0%,100%{transform:scale(1,1)}50%{transform:scale(1.035,.965)}}
+.blip.idle .eye{transform-box:fill-box;transform-origin:center;animation:blip-blink 4.2s infinite}
+@keyframes blip-blink{0%,91%,100%{transform:scaleY(1)}94%{transform:scaleY(.08)}}
+.blip.idle .zz text{animation:blip-zz 2.4s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
+.blip.idle .zz text:nth-child(2){animation-delay:.8s}
+@keyframes blip-zz{0%{opacity:0;transform:translate(0,4px) scale(.7)}30%,60%{opacity:1}100%{opacity:0;transform:translate(6px,-10px) scale(1.1)}}
+.blip.idle .conf *{transform-box:fill-box;transform-origin:center;animation:blip-pop 1.8s ease-out infinite}
+.blip.idle .conf :nth-child(2n){animation-delay:.3s}.blip.idle .conf :nth-child(3n){animation-delay:.6s}
+@keyframes blip-pop{0%{opacity:0;transform:translate(0,0) scale(.4)}25%{opacity:1}100%{opacity:0;transform:translate(var(--dx,0),var(--dy,-24px)) scale(1) rotate(120deg)}}
+.blip.idle .look{animation:blip-look 5s ease-in-out infinite}
+@keyframes blip-look{0%,35%,100%{transform:translate(0,0)}45%,85%{transform:translate(-4px,1px)}}
+.blip.idle .sweat{animation:blip-sweat 1.6s ease-in infinite;transform-box:fill-box;transform-origin:center}
+@keyframes blip-sweat{0%{opacity:0;transform:translateY(-4px)}30%{opacity:1}100%{opacity:0;transform:translateY(10px)}}
+.empty .blip{margin-bottom:2px}
+.li.blip-li{background:none;width:44px;height:44px}
+.splash-blip{width:min(440px,92vw);height:auto;display:block;overflow:visible}
+@media (prefers-reduced-motion:reduce){.blip.idle *{animation:none!important}}
