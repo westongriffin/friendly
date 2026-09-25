@@ -185,6 +185,35 @@ function toast(msg, action, onAction, mood) {
   if (action) { const b = document.createElement("button"); b.type = "button"; b.className = "toast-act"; b.textContent = action; b.onclick = () => { t.classList.remove("show"); onAction(); }; t.appendChild(b); }
   t.classList.add("show"); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), action ? 7000 : 3400);
 }
+// Tap the yellow dot in the logo: Dot drops out of it with a one-line tip, then climbs back in.
+const LOGO_TIPS = {
+  home: ["Tap a group chip up top to see just that crew's plans.", "Long-press an event tile? Not yet. But tap Calendar to see the month.", "The Today card shows up on the morning of anything you're going to.", "Past events keep their photos and wall. Scroll down to revisit them."],
+  event: ["Tap a guest's name to see their Venmo, so settling up is one tap.", "Add a bring list and I'll tell you when everything's covered.", "Hosts can nudge everyone who hasn't answered, in one tap.", "Share the link: anyone who joins shows up in your Activity feed."],
+  groups: ["Plan from inside a group and everyone's invited automatically.", "Group members see each other's birthdays a month out."],
+  money: ["Fewest payments combines debts so fewer people have to pay.", "Snap a receipt and I'll read the total for you."]
+};
+let logoTipTimer = null;
+function showLogoTip() {
+  if (!window.Blip || document.getElementById("logoTip")) return;
+  const dotEl = el("brandDot"); if (!dotEl) return;
+  const key = ["event", "groups", "money"].includes(S.route.name) ? S.route.name : "home";
+  const list = LOGO_TIPS[key]; let i = 0; try { i = (parseInt(localStorage.getItem("friendlyTip:" + key) || "0", 10) || 0); localStorage.setItem("friendlyTip:" + key, String(i + 1)); } catch {}
+  const tip = list[i % list.length];
+  const r = dotEl.getBoundingClientRect();
+  const wrap = document.createElement("div"); wrap.id = "logoTip";
+  wrap.style.left = r.left + "px"; wrap.style.top = r.top + "px";
+  wrap.innerHTML = `<div class="logo-tip-dot">${dot("happy", 56)}</div><div class="logo-tip-bubble">${esc(tip)}</div>`;
+  document.body.appendChild(wrap);
+  dotEl.classList.add("away");
+  requestAnimationFrame(() => wrap.classList.add("out"));
+  const hide = () => {
+    clearTimeout(logoTipTimer); document.removeEventListener("click", hide, true);
+    wrap.classList.remove("out"); wrap.classList.add("back");
+    setTimeout(() => { wrap.remove(); const d = el("brandDot"); if (d) d.classList.remove("away"); }, 420);
+  };
+  logoTipTimer = setTimeout(hide, 4200);
+  setTimeout(() => document.addEventListener("click", hide, true), 250);
+}
 document.addEventListener("click", () => { const x = el("edgeDot"); if (x && x.classList.contains("in")) { x.classList.remove("in"); x.querySelector(".edge-art").innerHTML = dot("idle", 66); } });
 window.addEventListener("offline", () => toast("You're offline. Changes will send when you're back.", null, null, "oops"));
 window.addEventListener("online", () => toast("Back online.", null, null, "happy"));
@@ -787,7 +816,7 @@ function shell(body) {
   return `
   ${isDemo() ? `<div class="demo-bar">${dot("happy", 26)}<span>Demo mode -- this is Riley, a shared public sandbox account. Explore freely; changes are visible to other visitors and reset nightly.</span></div>` : ""}
   <header class="topbar">
-    <div class="brand" data-go="#/">Friend<span class="tilt">l</span>y</div>
+    <div class="brand has-dot"><span data-go="#/">Friend<span class="tilt">l</span>y</span><button type="button" class="brand-dot" id="brandDot" aria-label="A tip from Dot"></button></div>
     <div class="topbar-right"><button class="bell" data-go="#/search" title="Search">🔍</button><button class="bell" data-go="#/activity" title="Activity">🔔${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ""}</button>
     <button class="me-chip" data-go="#/profile">${avatar(S.user.uid)}<span>${esc(first(p.name))}</span></button></div>
   </header>
@@ -805,6 +834,7 @@ function shell(body) {
 function wireShell() {
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
   if (el("fabBtn")) el("fabBtn").onclick = () => S.route.name === "groups" ? openGroupDialog() : go("#/new");
+  if (el("brandDot")) el("brandDot").onclick = e => { e.stopPropagation(); showLogoTip(); };
   const ed = el("edgeDot");
   if (ed) {
     // Dot peeks in from the right edge; tap and Dot slides in asking what to make. On Groups there is one thing to make, so it just opens.
