@@ -203,74 +203,139 @@ exports.onReceiptRequest = onDocumentCreated({ document: "receiptRequests/{id}",
 //      The user always reviews it before anything is created or sent.
 const PLAN_MODEL = "gemini-2.5-flash";
 const THEME_IDS = ["confetti", "citrus", "bubblegum", "sunset", "golden", "blossom", "garden", "aurora", "midnight", "cosmic", "rave", "disco", "y2k", "retro"];
-async function draftPlan(d) {
-  const text = String(d.text || "").slice(0, 1500).trim(); if (text.length < 4) throw new Error("nothing to plan");
-  const clean = (arr, n, len) => (Array.isArray(arr) ? arr : []).slice(0, n).map(x => String(x || "").replace(/[\r\n;]+/g, " ").slice(0, len)).filter(Boolean);
-  const people = clean(d.people, 150, 40), groups = clean(d.groups, 40, 40);
+const str = { type: "STRING" };
+const clean = (arr, n, len) => (Array.isArray(arr) ? arr : []).slice(0, n).map(x => String(x || "").replace(/[\r\n;]+/g, " ").slice(0, len)).filter(Boolean);
+const sv = (v, n) => String(v || "").trim().slice(0, n);
+async function askGemini(prompt, schema, temperature = 0.2) {
+  const token = (await (await gauth.getClient()).getAccessToken()).token;
+  const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${LOCATION}/publishers/google/models/${PLAN_MODEL}:generateContent`;
+  const body = { contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { temperature, responseMimeType: "application/json", responseSchema: schema } };
+  const r = await fetch(url, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(PLAN_MODEL + " " + r.status + ": " + (await r.text()).slice(0, 160));
+  const j = await r.json();
+  return JSON.parse(((((j.candidates || [])[0] || {}).content || {}).parts || []).map(p => p.text || "").join(""));
+}
+function whenContext(d) {
   const today = /^\d{4}-\d{2}-\d{2}$/.test(d.today || "") ? d.today : new Date().toISOString().slice(0, 10);
-  const instructions = `You are Dot, the helper inside Friendly, an app friends use to plan get-togethers and split costs.
-Turn what the user said into an event draft. Today is ${today} (${String(d.weekday || "").slice(0, 12)}), local time ${String(d.now || "").slice(0, 5)}, time zone ${String(d.tz || "").slice(0, 40)}.
+  return `Today is ${today} (${sv(d.weekday, 12)}), local time ${sv(d.now, 5)}, time zone ${sv(d.tz, 40)}. Resolve relative dates ("next Friday", "tomorrow", "the 14th") to YYYY-MM-DD in the user's zone; a bare weekday means the next one coming. Times as 24-hour HH:MM; if a time is vague ("evening"), leave it empty.`;
+}
+const DOT = "You are Dot, the helper inside Friendly, an app friends use to plan get-togethers and split costs. Only include what the user actually said; never invent people, places or facts.";
+
+// mode "event": what the user said -> an event draft, plus a few concrete ideas that would make the invite better organised.
+async function draftPlan(d) {
+  const text = sv(d.text, 1500); if (text.length < 4) throw new Error("nothing to plan");
+  const people = clean(d.people, 150, 40), groups = clean(d.groups, 40, 40);
+  const prompt = `${DOT}
+Turn what the user said into an event draft. ${whenContext(d)}
 Rules:
-- Resolve relative dates ("next Friday", "tomorrow", "the 14th") to YYYY-MM-DD in the user's zone; a bare weekday means the next one coming. Times as 24-hour HH:MM. If a time is vague ("evening"), leave time empty.
-- Only include what the user actually said. Leave anything unknown empty and name it in "missing" using only: date, time, location, guests.
+- Leave anything unknown empty and name it in "missing" using only: date, time, location, guests.
 - guests: the people the user named. When a name matches one of the user's friends below, use the friend's exact spelling. Do not add people who weren't mentioned.
-- group: if the user names one of their groups (or clearly means it, e.g. "the crew" when they have one group), set it to the group's exact name and do not list its members as guests. Otherwise empty.
+- group: if the user names one of their groups (or clearly means it, e.g. "the crew" when they have one group${d.groupHint ? `; the user is currently looking at the group "${sv(d.groupHint, 40)}", so "everyone" or "the group" means that one` : ""}), set it to the group's exact name and do not list its members as guests. Otherwise empty.
 - bring: things people are asked to bring, one entry each, with a quantity only if stated.
 - capacity: a maximum head count if stated, else 0. questions: RSVP questions the host wants to ask, if any.
 - kind: "meeting" only for plain calendar meetings (work, practice, appointments, calls). Everything social is "event".
 - emoji: exactly one emoji that fits. theme: one id from ${THEME_IDS.join(", ")} matching the vibe (sunset or golden for dinners, confetti for parties and birthdays, garden or blossom for brunch and outdoors, midnight or cosmic for nights out, disco, rave or retro for dance and costume nights, citrus or bubblegum for playful daytime plans).
 - title: short and natural, the way the user would name it (e.g. "Taco Night", "Sam's 30th").
-- notes: the details that don't fit elsewhere (dress code, parking, what to expect), in the user's words, or empty.
-- summary: one warm sentence in Dot's voice, starting "Here's what I heard:", restating the plan in plain words. No emoji in the summary.
+- notes: details that don't fit elsewhere (dress code, parking, what to expect), in the user's words, or empty.
+- summary: one warm sentence in Dot's voice, starting "Here's what I heard:", restating the plan in plain words. No emoji.
+- ideas: 2 to 4 concrete, specific suggestions that would make THIS invite clearer or better organised, each as something the app can add with one tap. Think like a good host: an RSVP question the guests would need answering (dietary needs, plus-ones, who's driving), an item people always forget for this kind of plan (ice, cups, a speaker, sunscreen), an end time so people can plan around it, a head count if space is tight, a note about parking, what to wear or where to meet. Never suggest something the user already covered. Each idea: "label" is the chip text starting with a verb ("Ask about dietary needs", "Add ice to the bring list", "End it at 10 PM"); "kind" is one of question, bring, note, endTime, capacity; "value" is exactly what to add (the question text, the item, the note sentence, HH:MM, or a number).
 Friends: ${people.join("; ") || "(none)"}.
-Groups: ${groups.join("; ") || "(none)"}.`;
-  const token = (await (await gauth.getClient()).getAccessToken()).token;
-  const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${LOCATION}/publishers/google/models/${PLAN_MODEL}:generateContent`;
-  const str = { type: "STRING" };
-  const body = {
-    contents: [{ role: "user", parts: [{ text: instructions + "\n\nWhat the user said:\n" + text }] }],
-    generationConfig: {
-      temperature: 0.2, responseMimeType: "application/json",
-      responseSchema: { type: "OBJECT", required: ["title", "kind", "summary"], properties: {
-        kind: { type: "STRING", enum: ["event", "meeting"] }, title: str, emoji: str, theme: { type: "STRING", enum: THEME_IDS },
-        date: str, time: str, endTime: str, location: str, notes: str, capacity: { type: "INTEGER" },
-        guests: { type: "ARRAY", items: str }, group: str,
-        bring: { type: "ARRAY", items: { type: "OBJECT", required: ["item"], properties: { item: str, qty: str } } },
-        questions: { type: "ARRAY", items: str },
-        missing: { type: "ARRAY", items: { type: "STRING", enum: ["date", "time", "location", "guests"] } },
-        summary: str
-      } }
-    }
-  };
-  const r = await fetch(url, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!r.ok) throw new Error(PLAN_MODEL + " " + r.status + ": " + (await r.text()).slice(0, 160));
-  const j = await r.json();
-  const out = JSON.parse(((((j.candidates || [])[0] || {}).content || {}).parts || []).map(p => p.text || "").join(""));
-  // Validate every field before the app sees it: the model never gets to invent shapes.
-  const s = (v, n) => String(v || "").trim().slice(0, n);
+Groups: ${groups.join("; ") || "(none)"}.
+
+What the user said:
+${text}`;
+  const schema = { type: "OBJECT", required: ["title", "kind", "summary"], properties: {
+    kind: { type: "STRING", enum: ["event", "meeting"] }, title: str, emoji: str, theme: { type: "STRING", enum: THEME_IDS },
+    date: str, time: str, endTime: str, location: str, notes: str, capacity: { type: "INTEGER" },
+    guests: { type: "ARRAY", items: str }, group: str,
+    bring: { type: "ARRAY", items: { type: "OBJECT", required: ["item"], properties: { item: str, qty: str } } },
+    questions: { type: "ARRAY", items: str },
+    missing: { type: "ARRAY", items: { type: "STRING", enum: ["date", "time", "location", "guests"] } },
+    ideas: { type: "ARRAY", items: { type: "OBJECT", required: ["label", "kind", "value"], properties: { label: str, kind: { type: "STRING", enum: ["question", "bring", "note", "endTime", "capacity"] }, value: str } } },
+    summary: str } };
+  const out = await askGemini(prompt, schema);
   const data = {
     kind: out.kind === "meeting" ? "meeting" : "event",
-    title: s(out.title, 80) || "New plan",
-    emoji: s(out.emoji, 8).replace(/[A-Za-z0-9\s]/g, "").slice(0, 4),
+    title: sv(out.title, 80) || "New plan",
+    emoji: sv(out.emoji, 8).replace(/[A-Za-z0-9\s]/g, "").slice(0, 4),
     theme: THEME_IDS.includes(out.theme) ? out.theme : "",
     date: /^\d{4}-\d{2}-\d{2}$/.test(out.date || "") ? out.date : "",
     time: /^\d{2}:\d{2}$/.test(out.time || "") ? out.time : "",
     endTime: /^\d{2}:\d{2}$/.test(out.endTime || "") ? out.endTime : "",
-    location: s(out.location, 200), notes: s(out.notes, 1000),
+    location: sv(out.location, 200), notes: sv(out.notes, 1000),
     capacity: Math.max(0, Math.min(500, parseInt(out.capacity, 10) || 0)),
-    guests: clean(out.guests, 30, 60), group: s(out.group, 60),
-    bring: (Array.isArray(out.bring) ? out.bring : []).slice(0, 12).map(b => ({ item: s(b && b.item, 60), qty: s(b && b.qty, 20) })).filter(b => b.item),
+    guests: clean(out.guests, 30, 60), group: sv(out.group, 60),
+    bring: (Array.isArray(out.bring) ? out.bring : []).slice(0, 12).map(b => ({ item: sv(b && b.item, 60), qty: sv(b && b.qty, 20) })).filter(b => b.item),
     questions: clean(out.questions, 5, 120),
     missing: clean(out.missing, 4, 12).filter(m => ["date", "time", "location", "guests"].includes(m)),
-    summary: s(out.summary, 300) || "Here's what I heard."
+    ideas: (Array.isArray(out.ideas) ? out.ideas : []).slice(0, 4).map(x => ({ label: sv(x && x.label, 60), kind: sv(x && x.kind, 12), value: sv(x && x.value, 200) }))
+      .filter(x => x.label && x.value && ["question", "bring", "note", "endTime", "capacity"].includes(x.kind))
+      .filter(x => x.kind !== "endTime" || /^\d{2}:\d{2}$/.test(x.value)).filter(x => x.kind !== "capacity" || /^\d{1,3}$/.test(x.value)),
+    summary: sv(out.summary, 300) || "Here's what I heard."
   };
   if (!data.date && !data.missing.includes("date")) data.missing.push("date");
   return data;
 }
+
+// mode "expense": what the user said -> an expense draft (what, how much, who paid, who splits).
+async function draftExpense(d) {
+  const text = sv(d.text, 1500); if (text.length < 4) throw new Error("nothing to add");
+  const people = clean(d.people, 150, 40);
+  const prompt = `${DOT}
+Turn what the user said into a shared-expense draft. "I"/"me" is the user. ${whenContext(d)}
+- desc: a short label for what was bought ("Pizza & drinks", "Uber home").
+- amount: the total in dollars as a number, 0 if not said.
+- paidBy: "me" if the user paid, otherwise the friend's exact name from the list, or empty if unclear.
+- splitWith: the people sharing it, using exact names from the list when they match; include "me" if the user is in on it (assume the user is, unless they say otherwise). If the user says everyone / all of us / the whole group, set splitEveryone true and leave splitWith empty.
+- missing: name what wasn't said, from: amount, split, payer.
+- summary: one sentence in Dot's voice starting "Here's what I heard:".
+Friends: ${people.join("; ") || "(none)"}.
+
+What the user said:
+${text}`;
+  const schema = { type: "OBJECT", required: ["desc", "summary"], properties: {
+    desc: str, amount: { type: "NUMBER" }, paidBy: str, splitWith: { type: "ARRAY", items: str }, splitEveryone: { type: "BOOLEAN" },
+    missing: { type: "ARRAY", items: { type: "STRING", enum: ["amount", "split", "payer"] } }, summary: str } };
+  const out = await askGemini(prompt, schema);
+  return {
+    desc: sv(out.desc, 80) || "Expense", amount: Math.max(0, Math.min(100000, Number(out.amount) || 0)),
+    paidBy: sv(out.paidBy, 60), splitWith: clean(out.splitWith, 30, 60), splitEveryone: !!out.splitEveryone,
+    missing: clean(out.missing, 3, 10).filter(m => ["amount", "split", "payer"].includes(m)), summary: sv(out.summary, 300) || "Here's what I heard."
+  };
+}
+
+// mode "edit": what the user said about an existing event -> only the fields that change.
+async function draftEdit(d) {
+  const text = sv(d.text, 1500); if (text.length < 3) throw new Error("nothing to change");
+  const cur = d.current && typeof d.current === "object" ? d.current : {};
+  const current = { title: sv(cur.title, 80), date: sv(cur.date, 10), time: sv(cur.time, 5), endTime: sv(cur.endTime, 5), location: sv(cur.location, 200), notes: sv(cur.notes, 1000), capacity: Math.max(0, parseInt(cur.capacity, 10) || 0) };
+  const prompt = `${DOT}
+The user wants to change an existing event. ${whenContext(d)}
+Current event: ${JSON.stringify(current)}
+Return ONLY the fields that should change, with their new values; leave every other field out (empty string means "do not change"). For notes, return the full new notes text (keep what is there unless the user says to remove it). capacity as a number, 0 to leave unchanged. If something is unclear, say so in "unclear" (one short sentence), otherwise leave it empty.
+summary: one sentence in Dot's voice starting "Here's what I'll change:".
+
+What the user said:
+${text}`;
+  const schema = { type: "OBJECT", required: ["summary"], properties: { title: str, date: str, time: str, endTime: str, location: str, notes: str, capacity: { type: "INTEGER" }, unclear: str, summary: str } };
+  const out = await askGemini(prompt, schema, 0.1);
+  const patch = {};
+  if (sv(out.title, 80) && sv(out.title, 80) !== current.title) patch.title = sv(out.title, 80);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(out.date || "") && out.date !== current.date) patch.date = out.date;
+  if (/^\d{2}:\d{2}$/.test(out.time || "") && out.time !== current.time) patch.time = out.time;
+  if (/^\d{2}:\d{2}$/.test(out.endTime || "") && out.endTime !== current.endTime) patch.endTime = out.endTime;
+  if (sv(out.location, 200) && sv(out.location, 200) !== current.location) patch.location = sv(out.location, 200);
+  if (sv(out.notes, 1000) && sv(out.notes, 1000) !== current.notes) patch.notes = sv(out.notes, 1000);
+  const cap = parseInt(out.capacity, 10); if (cap > 0 && cap !== current.capacity) patch.capacity = Math.min(500, cap);
+  return { patch, unclear: sv(out.unclear, 200), summary: sv(out.summary, 300) || "Here's what I'll change." };
+}
 exports.onPlanRequest = onDocumentCreated({ document: "planRequests/{id}", region: "us-central1", timeoutSeconds: 60, memory: "256MiB" }, async e => {
   const d = e.data && e.data.data(); if (!d || !d.text) return;
   const ref = e.data.ref;
-  try { const data = await draftPlan(d); await ref.update({ status: "done", data }); }
+  try {
+    const data = d.mode === "expense" ? await draftExpense(d) : d.mode === "edit" ? await draftEdit(d) : await draftPlan(d);
+    await ref.update({ status: "done", data });
+  }
   catch (err) { logger.error("plan draft failed: " + err.message); await ref.update({ status: "error", error: "couldn't work that out" }); }
 });
 

@@ -966,32 +966,56 @@ function shell(body) {
     ${T("money", "Money", "#/money")}
   </nav>
   <main class="wrap">${updateBanner()}${inviteBanner()}${body}</main>
-  ${["new", "group", "expense", "profile"].includes(tab) ? "" : window.Blip ? `<div class="fab-scrim"></div><div class="edge-dot" id="edgeDot" role="button" aria-label="${tab === "groups" ? "New group" : "Make something"}">
-    ${tab === "groups" ? "" : `<div class="edge-menu"><b>What are we making?</b><button type="button" data-make="plan" class="plan-btn">✨ Let me plan it. Just tell me.</button><button type="button" data-make="event">🎉 An event</button><button type="button" data-make="meeting">📅 A meeting</button><button type="button" data-make="expense">💸 An expense</button></div>`}
-    <span class="edge-art">${dot("idle", 66)}</span></div>` : `<div class="fab-scrim"></div><button class="fab" id="fabBtn" title="${tab === "groups" ? "New group" : "Create event"}">＋</button>`}`;
+  ${edgeDotHtml()}`;
+}
+// ---- Dot at the edge: the same spot on every page. What Dot offers depends on where you are.
+function edgeMenu() {
+  const r = S.route, gate = window.Blip;
+  if (!gate) return null;
+  const item = (k, label, cls = "") => `<button type="button" data-make="${k}" ${cls ? `class="${cls}"` : ""}>${label}</button>`;
+  if (r.name === "event") {
+    const ev = S.events.get(r.id); if (!ev) return null;
+    const mine = canManage(ev), items = [];
+    if (mine) items.push(item("edit", "✨ Change something. Just tell me.", "plan-btn"));
+    items.push(item("expense-here", "💸 An expense for this"));
+    if (!mine) items.push(item("plan", "✨ Let me plan something new", "plan-btn"));
+    items.push(item("event", "🎉 A new event"));
+    return { title: mine ? "What should I do?" : "What are we making?", items };
+  }
+  if (r.name === "group") {
+    const g = S.groups.get(r.id); if (!g) return null;
+    return { title: `For ${esc(g.name)}`, items: [item("plan", "✨ Let me plan it. Just tell me.", "plan-btn"), item("event", "🎉 An event for this group"), item("meeting", "📅 A meeting"), item("expense", "💸 An expense for this group")] };
+  }
+  if (r.name === "groups") return { title: "What are we making?", items: [item("group", "👥 A new group"), item("plan", "✨ Let me plan something", "plan-btn"), item("event", "🎉 An event")] };
+  return { title: "What are we making?", items: [item("plan", "✨ Let me plan it. Just tell me.", "plan-btn"), item("event", "🎉 An event"), item("meeting", "📅 A meeting"), item("expense", "💸 An expense")] };
+}
+function edgeDotHtml() {
+  const m = edgeMenu();
+  if (!m) return window.Blip ? "" : `<div class="fab-scrim"></div><button class="fab" id="fabBtn" title="Create event">＋</button>`;
+  return `<div class="fab-scrim"></div><div class="edge-dot" id="edgeDot" role="button" aria-label="Make something"><div class="edge-menu"><b>${m.title}</b>${m.items.join("")}</div><span class="edge-art">${dot("idle", 66)}</span></div>`;
+}
+function wireEdgeDot() {
+  if (el("fabBtn")) el("fabBtn").onclick = () => go("#/new");
+  const ed = el("edgeDot"); if (!ed) return;
+  const setMood = m => { ed.querySelector(".edge-art").innerHTML = dot(m, 66); };
+  ed.onclick = e => { e.stopPropagation(); const open = !ed.classList.contains("in"); ed.classList.toggle("in", open); setMood(open ? "happy" : "idle"); };
+  ed.querySelectorAll("[data-make]").forEach(b => b.onclick = e => {
+    e.stopPropagation(); ed.classList.remove("in"); setMood("idle");
+    const k = b.dataset.make, r = S.route;
+    const gid = r.name === "group" ? r.id : "";
+    if (k === "plan") openPlanDialog("event", { groupId: gid });
+    else if (k === "event") { resetCompose(); if (gid) compose.groupId = gid; go("#/new"); }
+    else if (k === "meeting") { resetCompose(); compose.kind = "meeting"; if (gid) compose.groupId = gid; go("#/new"); }
+    else if (k === "expense") openExpense(null, null, gid || null);
+    else if (k === "expense-here") { const ev = S.events.get(r.id); openExpense(r.id, ev ? ev.invitedUids : null, ev ? ev.groupId : null); }
+    else if (k === "edit") { const ev = S.events.get(r.id); if (ev) openPlanDialog("edit", { ev }); }
+    else if (k === "group") openGroupDialog();
+  });
 }
 function wireShell() {
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
-  if (el("fabBtn")) el("fabBtn").onclick = () => S.route.name === "groups" ? openGroupDialog() : go("#/new");
   if (el("brandDot")) el("brandDot").onclick = e => { e.stopPropagation(); showLogoTip(); };
-  const ed = el("edgeDot");
-  if (ed) {
-    // Dot peeks in from the right edge; tap and Dot slides in asking what to make. On Groups there is one thing to make, so it just opens.
-    const setMood = m => { ed.querySelector(".edge-art").innerHTML = dot(m, 66); };
-    ed.onclick = e => {
-      e.stopPropagation();
-      if (S.route.name === "groups") { setMood("happy"); setTimeout(() => setMood("idle"), 900); openGroupDialog(); return; }
-      const open = !ed.classList.contains("in"); ed.classList.toggle("in", open); setMood(open ? "happy" : "idle");
-    };
-    ed.querySelectorAll("[data-make]").forEach(b => b.onclick = e => {
-      e.stopPropagation(); ed.classList.remove("in");
-      const k = b.dataset.make;
-      if (k === "plan") openPlanDialog();
-      else if (k === "event") { if (compose.kind === "meeting") resetCompose(); go("#/new"); }
-      else if (k === "meeting") { resetCompose(); compose.kind = "meeting"; go("#/new"); }
-      else openExpense(null, null);
-    });
-  }
+  wireEdgeDot();
   wireUpdateBanner();
   document.querySelectorAll("[data-accept]").forEach(b => b.onclick = () => acceptInvite(b.dataset.accept, b));
   if (S.route.name === "home") { wireHome(); dotIntro(); }
@@ -1434,24 +1458,37 @@ const compose = { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover:
   questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "" };
 function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", repeat: "", _restored: false, _fromDraft: false, _plan: null }); }
 // ---- "Let me plan it": say the plan, Dot drafts it, you review it in the composer. Nothing is created or sent until you tap Create.
-function planContext(text) {
+function planContext(text, mode, ctx) {
   const d = new Date(), pad = n => String(n).padStart(2, "0");
   const people = [...new Set([...S.contacts.values()].map(c => c && c.name).filter(Boolean))].filter(n => n !== S.profile.name).slice(0, 150);
   const groups = [...S.groups.values()].map(g => g.name).filter(Boolean).slice(0, 40);
-  return { text: text.slice(0, 1500), today: todayStr(), weekday: d.toLocaleDateString("en-US", { weekday: "long" }), now: pad(d.getHours()) + ":" + pad(d.getMinutes()), tz: (Intl.DateTimeFormat().resolvedOptions().timeZone || ""), people, groups };
+  const base = { mode, text: text.slice(0, 1500), today: todayStr(), weekday: d.toLocaleDateString("en-US", { weekday: "long" }), now: pad(d.getHours()) + ":" + pad(d.getMinutes()), tz: (Intl.DateTimeFormat().resolvedOptions().timeZone || ""), people, groups };
+  if (mode === "event" && ctx.groupId) { const g = S.groups.get(ctx.groupId); if (g) base.groupHint = g.name; }
+  if (mode === "edit" && ctx.ev) { const e = ctx.ev; base.current = { title: e.title, date: e.date, time: e.time || "", endTime: e.endTime || "", location: e.location || "", notes: e.notes || "", capacity: e.capacity || 0 }; }
+  return base;
 }
-function openPlanDialog() {
-  if (isDemo()) return toast("Planning by voice is off in the demo -- try New event instead.");
+const PLAN_COPY = {
+  event: { lead: "Tell me the plan like you'd text a friend: what, when, where, who, what to bring. I'll fill everything in, and you check it before anything sends.", label: "The plan", ph: "Taco night at my place next Friday at 7. Invite the Fruit Basket crew, everyone brings a side, cap it at 12.", ok: "Take it from here" },
+  expense: { lead: "Tell me what it was, how much, who paid and who's splitting it. I'll set it up and you check it.", label: "The expense", ph: "Dinner was 120, I paid, split with Sam and Alex.", ok: "Set it up" },
+  edit: { lead: "Tell me what to change and I'll line it up. You still tap Save.", label: "The change", ph: "Move it to 8, and add that parking is on the street.", ok: "Line it up" }
+};
+function openPlanDialog(mode = "event", ctx = {}) {
+  if (isDemo()) return toast("Talking to Dot is off in the demo -- try the regular buttons instead.");
+  const c = PLAN_COPY[mode] || PLAN_COPY.event;
   const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
   const micHint = (NATIVE || IOS) ? `Tap the mic on your keyboard to talk instead of type.` : Speech ? `<button type="button" class="btn small" id="planMic">🎤 Talk instead</button>` : "";
-  dialog(`<div class="dot-say">${dot("happy", 56)}<div class="say-bubble">Tell me the plan like you'd text a friend: what, when, where, who, what to bring. I'll fill everything in, and you check it before anything sends.</div></div>
-    <label class="field"><span>The plan</span><textarea id="planText" rows="5" maxlength="1500" placeholder="Taco night at my place next Friday at 7. Invite the Fruit Basket crew, everyone brings a side, cap it at 12."></textarea></label>
-    <p class="muted sm" style="margin:-2px 0 0">${micHint}</p>`, "Take it from here", async () => {
-    const text = el("planText").value.trim(); if (text.length < 8) return toast("Tell me a little more.");
+  const lead = mode === "edit" && ctx.ev ? `What should change about “${esc(ctx.ev.title)}”? ${c.lead}` : c.lead;
+  dialog(`<div class="dot-say">${dot("happy", 56)}<div class="say-bubble">${lead}</div></div>
+    <label class="field"><span>${c.label}</span><textarea id="planText" rows="5" maxlength="1500" placeholder="${esc(c.ph)}"></textarea></label>
+    <p class="muted sm" style="margin:-2px 0 0">${micHint}</p>`, c.ok, async () => {
+    const text = el("planText").value.trim(); if (text.length < (mode === "edit" ? 3 : 8)) return toast("Tell me a little more.");
     const ok = el("dlgOk"); ok.disabled = true; ok.textContent = "Working on it…";
     const box = document.querySelector("#appDialog .dot-say"); if (box) box.innerHTML = `${dot("thinking", 56)}<div class="say-bubble">Got it. Working out the details…</div>`;
-    try { const res = await requestViaFirestore("planRequests", planContext(text), 60000); closeDialog(); applyPlan(res.data || {}, text); }
-    catch (e) { ok.disabled = false; ok.textContent = "Take it from here"; if (box) box.innerHTML = `${dot("oops", 56)}<div class="say-bubble">Hmm, that didn't go through. Try again?</div>`; toast("I couldn't work that out: " + e.message); }
+    try {
+      const res = await requestViaFirestore("planRequests", planContext(text, mode, ctx), 60000); closeDialog();
+      if (mode === "expense") applyExpense(res.data || {}, ctx); else if (mode === "edit") applyEdit(res.data || {}, ctx.ev); else applyPlan(res.data || {}, text);
+    }
+    catch (e) { ok.disabled = false; ok.textContent = c.ok; if (box) box.innerHTML = `${dot("oops", 56)}<div class="say-bubble">Hmm, that didn't go through. Try again?</div>`; toast("I couldn't work that out: " + e.message); }
   });
   setTimeout(() => { const t = el("planText"); if (t) t.focus(); }, 60);
   const mic = el("planMic");
@@ -1462,6 +1499,19 @@ function openPlanDialog() {
     rec.onend = () => { on = false; mic.textContent = "🎤 Talk instead"; };
     rec.onerror = () => { on = false; mic.textContent = "🎤 Talk instead"; };
   }
+}
+// Names -> friends: a unique full-name match, else a unique first-name match. Anything else is reported, never guessed.
+function matchFriends(names) {
+  const contacts = [...S.contacts.entries()].filter(([uid, c]) => uid !== myUid() && c && c.name);
+  const uids = [], unmatched = [];
+  for (const raw of (names || []).slice(0, 30)) {
+    const n = String(raw).trim().toLowerCase(); if (!n) continue;
+    if (n === "me" || n === "i") { uids.push(myUid()); continue; }
+    let hits = contacts.filter(([, c]) => c.name.trim().toLowerCase() === n);
+    if (!hits.length) hits = contacts.filter(([, c]) => c.name.trim().toLowerCase().split(/\s+/)[0] === n.split(/\s+/)[0]);
+    if (hits.length === 1) uids.push(hits[0][0]); else unmatched.push(String(raw).trim());
+  }
+  return { uids, unmatched };
 }
 function applyPlan(p, said) {
   resetCompose(); compose._restored = true;
@@ -1478,22 +1528,59 @@ function applyPlan(p, said) {
   const gname = String(p.group || "").trim().toLowerCase();
   const g = gname && [...S.groups.values()].find(x => (x.name || "").trim().toLowerCase() === gname);
   if (g) compose.groupId = g.id;
-  // guests by name: a unique full-name match, else a unique first-name match; anything else is reported, never guessed
-  const unmatched = [];
-  const contacts = [...S.contacts.entries()].filter(([uid, c]) => uid !== myUid() && c && c.name);
-  for (const raw of (p.guests || []).slice(0, 30)) {
-    const n = String(raw).trim().toLowerCase(); if (!n) continue;
-    let hits = contacts.filter(([, c]) => c.name.trim().toLowerCase() === n);
-    if (!hits.length) hits = contacts.filter(([, c]) => c.name.trim().toLowerCase().split(/\s+/)[0] === n.split(/\s+/)[0]);
-    if (hits.length === 1) compose.invitees.add(hits[0][0]); else unmatched.push(String(raw).trim());
-  }
+  const { uids, unmatched } = matchFriends(p.guests);
+  uids.filter(u => u !== myUid()).forEach(u => compose.invitees.add(u));
   compose._plan = {
     summary: String(p.summary || "Here's what I heard."),
     missing: (p.missing || []).filter(m => ["date", "time", "location", "guests"].includes(m)),
     unmatched, said,
-    bring: (p.bring || []).slice(0, 12).map(b => ({ item: String(b.item || "").slice(0, 60), qty: String(b.qty || "").slice(0, 20) })).filter(b => b.item)
+    bring: (p.bring || []).slice(0, 12).map(b => ({ item: String(b.item || "").slice(0, 60), qty: String(b.qty || "").slice(0, 20) })).filter(b => b.item),
+    ideas: (p.ideas || []).slice(0, 4).map(x => ({ label: String(x.label || "").slice(0, 60), kind: String(x.kind || ""), value: String(x.value || "").slice(0, 200) })).filter(x => x.label && x.value)
   };
   go("#/new");
+}
+// One of Dot's ideas, applied to the draft with a tap.
+function applyIdea(idx) {
+  const p = compose._plan; if (!p) return; const idea = p.ideas[idx]; if (!idea) return;
+  syncCompose();
+  if (idea.kind === "question") compose.questions.push({ id: newId().slice(0, 6), q: idea.value.slice(0, 120) });
+  else if (idea.kind === "bring") p.bring.push({ item: idea.value.slice(0, 60), qty: "" });
+  else if (idea.kind === "note") compose.notes = (compose.notes ? compose.notes + "\n" : "") + idea.value;
+  else if (idea.kind === "endTime" && /^\d{2}:\d{2}$/.test(idea.value)) compose.end = idea.value;
+  else if (idea.kind === "capacity" && /^\d{1,3}$/.test(idea.value)) compose.cap = idea.value;
+  p.ideas.splice(idx, 1); p.applied = (p.applied || 0) + 1;
+  render(); toast("Added.", null, null, "happy");
+}
+function applyExpense(x, ctx) {
+  openExpense(ctx.eventId || null, null, ctx.groupId || null);
+  const notes = [];
+  if (el("xDesc")) el("xDesc").value = x.desc || "";
+  if (el("xAmt") && x.amount > 0) el("xAmt").value = String(x.amount);
+  const payer = el("xPayer");
+  if (payer && x.paidBy) { const m = matchFriends([x.paidBy]); if (m.uids.length) payer.value = m.uids[0]; else notes.push(`I couldn't tell who "${x.paidBy}" is, so I left you as the payer.`); }
+  if (!x.splitEveryone && (x.splitWith || []).length) {
+    const m = matchFriends(x.splitWith); const set = new Set([...m.uids, payer ? payer.value : myUid()]);
+    document.querySelectorAll('#appDialog input[name=spl]').forEach(i => { i.checked = set.has(i.value); });
+    if (m.unmatched.length) notes.push(`I couldn't find ${m.unmatched.join(", ")} in your friends. Tick them below if they're listed under another name.`);
+  }
+  const miss = { amount: "the amount", split: "who's splitting", payer: "who paid" };
+  const missing = (x.missing || []).map(k => miss[k]).filter(Boolean); if (missing.length) notes.push(`I didn't catch ${missing.join(" or ")}. Fill that in.`);
+  const form = document.querySelector("#appDialog .dlg-inner h3");
+  if (form) form.insertAdjacentHTML("afterend", `<div class="dot-say">${dot(missing.length ? "thinking" : "happy", 52)}<div class="say-bubble"><b>${esc(x.summary || "Here's what I heard.")}</b>${notes.length ? `<div class="muted sm" style="margin-top:4px">${notes.map(esc).join(" ")}</div>` : ""}</div></div>`);
+}
+function applyEdit(d, ev) {
+  if (!ev) return;
+  editEvent(ev);
+  const p = d.patch || {}, changed = [];
+  const set = (id, v, label) => { const f = el(id); if (f && v != null && v !== "") { f.value = v; changed.push(label); } };
+  set("eTitle", p.title, "title"); set("eDate", p.date, "date"); set("eTime", p.time, "time"); set("eWhere", p.location, "place"); set("eNotes", p.notes, "details");
+  const extra = [];
+  if (p.endTime) extra.push(`End time (${p.endTime}) isn't in this form; change it from the composer.`);
+  if (p.capacity) extra.push(`Max spots (${p.capacity}) isn't in this form; change it from the composer.`);
+  if (d.unclear) extra.push(d.unclear);
+  if (!changed.length && !extra.length) extra.push("I didn't find anything to change in what you said.");
+  const h = document.querySelector("#appDialog .dlg-inner h3");
+  if (h) h.insertAdjacentHTML("afterend", `<div class="dot-say">${dot(changed.length ? "happy" : "thinking", 52)}<div class="say-bubble"><b>${esc(d.summary || "Here's what I'll change.")}</b>${extra.length ? `<div class="muted sm" style="margin-top:4px">${extra.map(esc).join(" ")}</div>` : ""}${changed.length ? `<div class="muted sm" style="margin-top:4px">Changed below: ${changed.join(", ")}. Check it and tap Save.</div>` : ""}</div></div>`);
 }
 function planCard() {
   const p = compose._plan, need = { date: "a date", time: "a time", location: "where it is", guests: "who's coming" };
@@ -1501,7 +1588,8 @@ function planCard() {
   if (miss.length) bits.push(`I didn't catch ${miss.join(" or ")}. Fill that in below.`);
   if (p.unmatched.length) bits.push(`I couldn't find ${p.unmatched.join(", ")} in your friends. Add them by phone under Who's invited.`);
   if (p.bring.length) bits.push(`I'll put ${p.bring.length === 1 ? p.bring[0].item : p.bring.length + " items"} on the bring list once it's created.`);
-  return `<div class="dot-say plan-card">${dot(miss.length ? "thinking" : "happy", 56)}<div class="say-bubble"><b>${esc(p.summary)}</b>${bits.length ? `<div class="muted sm" style="margin-top:4px">${bits.map(esc).join(" ")}</div>` : ""}<div style="margin-top:6px"><a id="planRedo" style="color:var(--accent);font-weight:600">Say it again</a></div></div></div>`;
+  const ideas = (p.ideas || []).length ? `<div class="idea-row"><span class="muted sm">Want me to…</span>${p.ideas.map((x, i) => `<button type="button" class="idea-chip" data-idea="${i}">＋ ${esc(x.label)}</button>`).join("")}</div>` : (p.applied ? `<div class="muted sm" style="margin-top:6px">That's everything I'd add. Looks good.</div>` : "");
+  return `<div class="dot-say plan-card">${dot(miss.length ? "thinking" : "happy", 56)}<div class="say-bubble"><b>${esc(p.summary)}</b>${bits.length ? `<div class="muted sm" style="margin-top:4px">${bits.map(esc).join(" ")}</div>` : ""}${ideas}<div style="margin-top:6px"><a id="planRedo" style="color:var(--accent);font-weight:600">Say it again</a></div></div></div>`;
 }
 function composeBody() {
   restoreDraft();
@@ -1682,7 +1770,8 @@ function syncCompose() {
 }
 function wireCompose() {
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
-  if (el("planRedo")) el("planRedo").onclick = openPlanDialog;
+  if (el("planRedo")) el("planRedo").onclick = () => openPlanDialog("event", {});
+  document.querySelectorAll("[data-idea]").forEach(b => b.onclick = () => applyIdea(+b.dataset.idea));
   composeStop = startParticles(el("cCanvas"), compose.theme, compose.customTheme);
   const upd = () => {
     el("cPvTitle").textContent = el("cTitle").value.trim() || "Your event";
@@ -1801,6 +1890,7 @@ function renderEventPage(root, id) {
   </div>`;
   eventBgStop = startParticles(el("evCanvas"), ev.theme, ev.customTheme);
   wireEventPage(ev);
+  root.insertAdjacentHTML("beforeend", edgeDotHtml()); wireEdgeDot();
   // live subcollections (comments, photos, polls, songs)
   S.evSubs.forEach(fn => fn()); S.evSubs = [];
   S.comments = []; S.photos = []; S.polls = []; S.songs = [];
@@ -2614,6 +2704,7 @@ const inGroup = (x, g) => x.groupId === g.id || (!x.groupId && (x.involved || []
 function openExpense(eventId, restrict, groupId) {
   const people = [...S.contacts.entries()];
   dialog(`<h3>Add expense</h3>
+    ${window.Blip && !isDemo() ? `<button type="button" class="btn small tell-dot" id="xTell">${dot("happy", 24)} Or just tell me: “Dinner was 120, I paid, split with Sam and Alex.”</button>` : ""}
     <label class="field"><span>What was it?</span><input id="xDesc" maxlength="80" placeholder="Pizza & drinks"></label>
     <div class="two"><label class="field"><span>Amount ($)</span><input id="xAmt" inputmode="decimal" placeholder="42.50"></label>
     <label class="field"><span>Paid by</span><select id="xPayer">${payerOptions(people)}</select></label></div>
@@ -2627,6 +2718,7 @@ function openExpense(eventId, restrict, groupId) {
       try { await setDoc(doc(db, "expenses", newId()), { desc: el("xDesc").value.trim(), amountCents: amount, paidBy, split, involved, eventId: eventId || null, groupId: groupId || (eventId && (S.events.get(eventId) || {}).groupId) || matchGroupId(involved), addedBy: myUid(), createdAt: Date.now() }); closeDialog(); toast("Expense added"); } catch (e) { toast(e.message); }
     });
   el("xScan").onclick = () => scanReceipt(eventId, restrict, { desc: el("xDesc").value.trim(), paidBy: el("xPayer").value }, groupId);
+  if (el("xTell")) el("xTell").onclick = () => openPlanDialog("expense", { eventId, groupId });
 }
 
 // ----- Receipt scan → itemize → assign -----
