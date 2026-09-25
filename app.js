@@ -264,19 +264,20 @@ function showLogoTip(custom, sug) {
   document.body.appendChild(wrap);
   dotEl.classList.add("away");
   requestAnimationFrame(() => wrap.classList.add("out"));
-  let acted = false;
+  let acted = false, dismissed = false;
   const hide = e => {
     if (e && wrap.contains(e.target)) return;                       // taps inside the bubble are for its buttons
+    if (e) dismissed = true;                                        // a tap away is a dismissal; a timeout is not
     clearTimeout(logoTipTimer); document.removeEventListener("click", hide, true);
     wrap.classList.remove("out"); wrap.classList.add("back");
     setTimeout(() => { wrap.remove(); const d = el("brandDot"); if (d) d.classList.remove("away"); }, 420);
-    if (sug) { dotMarkSeen(sug, !acted); dotCurrent = null; const d = el("brandDot"); if (d) d.classList.remove("has-tip"); }
+    if (sug) { dotMarkSeen(sug, dismissed && !acted); dotCurrent = null; const d = el("brandDot"); if (d) d.classList.remove("has-tip"); }
   };
   if (sug) {
     el("tipDo").onclick = ev => { ev.stopPropagation(); acted = true; hide(); try { sug.run(); } catch (e2) { toast(e2.message); } };
-    el("tipSkip").onclick = ev => { ev.stopPropagation(); hide(); };
+    el("tipSkip").onclick = ev => { ev.stopPropagation(); dismissed = true; hide(); };
   }
-  logoTipTimer = setTimeout(hide, sug ? 14000 : 8500);
+  logoTipTimer = setTimeout(() => hide(), sug ? 14000 : 8500);
   setTimeout(() => document.addEventListener("click", hide, true), 250);
 }
 
