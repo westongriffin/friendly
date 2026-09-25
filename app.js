@@ -779,6 +779,11 @@ function onboardingBody() {
           <input id="obVenmo" placeholder="@sam-rivera" autocomplete="off"></label>
         <label class="field"><span>Apple Cash number</span>
           <input id="obApple" type="tel" placeholder="+1 555 123 4567" value="${esc(p.phone || "")}" autocomplete="tel"></label>
+        <div class="two"><label class="field"><span>Zelle <span class="muted">(phone or email)</span></span>
+          <input id="obZelle" placeholder="+1 555 123 4567" autocomplete="off"></label>
+        <label class="field"><span>Cash App</span>
+          <input id="obCashapp" placeholder="$samrivera" autocomplete="off"></label></div>
+        <p class="muted sm" style="margin:-4px 0 10px">Payment handles are shared only with people in your groups, so they can pay you back. All optional.</p>
         <label class="field"><span>Birthday <span class="muted">(so friends get a heads-up a month out)</span></span>
           <input id="obBday" type="date" autocomplete="bday"></label>
         <button class="btn primary lg" type="submit">Done</button>
@@ -791,8 +796,9 @@ function wireOnboarding() {
   startParticles(el("authbg"), "confetti");
   const finish = async () => {
     const email = el("obEmail").value.trim(), venmo = el("obVenmo").value.trim(), apple = el("obApple").value.trim(), birthday = el("obBday") ? el("obBday").value : "";
+    const zelle = ((el("obZelle") || {}).value || "").trim(), cashapp = ((el("obCashapp") || {}).value || "").trim();
     try {
-      await updateDoc(doc(db, "users", myUid()), { email: email.toLowerCase(), venmo, phone: apple, phoneE164: toE164(apple) || myPhoneE164(), ...(birthday ? { birthday } : {}), onboarded: true });
+      await updateDoc(doc(db, "users", myUid()), { email: email.toLowerCase(), venmo, zelle, cashapp, phone: apple, phoneE164: toE164(apple) || myPhoneE164(), ...(birthday ? { birthday } : {}), onboarded: true });
     } catch (e) { toast(e.message); }
   };
   el("onboardForm").onsubmit = e => { e.preventDefault(); finish(); };
