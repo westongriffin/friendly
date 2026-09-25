@@ -636,6 +636,93 @@ exports.scrubOrphans = onRequest({ region: "us-central1", invoker: "public", mem
   res.json({ checked: all.length, gone: gone.length, report });
 });
 
+// ---------- public demo (wes-griffin.com "Try the demo" and ?demo=1) ----------
+// A dedicated sandbox account, separate from any real user or App Store
+// review account. demoLogin hands back a sign-in token for it -- no password
+// ever reaches the browser, so there is nothing in the client to leak.
+// resetDemoData (re)writes its group and events to a known-good state on a
+// fixed set of doc ids and removes anything a visitor added outside them, so
+// the sandbox self-heals from whatever the public does to it. Runs nightly
+// and can be called by hand.
+const DEMO_UID = "demo-riley", DEMO_JORDAN = "demo-jordan", DEMO_CASEY = "demo-casey";
+const DEMO_GROUP = "demo-squad", DEMO_EVENTS = ["demo-evt-1", "demo-evt-2", "demo-evt-3"], DEMO_EXPENSE = "demo-exp-1";
+const demoEmail = uid => uid.replace(/[^a-z0-9]/gi, "") + "@phone.officialfriendly.com";
+async function ensureDemoAuthUsers() {
+  for (const [uid, name] of [[DEMO_UID, "Riley"], [DEMO_JORDAN, "Jordan"], [DEMO_CASEY, "Casey"]]) {
+    await getAuth().getUser(uid).catch(() => getAuth().createUser({ uid, email: demoEmail(uid), emailVerified: true, displayName: name }));
+  }
+}
+async function seedDemoData() {
+  await ensureDemoAuthUsers();
+  const addDays = n => { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+  const members = { [DEMO_UID]: { name: "Riley", venmo: "@riley-demo", phone: "" }, [DEMO_JORDAN]: { name: "Jordan", venmo: "@jordan-demo", phone: "" }, [DEMO_CASEY]: { name: "Casey", venmo: "@casey-demo", phone: "" } };
+  const memberUids = [DEMO_UID, DEMO_JORDAN, DEMO_CASEY];
+  await db.doc("users/" + DEMO_UID).set({ name: "Riley", phone: "", phoneE164: "+15550001001", email: "", venmo: "@riley-demo", photo: "", birthday: "", blockedUids: [], hiddenIds: [], pushTokens: [], webPush: [], onboarded: true, createdAt: Date.now() }, { merge: true });
+  await db.doc("users/" + DEMO_JORDAN).set({ name: "Jordan", phone: "", phoneE164: "+15550001002", email: "", venmo: "@jordan-demo", onboarded: true, createdAt: Date.now() }, { merge: true });
+  await db.doc("users/" + DEMO_CASEY).set({ name: "Casey", phone: "", phoneE164: "+15550001003", email: "", venmo: "@casey-demo", onboarded: true, createdAt: Date.now() }, { merge: true });
+  await db.doc("groups/" + DEMO_GROUP).set({ name: "Demo Squad", emoji: "🎈", color: "#FFE0B2", ownerId: DEMO_UID, memberUids, members, createdAt: Date.now() });
+  const names = Object.fromEntries(memberUids.map(u => [u, members[u].name]));
+  const base = { groupId: DEMO_GROUP, invitedUids: memberUids, names, cohostUids: [], plusOnes: {}, hypes: {}, answers: {}, questions: [], openLink: true, kind: "event", repeat: "", invitedPhones: [], invitedPhoneNames: {}, guestEmails: [], sequence: 0, createdAt: Date.now() };
+  await db.doc("events/demo-evt-1").set({ ...base, hostId: DEMO_UID, hostName: "Riley", title: "Board Game Night", emoji: "🎲", theme: "cosmic", customTheme: null, date: addDays(5), time: "19:00", endTime: "22:00", location: "Riley's place", notes: "Bring a game if you've got a favorite. Snacks are covered.", capacity: 8, approval: false, rsvps: { [DEMO_UID]: "going", [DEMO_JORDAN]: "going", [DEMO_CASEY]: "maybe" } });
+  await db.doc("events/demo-evt-2").set({ ...base, hostId: DEMO_UID, hostName: "Riley", title: "Beach Cleanup + Picnic", emoji: "🏖️", theme: "garden", customTheme: null, date: addDays(12), time: "10:00", endTime: "13:00", location: "Sunset Beach, north lot", notes: "Gloves and bags provided, just bring sunscreen. Picnic after.", capacity: 12, approval: false, rsvps: { [DEMO_UID]: "going", [DEMO_JORDAN]: "maybe" } });
+  await db.doc("events/demo-evt-3").set({ ...base, hostId: DEMO_UID, hostName: "Riley", title: "Housewarming Party", emoji: "🏠", theme: "disco", customTheme: null, date: addDays(-9), time: "20:00", endTime: "23:30", location: "Riley's new place", notes: "First party in the new spot!", capacity: 15, approval: false, rsvps: { [DEMO_UID]: "going", [DEMO_JORDAN]: "going", [DEMO_CASEY]: "going" } });
+  await db.doc("expenses/" + DEMO_EXPENSE).set({ desc: "Pizza & drinks", amountCents: 6820, paidBy: DEMO_JORDAN, split: memberUids, involved: memberUids, eventId: "demo-evt-3", groupId: DEMO_GROUP, addedBy: DEMO_JORDAN, createdAt: Date.now() });
+  // Remove anything a visitor created outside the fixed seed set, on the demo
+  // accounts only -- this is what makes the sandbox self-heal on a reset:
+  // extra events/groups, visitor chat/photos/polls/songs on the seeded events,
+  // extra expenses and settlements, and the demo accounts' activity feed.
+  const demoUids = [DEMO_UID, DEMO_JORDAN, DEMO_CASEY];
+  const [evSnap, grpSnap] = await Promise.all([
+    db.collection("events").where("hostId", "in", demoUids).get(),
+    db.collection("groups").where("ownerId", "in", demoUids).get(),
+  ]);
+  for (const d of evSnap.docs) if (!DEMO_EVENTS.includes(d.id)) await db.recursiveDelete(d.ref).catch(() => {});
+  for (const d of grpSnap.docs) if (d.id !== DEMO_GROUP) await db.recursiveDelete(d.ref).catch(() => {});
+  for (const id of DEMO_EVENTS) for (const sub of ["comments", "photos", "polls", "songs"]) {
+    const snap = await db.collection("events/" + id + "/" + sub).get();
+    for (const d of snap.docs) if (!(id === "demo-evt-3" && sub === "comments" && d.get("seed"))) await d.ref.delete().catch(() => {});
+  }
+  for (const sub of ["comments", "polls"]) { const snap = await db.collection("groups/" + DEMO_GROUP + "/" + sub).get(); for (const d of snap.docs) await d.ref.delete().catch(() => {}); }
+  const seedWall = db.collection("events/demo-evt-3/comments");
+  if ((await seedWall.where("seed", "==", true).limit(1).get()).empty) {
+    await seedWall.add({ seed: true, authorId: DEMO_CASEY, authorName: "Casey", text: "This place is so much bigger than the old one 😍", createdAt: Date.now() - 3600000 });
+    await seedWall.add({ seed: true, authorId: DEMO_UID, authorName: "Riley", text: "Right?! Still finding boxes I forgot about", createdAt: Date.now() - 3500000 });
+  }
+  for (const col of ["expenses", "settlements"]) {
+    const snap = await db.collection(col).where("involved", "array-contains-any", demoUids).get();
+    for (const d of snap.docs) if (d.id !== DEMO_EXPENSE) await db.recursiveDelete(d.ref).catch(() => {});
+  }
+  const act = await db.collection("activity").where("uids", "array-contains-any", demoUids).get();
+  for (const d of act.docs) await d.ref.delete().catch(() => {});
+}
+// Cheap brake on the public token endpoint: a few instances, a per-instance
+// per-minute budget, and one token per IP per 10 seconds.
+const demoBudget = { minute: 0, count: 0, byIp: new Map() };
+exports.demoLogin = onRequest({ region: "us-central1", invoker: "public", memory: "256MiB", maxInstances: 3 }, async (req, res) => {
+  res.set("Access-Control-Allow-Origin", SITE);
+  res.set("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.set("Cache-Control", "no-store");
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "GET") { res.status(405).json({ error: "Method not allowed" }); return; }
+  const now = Date.now(), minute = Math.floor(now / 60000);
+  if (demoBudget.minute !== minute) { demoBudget.minute = minute; demoBudget.count = 0; demoBudget.byIp.clear(); }
+  const ip = String(req.headers["x-forwarded-for"] || req.ip || "").split(",")[0].trim();
+  if (++demoBudget.count > 60 || (demoBudget.byIp.get(ip) || 0) > now - 10000) { res.status(429).json({ error: "Slow down" }); return; }
+  demoBudget.byIp.set(ip, now);
+  try {
+    await getAuth().getUser(DEMO_UID).catch(() => seedDemoData());
+    const token = await getAuth().createCustomToken(DEMO_UID);
+    res.json({ token });
+  } catch (e) { logger.error("demoLogin", e); res.status(500).json({ error: "Server error" }); }
+});
+exports.resetDemoData = onRequest({ region: "us-central1", invoker: "public", memory: "256MiB", secrets: [MAINT_KEY] }, async (req, res) => {
+  if (!MAINT_KEY.value() || String(req.query.key || "") !== MAINT_KEY.value()) { res.status(403).send("forbidden"); return; }
+  try { await seedDemoData(); res.json({ ok: true }); } catch (e) { logger.error("resetDemoData", e); res.status(500).json({ error: String(e.message || e) }); }
+});
+exports.resetDemoDataNightly = onSchedule({ schedule: "17 4 * * *", timeZone: "America/Chicago" }, async () => {
+  await seedDemoData(); logger.info("Demo sandbox reset");
+});
+
 // Someone nudged the guests who haven't answered.
 exports.onNudge = onDocumentCreated({ document: "nudges/{id}", ...PUSH }, async e => {
   const n = e.data && e.data.data(); if (!n || !n.eventId) return;

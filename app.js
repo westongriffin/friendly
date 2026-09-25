@@ -25,6 +25,23 @@ const db = getFirestore(fb);
 // this degrades to web behavior when window.Capacitor is absent.
 const CAP = window.Capacitor || null;
 const NATIVE = !!(CAP && CAP.isNativePlatform && CAP.isNativePlatform());
+
+// Public demo (wes-griffin.com "Try the demo" and ?demo=1): a dedicated
+// sandbox account, seeded and nightly-reset server-side (functions/index.js).
+// isDemo() gates a few things that would either cost real money at unlimited
+// public volume, contact a real stranger, or wreck the shared account for
+// whoever else is looking at it right now; everything else (RSVPs, chat,
+// polls, photos, new events, profile edits) is fully live and left alone.
+const DEMO_UID = "demo-riley", DEMO_GROUP = "demo-squad", DEMO_EVENTS = ["demo-evt-1", "demo-evt-2", "demo-evt-3"];
+const isDemo = () => !!(S.user && S.user.uid === DEMO_UID);
+let demoAutoTried = false;
+async function demoSignIn() {
+  try {
+    const r = await fetch(FN_BASE + "/demoLogin");
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.token) await signInWithCustomToken(auth, j.token); else throw new Error("no token");
+  } catch (e) { S.ready = true; render(); toast("Couldn't open the demo right now -- try again in a moment."); }
+}
 // The iOS shell already keeps the web view below the status bar and above the
 // home indicator, so the CSS safe-area padding would double up there.
 if (NATIVE) document.documentElement.classList.add("native");
@@ -42,7 +59,8 @@ if (/^[a-f0-9]{8,64}$/i.test(RESET_PARAMS.get("p") || "")) history.replaceState(
 // since the app shell also loads this same origin) belongs in the App Store,
 // not the mobile web build. Full-screen block, no way to continue in browser.
 const APP_STORE_URL = "https://apps.apple.com/app/id6810875052";
-const BLOCKED_MOBILE_WEB = !NATIVE && !RESET_OOB && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+// The public demo (?demo=1 from wes-griffin.com) stays on the web on phones too.
+const BLOCKED_MOBILE_WEB = !NATIVE && !RESET_OOB && !RESET_PARAMS.get("demo") && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 if (BLOCKED_MOBILE_WEB) {
   document.getElementById("app").innerHTML = `
   <div class="auth-wrap">
@@ -239,8 +257,10 @@ async function generateCover(prompt) {
   // Primary: a Gemini image model on Vertex, driven through a Firestore trigger.
   // We write a request doc; the Cloud Function generates the image and writes
   // it back. Keeps the function off the public internet and needs no key in
-  // the app. Falls back to a free generator if it doesn't land.
-  try {
+  // the app. Falls back to a free generator if it doesn't land -- and the
+  // public demo account always uses that free path, so unlimited demo
+  // traffic never bills the paid one.
+  if (!isDemo()) try {
     const image = await imagenViaFirestore(prompt);
     if (image) return compressImage(image, 1024, 0.8);
   } catch (e) { console.warn("Imagen unavailable, using fallback:", e && e.message); }
@@ -378,6 +398,7 @@ onAuthStateChanged(auth, async u => {
   S.user = u;
   if (!u) {
     S.profile = null;
+    if (!demoAutoTried && new URLSearchParams(location.search).get("demo")) { demoAutoTried = true; demoSignIn(); return; }
     S.ready = true; render(); return;
   }
   const uref = doc(db, "users", u.uid);
@@ -594,6 +615,7 @@ function renderAuth(root) {
         <button id="segIn" class="${authMode === "in" ? "on" : ""}">Sign in</button>
         <button id="segUp" class="${authMode === "up" ? "on" : ""}">Create account</button>
       </div>
+      ${NATIVE ? "" : `<button type="button" class="btn lg demo-btn" id="demoBtn">Try the demo, no account needed</button>`}
       <form id="authForm" class="stack">
         <label class="field ${authMode === "in" ? "hidden" : ""}" id="nameField"><span>Your name</span>
           <input id="aName" maxlength="40" placeholder="Sam Rivera" autocomplete="name"></label>
@@ -622,6 +644,7 @@ function renderAuth(root) {
   }
   el("segIn").onclick = () => { authMode = "in"; renderAuth(root); };
   el("segUp").onclick = () => { authMode = "up"; renderAuth(root); };
+  if (el("demoBtn")) el("demoBtn").onclick = () => { el("demoBtn").disabled = true; el("demoBtn").textContent = "Opening the demo…"; demoSignIn(); };
   el("authSwap").onclick = () => { authMode = authMode === "in" ? "up" : "in"; renderAuth(root); };
   if (el("forgotPass")) el("forgotPass").onclick = () => {
     dialog(`<h3>Reset your password</h3><p class="muted" style="margin-top:-6px">Enter the phone number on your account. If it has an email on file, we'll send a reset link there.</p>
@@ -740,6 +763,7 @@ function shell(body) {
   const tab = S.route.name;
   const T = (name, label, path) => `<button class="tab ${tab === name ? "on" : ""}" data-go="${path}">${label}</button>`;
   return `
+  ${isDemo() ? `<div class="demo-bar">Demo mode -- this is Riley, a shared public sandbox account. Explore freely; changes are visible to other visitors and reset nightly.</div>` : ""}
   <header class="topbar">
     <div class="brand" data-go="#/">Friend<span class="tilt">l</span>y</div>
     <div class="topbar-right"><button class="bell" data-go="#/search" title="Search">🔍</button><button class="bell" data-go="#/activity" title="Activity">🔔${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ""}</button>
@@ -1054,9 +1078,9 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), subm
   const renderPicked = () => { const box = el("invChosen"); if (box) box.innerHTML = picked.map((p, i) => `<div class="inv-hit"><div style="flex:1;min-width:0"><b>${esc(p.name || p.e164)}</b><div class="muted sm">${p.uid ? "On Friendly · added right away" : "Gets a text with the join link"}${p.e164 ? " · " + esc(p.e164) : ""}</div></div><button type="button" class="btn ghost small" data-unpick="${i}">✕</button></div>`).join("") || `<p class="muted sm">Nobody picked yet.</p>`; box.querySelectorAll("[data-unpick]").forEach(b => b.onclick = () => { picked.splice(+b.dataset.unpick, 1); renderPicked(); }); };
   dialog(`<h3>${esc(title)}</h3>
     <p class="muted" style="margin-top:-6px">${esc(blurb)}</p>
-    ${nativeContacts || webPicker ? `<button type="button" class="btn primary" id="invPick" style="width:100%">📇 Choose from contacts</button>` : `<p class="muted sm">Picking from your address book works in the Friendly iPhone app. Here, type a name and number:</p>`}
-    <div class="two" style="margin-top:10px"><label class="field"><span>Name</span><input id="invName" placeholder="Jo Park" maxlength="40" autocomplete="off"></label><label class="field"><span>Phone</span><input id="invPhone" inputmode="tel" placeholder="+1 555 123 4567" autocomplete="off"></label></div>
-    <button type="button" class="btn small" id="invAddManual">＋ Add to the list</button>
+    ${isDemo() ? `<p class="muted sm">Inviting by phone number is off in the demo, so it never texts a real person -- add Jordan or Casey below instead.</p>` : nativeContacts || webPicker ? `<button type="button" class="btn primary" id="invPick" style="width:100%">📇 Choose from contacts</button>` : `<p class="muted sm">Picking from your address book works in the Friendly iPhone app. Here, type a name and number:</p>`}
+    ${isDemo() ? "" : `<div class="two" style="margin-top:10px"><label class="field"><span>Name</span><input id="invName" placeholder="Jo Park" maxlength="40" autocomplete="off"></label><label class="field"><span>Phone</span><input id="invPhone" inputmode="tel" placeholder="+1 555 123 4567" autocomplete="off"></label></div>
+    <button type="button" class="btn small" id="invAddManual">＋ Add to the list</button>`}
     <div class="inv-chosen" id="invChosen" style="margin-top:12px"></div>
     ${known.length ? `<details class="adv" style="margin-top:12px"><summary>Friends from your other groups</summary><input class="inv-search" id="invSearch" placeholder="Search by name…" autocomplete="off" style="margin-top:8px"><div class="inv-results" id="invResults"></div></details>` : ""}`,
     submitLabel, async () => {
@@ -1172,8 +1196,9 @@ async function acceptInvite(gid, btn) {
 }
 async function uninvite(g, email) { try { await updateDoc(doc(db, "groups", g.id), { invitedEmails: (g.invitedEmails || []).filter(e => e !== email) }); } catch (e) { toast(e.message); } }
 async function uninvitePhone(g, e164) { try { await updateDoc(doc(db, "groups", g.id), { invitedPhones: (g.invitedPhones || []).filter(p => p !== e164), [`invitedPhoneNames.${e164}`]: deleteField() }); } catch (e) { toast(e.message); } }
-async function deleteGroup(g) { if (!confirm(`Delete “${g.name}”? Its events stay, but the group is removed.`)) return; try { await deleteDoc(doc(db, "groups", g.id)); go("#/groups"); toast("Group deleted"); } catch (e) { toast(e.message); } }
+async function deleteGroup(g) { if (isDemo() && g.id === DEMO_GROUP) return toast("Deleting the demo group is off -- it resets nightly instead."); if (!confirm(`Delete “${g.name}”? Its events stay, but the group is removed.`)) return; try { await deleteDoc(doc(db, "groups", g.id)); go("#/groups"); toast("Group deleted"); } catch (e) { toast(e.message); } }
 async function leaveGroup(g) {
+  if (isDemo() && g.id === DEMO_GROUP) return toast("Leaving the demo group is off -- it resets nightly instead.");
   if (!confirm(`Leave “${g.name}”?`)) return;
   try {
     const members = { ...(g.members || {}) }; delete members[myUid()];
@@ -2170,7 +2195,7 @@ function downloadIcs(ev) {
   const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Friendly//EN", "BEGIN:VEVENT", "UID:" + ev.id + "@officialfriendly.com", "DTSTAMP:" + new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z", dts, dte, "SUMMARY:" + esc2(ev.emoji + " " + ev.title), ev.location ? "LOCATION:" + esc2(ev.location) : "", "DESCRIPTION:" + esc2((ev.notes || "") + "\nRSVP: " + location.origin + location.pathname + "#/e/" + ev.id), "END:VEVENT", "END:VCALENDAR"].filter(Boolean).join("\r\n");
   const a = document.createElement("a"); a.href = "data:text/calendar;charset=utf-8," + encodeURIComponent(ics); a.download = ev.title.replace(/[^a-z0-9]+/gi, "-") + ".ics"; a.click();
 }
-async function delEvent(ev) { if (!confirm(`Delete “${ev.title}”?`)) return; try { await deleteDoc(doc(db, "events", ev.id)); go("#/"); toast("Event deleted"); } catch (e) { toast(e.message); } }
+async function delEvent(ev) { if (isDemo() && DEMO_EVENTS.includes(ev.id)) return toast("Deleting this demo event is off -- it resets nightly instead."); if (!confirm(`Delete “${ev.title}”?`)) return; try { await deleteDoc(doc(db, "events", ev.id)); go("#/"); toast("Event deleted"); } catch (e) { toast(e.message); } }
 function editEvent(ev) {
   dialog(`<h3>Edit event</h3>
     <label class="field"><span>Title</span><input id="eTitle" value="${esc(ev.title)}"></label>
@@ -2320,6 +2345,7 @@ function requestViaFirestore(col, payload, timeoutMs = 90000) {
   });
 }
 async function scanReceipt(eventId, restrict, seed, groupId) {
+  if (isDemo()) return toast("Receipt scanning is off in the demo -- try Add expense instead.");
   const f = await pickFile("image/*"); if (!f) return;
   toast("Reading the receipt…");
   try {
@@ -2520,6 +2546,7 @@ function wireProfile() {
     "Delete account", deleteAccount);
 }
 async function deleteAccount() {
+  if (isDemo()) { closeDialog(); return toast("Account deletion is off in the demo."); }
   const u = auth.currentUser, pw = (el("delPw") || {}).value || "";
   if (!pw) return toast("Enter your password to confirm.");
   try {

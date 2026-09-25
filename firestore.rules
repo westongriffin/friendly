@@ -34,13 +34,34 @@ service cloud.firestore {
       allow read, update, delete: if isAdmin();
     }
 
+    // Public demo sandbox (see functions/index.js seedDemoData). These three
+    // accounts are reachable by anyone on the internet, so everything that could
+    // touch a real person or cost real money is refused HERE, not just in the UI:
+    // no phone/email invites, no non-demo people in their groups/events/expenses,
+    // no paid AI requests, no deleting the seeded fixtures, no identity changes.
+    function demoUids() { return ['demo-riley', 'demo-jordan', 'demo-casey']; }
+    function isDemoUser() { return signedIn() && uid() in demoUids(); }
+    function demoGroupOk(d) {
+      return d.memberUids.hasOnly(demoUids()) && d.get('hostUids', []).hasOnly(demoUids())
+        && d.get('invitedEmails', []).size() == 0 && d.get('invitedPhones', []).size() == 0;
+    }
+    function demoEventOk(d) {
+      return d.invitedUids.hasOnly(demoUids()) && d.get('cohostUids', []).hasOnly(demoUids())
+        && d.get('invitedPhones', []).size() == 0 && d.get('guestEmails', []).size() == 0;
+    }
+
     function groupMemberUids(gid) {
       return get(/databases/$(database)/documents/groups/$(gid)).data.memberUids;
     }
 
     // ---- Users: each profile is private to its owner ----
     match /users/{userId} {
-      allow read, write: if signedIn() && userId == uid();
+      allow read: if signedIn() && userId == uid();
+      allow create: if signedIn() && userId == uid() && !isDemoUser();
+      allow update: if signedIn() && userId == uid()
+        && (!isDemoUser() || request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['name', 'venmo', 'photo', 'birthday', 'notifPrefs', 'activitySeenAt', 'hiddenIds', 'blockedUids', 'onboarded']));
+      allow delete: if signedIn() && userId == uid() && !isDemoUser();
     }
 
     // ---- Groups ----
@@ -58,7 +79,8 @@ service cloud.firestore {
 
       allow create: if signedIn()
         && request.resource.data.ownerId == uid()
-        && uid() in request.resource.data.memberUids;
+        && uid() in request.resource.data.memberUids
+        && (!isDemoUser() || demoGroupOk(request.resource.data));
 
       // Hosts (owner + hostUids) manage the group. A plain member may only touch
       // their own entry in `members`, remove themselves from memberUids/hostUids
@@ -95,9 +117,9 @@ service cloud.firestore {
         isGroupHost()
         || (uid() in resource.data.memberUids && memberSelfEdit())
         || ((email() in resource.data.invitedEmails || phoneInvited()) && acceptInvite())
-      );
+      ) && (!isDemoUser() || demoGroupOk(request.resource.data));
 
-      allow delete: if signedIn() && uid() == resource.data.ownerId;
+      allow delete: if signedIn() && uid() == resource.data.ownerId && !(isDemoUser() && groupId == 'demo-squad');
 
       function isMember() { return signedIn() && uid() in groupMemberUids(groupId); }
 
@@ -178,11 +200,14 @@ service cloud.firestore {
       }
 
       allow read: if isHost() || isInvited() || viaGroup() || openLink();
-      allow create: if signedIn() && request.resource.data.hostId == uid();
-      allow update: if isHost()
+      allow create: if signedIn() && request.resource.data.hostId == uid()
+        && (!isDemoUser() || demoEventOk(request.resource.data));
+      allow update: if (isHost()
         || (isInvited() && (onlyOwn('rsvps') || onlyOwn('plusOnes') || onlyOwn('plusNames') || onlyOwn('hypes') || onlyOwn('answers')))
-        || ((openLink() || viaGroup()) && selfJoin());
-      allow delete: if signedIn() && uid() == resource.data.hostId;
+        || ((openLink() || viaGroup()) && selfJoin()))
+        && (!isDemoUser() || demoEventOk(request.resource.data));
+      allow delete: if signedIn() && uid() == resource.data.hostId
+        && !(isDemoUser() && eventId in ['demo-evt-1', 'demo-evt-2', 'demo-evt-3']);
 
       // The event's host or a co-host, for cleaning up other people's items
       // (bring list, rides, wall posts, polls) -- the UI already showed them ✕.
@@ -228,7 +253,8 @@ service cloud.firestore {
       allow read: if signedIn() && uid() in resource.data.involved;
       allow create: if signedIn()
         && request.resource.data.addedBy == uid()
-        && uid() in request.resource.data.involved;
+        && uid() in request.resource.data.involved
+        && (!isDemoUser() || request.resource.data.involved.hasOnly(demoUids()));
       allow update, delete: if signedIn() && uid() == resource.data.addedBy;
 
       // Expense discussion — the people involved can comment; delete your own.
@@ -250,7 +276,7 @@ service cloud.firestore {
     match /coverRequests/{reqId} {
       allow read, delete: if signedIn() && uid() == resource.data.uid;
       allow create: if signedIn() && request.resource.data.uid == uid()
-        && request.resource.data.status == "pending";
+        && request.resource.data.status == "pending" && !isDemoUser();
     }
 
     // ---- Receipt reads (same pattern: client writes an image, a function
@@ -258,7 +284,7 @@ service cloud.firestore {
     match /receiptRequests/{reqId} {
       allow read, delete: if signedIn() && uid() == resource.data.uid;
       allow create: if signedIn() && request.resource.data.uid == uid()
-        && request.resource.data.status == "pending";
+        && request.resource.data.status == "pending" && !isDemoUser();
     }
 
     // ---- Settlements ----
@@ -267,7 +293,8 @@ service cloud.firestore {
       allow read: if signedIn() && uid() in resource.data.involved;
       allow create: if signedIn()
         && request.resource.data.addedBy == uid()
-        && uid() in request.resource.data.involved;
+        && uid() in request.resource.data.involved
+        && (!isDemoUser() || request.resource.data.involved.hasOnly(demoUids()));
       allow update, delete: if signedIn() && uid() == resource.data.addedBy;
     }
   }
