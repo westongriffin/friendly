@@ -211,7 +211,7 @@ function showLogoTip() {
     wrap.classList.remove("out"); wrap.classList.add("back");
     setTimeout(() => { wrap.remove(); const d = el("brandDot"); if (d) d.classList.remove("away"); }, 420);
   };
-  logoTipTimer = setTimeout(hide, 4200);
+  logoTipTimer = setTimeout(hide, 6500);
   setTimeout(() => document.addEventListener("click", hide, true), 250);
 }
 document.addEventListener("click", () => { const x = el("edgeDot"); if (x && x.classList.contains("in")) { x.classList.remove("in"); x.querySelector(".edge-art").innerHTML = dot("idle", 66); } });
