@@ -601,3 +601,9 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 /* payment buttons */
 .btn.cashapp{background:#00D632;color:#062B12}
 .btn.zelle{background:#6D1ED4;color:#fff}
+/* Group pages: a cream backdrop so each white section reads as its own card */
+.group-page{background:var(--surface2);margin:2px -10px 0;padding:14px 12px 22px;border-radius:22px}
+.group-page .card{background:#fff;border:1px solid #EAD9C6;box-shadow:0 1px 2px rgba(60,40,20,.06),0 10px 26px rgba(60,40,20,.11)}
+.group-page .section-head h2{position:relative;padding-left:13px}
+.group-page .section-head h2::before{content:"";position:absolute;left:0;top:.3em;width:4px;height:.78em;border-radius:2px;background:var(--accent)}
+.group-page .chiprow .fchip,.group-page .btn:not(.primary){background:#fff}

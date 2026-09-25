@@ -1077,7 +1077,7 @@ function routeBody(r) {
   if (r.name === "home") return homeBody();
   if (r.name === "new") return composeBody();
   if (r.name === "groups") return groupsBody();
-  if (r.name === "group") return groupPageBody(r.id);
+  if (r.name === "group") return `<div class="group-page">${groupPageBody(r.id)}</div>`;
   if (r.name === "join") return joinBody(r.id);
   if (r.name === "money") return moneyBody();
   if (r.name === "expense") return expenseBody(r.id);
