@@ -78,6 +78,7 @@ img{max-width:100%}
 /* Soft fade behind the FAB so it reads as floating above content rather than stamped on a card. */
 .fab-scrim{position:fixed;left:0;right:0;bottom:0;height:calc(110px + env(safe-area-inset-bottom));background:linear-gradient(to top, var(--bg), transparent);pointer-events:none;z-index:25}
 
+.update-bar{cursor:pointer;border:1.5px solid var(--sun);background:linear-gradient(90deg,#FFF6DC,var(--surface))}
 .section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:18px 0 12px}
 /* activity bell + feed + notification prompt */
 .topbar-right{display:flex;align-items:center;gap:8px}

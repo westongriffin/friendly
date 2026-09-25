@@ -77,6 +77,32 @@ function wireAppLinks() {
   });
 }
 if (NATIVE) wireAppLinks();
+// ---------- "We've updated the app" banner (native only) ----------
+// Each launch compares the installed version with what the App Store lists
+// (Apple's public lookup API, CORS-enabled). A phone with no App plugin is on
+// 1.0.1 or older, which is behind anything Apple lists from here on.
+let updateAvail = null, updateDismissed = false;
+const verCmp = (a, b) => { const A = String(a).split(".").map(Number), B = String(b).split(".").map(Number); for (let i = 0; i < Math.max(A.length, B.length); i++) { const d = (A[i] || 0) - (B[i] || 0); if (d) return d; } return 0; };
+async function checkForUpdate() {
+  if (!NATIVE) return;
+  try {
+    const AppPlugin = plugin("App"); let installed = "";
+    if (AppPlugin && AppPlugin.getInfo) { try { installed = (await AppPlugin.getInfo()).version || ""; } catch {} }
+    const r = await fetch("https://itunes.apple.com/lookup?id=6810875052&t=" + Date.now());
+    const j = await r.json(); const store = j && j.results && j.results[0] && j.results[0].version; if (!store) return;
+    if (!installed || verCmp(store, installed) > 0) { updateAvail = { store, installed }; render(); }
+  } catch {}
+}
+if (NATIVE) checkForUpdate();
+function updateBanner() {
+  if (!updateAvail || updateDismissed) return "";
+  return `<div class="card notif-card update-bar" id="updateBar" role="button"><span class="li">🎉</span><div style="flex:1;min-width:0"><b>Friendly just got better!</b><div class="muted sm">Version ${esc(updateAvail.store)} is ready. Tap to update.</div></div><button type="button" class="btn ghost small" id="updateLater" title="Not now">✕</button></div>`;
+}
+function wireUpdateBanner() {
+  const bar = el("updateBar"); if (!bar) return;
+  bar.onclick = () => { location.href = "itms-apps://apps.apple.com/app/id6810875052"; };
+  el("updateLater").onclick = e => { e.stopPropagation(); updateDismissed = true; render(); };
+}
 async function registerPush(uid) {
   const Push = plugin("PushNotifications"); if (!Push) return;
   try {
@@ -725,12 +751,13 @@ function shell(body) {
     ${T("groups", "Groups", "#/groups")}
     ${T("money", "Money", "#/money")}
   </nav>
-  <main class="wrap">${inviteBanner()}${body}</main>
+  <main class="wrap">${updateBanner()}${inviteBanner()}${body}</main>
   ${["new", "group", "expense", "profile"].includes(tab) ? "" : `<div class="fab-scrim"></div><button class="fab" id="fabBtn" title="${tab === "groups" ? "New group" : "Create event"}">＋</button>`}`;
 }
 function wireShell() {
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
   if (el("fabBtn")) el("fabBtn").onclick = () => S.route.name === "groups" ? openGroupDialog() : go("#/new");
+  wireUpdateBanner();
   document.querySelectorAll("[data-accept]").forEach(b => b.onclick = () => acceptInvite(b.dataset.accept, b));
   if (S.route.name === "home") wireHome();
   if (S.route.name === "new") wireCompose();
