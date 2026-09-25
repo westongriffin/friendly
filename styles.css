@@ -590,3 +590,14 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .blip .hand{animation:blip-wave .5s ease-in-out 3 .35s;transform:rotate(0)}
 @keyframes blip-wave{0%,100%{transform:rotate(0)}30%{transform:rotate(-28deg)}70%{transform:rotate(18deg)}}
 .tell-dot.inline{width:auto;display:inline-flex;margin:0}
+/* food line on the event page */
+.ev-food{margin-top:3px;opacity:.9}
+/* invited-by-text section folds */
+.inv-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;cursor:pointer;text-align:left;color:inherit;font:inherit;padding:0}
+.inv-chev{font-size:22px;line-height:1;transition:transform .2s;opacity:.7;transform:rotate(0)}
+.inv-card.open .inv-chev{transform:rotate(90deg)}
+.inv-body{display:none;margin-top:10px}
+.inv-card.open .inv-body{display:block}
+/* payment buttons */
+.btn.cashapp{background:#00D632;color:#062B12}
+.btn.zelle{background:#6D1ED4;color:#fff}

@@ -60,7 +60,7 @@ service cloud.firestore {
       allow create: if signedIn() && userId == uid() && !isDemoUser();
       allow update: if signedIn() && userId == uid()
         && (!isDemoUser() || request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['name', 'venmo', 'photo', 'birthday', 'notifPrefs', 'activitySeenAt', 'hiddenIds', 'blockedUids', 'onboarded']));
+              .hasOnly(['name', 'venmo', 'zelle', 'cashapp', 'photo', 'birthday', 'notifPrefs', 'activitySeenAt', 'hiddenIds', 'blockedUids', 'onboarded']));
       allow delete: if signedIn() && userId == uid() && !isDemoUser();
     }
 

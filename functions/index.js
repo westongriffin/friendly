@@ -236,6 +236,7 @@ Rules:
 - kind: "meeting" only for plain calendar meetings (work, practice, appointments, calls). Everything social is "event".
 - emoji: exactly one emoji that fits. theme: one id from ${THEME_IDS.join(", ")} matching the vibe (sunset or golden for dinners, confetti for parties and birthdays, garden or blossom for brunch and outdoors, midnight or cosmic for nights out, disco, rave or retro for dance and costume nights, citrus or bubblegum for playful daytime plans).
 - title: short and natural, the way the user would name it (e.g. "Taco Night", "Sam's 30th").
+- food: what's being served or the food plan ("tacos and margs, BYOB", "we'll order pizza"), or empty. Things guests are asked to bring go in bring, not food.
 - notes: details that don't fit elsewhere (dress code, parking, what to expect), in the user's words, or empty.
 - summary: one warm sentence in Dot's voice, starting "Here's what I heard:", restating the plan in plain words. No emoji.
 - ideas: 2 to 4 concrete, specific suggestions that would make THIS invite clearer or better organised, each as something the app can add with one tap. Think like a good host: an RSVP question the guests would need answering (dietary needs, plus-ones, who's driving), an item people always forget for this kind of plan (ice, cups, a speaker, sunscreen), an end time so people can plan around it, a head count if space is tight, a note about parking, what to wear or where to meet. Never suggest something the user already covered. Each idea: "label" is the chip text starting with a verb ("Ask about dietary needs", "Add ice to the bring list", "End it at 10 PM"); "kind" is one of question, bring, note, endTime, capacity; "value" is exactly what to add (the question text, the item, the note sentence, HH:MM, or a number).
@@ -246,7 +247,7 @@ What the user said:
 ${text}`;
   const schema = { type: "OBJECT", required: ["title", "kind", "summary"], properties: {
     kind: { type: "STRING", enum: ["event", "meeting"] }, title: str, emoji: str, theme: { type: "STRING", enum: THEME_IDS },
-    date: str, time: str, endTime: str, location: str, notes: str, capacity: { type: "INTEGER" },
+    date: str, time: str, endTime: str, location: str, food: str, notes: str, capacity: { type: "INTEGER" },
     guests: { type: "ARRAY", items: str }, group: str,
     bring: { type: "ARRAY", items: { type: "OBJECT", required: ["item"], properties: { item: str, qty: str } } },
     questions: { type: "ARRAY", items: str },
@@ -262,7 +263,7 @@ ${text}`;
     date: /^\d{4}-\d{2}-\d{2}$/.test(out.date || "") ? out.date : "",
     time: /^\d{2}:\d{2}$/.test(out.time || "") ? out.time : "",
     endTime: /^\d{2}:\d{2}$/.test(out.endTime || "") ? out.endTime : "",
-    location: sv(out.location, 200), notes: sv(out.notes, 1000),
+    location: sv(out.location, 200), food: sv(out.food, 120), notes: sv(out.notes, 1000),
     capacity: Math.max(0, Math.min(500, parseInt(out.capacity, 10) || 0)),
     guests: clean(out.guests, 30, 60), group: sv(out.group, 60),
     bring: (Array.isArray(out.bring) ? out.bring : []).slice(0, 12).map(b => ({ item: sv(b && b.item, 60), qty: sv(b && b.qty, 20) })).filter(b => b.item),
@@ -308,7 +309,7 @@ ${text}`;
 async function draftEdit(d) {
   const text = sv(d.text, 1500); if (text.length < 3) throw new Error("nothing to change");
   const cur = d.current && typeof d.current === "object" ? d.current : {};
-  const current = { title: sv(cur.title, 80), date: sv(cur.date, 10), time: sv(cur.time, 5), endTime: sv(cur.endTime, 5), location: sv(cur.location, 200), notes: sv(cur.notes, 1000), capacity: Math.max(0, parseInt(cur.capacity, 10) || 0) };
+  const current = { title: sv(cur.title, 80), date: sv(cur.date, 10), time: sv(cur.time, 5), endTime: sv(cur.endTime, 5), location: sv(cur.location, 200), food: sv(cur.food, 120), notes: sv(cur.notes, 1000), capacity: Math.max(0, parseInt(cur.capacity, 10) || 0) };
   const prompt = `${DOT}
 The user wants to change an existing event. ${whenContext(d)}
 Current event: ${JSON.stringify(current)}
@@ -317,7 +318,7 @@ summary: one sentence in Dot's voice starting "Here's what I'll change:".
 
 What the user said:
 ${text}`;
-  const schema = { type: "OBJECT", required: ["summary"], properties: { title: str, date: str, time: str, endTime: str, location: str, notes: str, capacity: { type: "INTEGER" }, unclear: str, summary: str } };
+  const schema = { type: "OBJECT", required: ["summary"], properties: { title: str, date: str, time: str, endTime: str, location: str, food: str, notes: str, capacity: { type: "INTEGER" }, unclear: str, summary: str } };
   const out = await askGemini(prompt, schema, 0.1);
   const patch = {};
   if (sv(out.title, 80) && sv(out.title, 80) !== current.title) patch.title = sv(out.title, 80);
@@ -325,6 +326,7 @@ ${text}`;
   if (/^\d{2}:\d{2}$/.test(out.time || "") && out.time !== current.time) patch.time = out.time;
   if (/^\d{2}:\d{2}$/.test(out.endTime || "") && out.endTime !== current.endTime) patch.endTime = out.endTime;
   if (sv(out.location, 200) && sv(out.location, 200) !== current.location) patch.location = sv(out.location, 200);
+  if (sv(out.food, 120) && sv(out.food, 120) !== current.food) patch.food = sv(out.food, 120);
   if (sv(out.notes, 1000) && sv(out.notes, 1000) !== current.notes) patch.notes = sv(out.notes, 1000);
   const cap = parseInt(out.capacity, 10); if (cap > 0 && cap !== current.capacity) patch.capacity = Math.min(500, cap);
   return { patch, unclear: sv(out.unclear, 200), summary: sv(out.summary, 300) || "Here's what I'll change." };

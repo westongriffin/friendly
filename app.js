@@ -108,7 +108,8 @@ async function checkForUpdate() {
     if (AppPlugin && AppPlugin.getInfo) { try { installed = (await AppPlugin.getInfo()).version || ""; } catch {} }
     const r = await fetch("https://itunes.apple.com/lookup?id=6810875052&t=" + Date.now());
     const j = await r.json(); const store = j && j.results && j.results[0] && j.results[0].version; if (!store) return;
-    if (!installed || verCmp(store, installed) > 0) { updateAvail = { store, installed }; render(); }
+    const inst = installed || "1.0.1";   // builds before 1.0.2 can't report a version; they are 1.0.1 or older
+    if (verCmp(store, inst) > 0) { updateAvail = { store, installed: inst }; render(); }
   } catch {}
 }
 if (NATIVE) checkForUpdate();
@@ -697,7 +698,7 @@ function resubscribeEvents(u) {
 
 function rebuildContacts() {
   const m = new Map();
-  if (S.user && S.profile) m.set(S.user.uid, { name: S.profile.name, venmo: S.profile.venmo, phone: S.profile.phone, photo: S.profile.photo || "" });
+  if (S.user && S.profile) m.set(S.user.uid, { name: S.profile.name, venmo: S.profile.venmo, phone: S.profile.phone, zelle: S.profile.zelle || "", cashapp: S.profile.cashapp || "", photo: S.profile.photo || "" });
   for (const g of S.groups.values())
     for (const [uid, info] of Object.entries(g.members || {})) if (!m.has(uid)) m.set(uid, info);
   S.contacts = m;
@@ -778,6 +779,8 @@ function onboardingBody() {
           <input id="obVenmo" placeholder="@sam-rivera" autocomplete="off"></label>
         <label class="field"><span>Apple Cash number</span>
           <input id="obApple" type="tel" placeholder="+1 555 123 4567" value="${esc(p.phone || "")}" autocomplete="tel"></label>
+        <label class="field"><span>Birthday <span class="muted">(so friends get a heads-up a month out)</span></span>
+          <input id="obBday" type="date" autocomplete="bday"></label>
         <button class="btn primary lg" type="submit">Done</button>
       </form>
       <p class="auth-foot"><a id="obSkip">Skip for now</a></p>
@@ -787,9 +790,9 @@ function onboardingBody() {
 function wireOnboarding() {
   startParticles(el("authbg"), "confetti");
   const finish = async () => {
-    const email = el("obEmail").value.trim(), venmo = el("obVenmo").value.trim(), apple = el("obApple").value.trim();
+    const email = el("obEmail").value.trim(), venmo = el("obVenmo").value.trim(), apple = el("obApple").value.trim(), birthday = el("obBday") ? el("obBday").value : "";
     try {
-      await updateDoc(doc(db, "users", myUid()), { email: email.toLowerCase(), venmo, phone: apple, phoneE164: toE164(apple) || myPhoneE164(), onboarded: true });
+      await updateDoc(doc(db, "users", myUid()), { email: email.toLowerCase(), venmo, phone: apple, phoneE164: toE164(apple) || myPhoneE164(), ...(birthday ? { birthday } : {}), onboarded: true });
     } catch (e) { toast(e.message); }
   };
   el("onboardForm").onsubmit = e => { e.preventDefault(); finish(); };
@@ -821,7 +824,7 @@ function renderAuth(root) {
         <label class="field ${authMode === "in" ? "hidden" : ""}" id="nameField"><span>Your name</span>
           <input id="aName" maxlength="40" placeholder="Sam Rivera" autocomplete="name"></label>
         <label class="field"><span id="aPhoneLabel">Phone number</span>
-          <input id="aPhone" name="username" type="tel" required inputmode="tel" placeholder="+1 555 123 4567" autocomplete="${authMode === "in" ? "username" : "tel"}"></label>
+          <input id="aPhone" name="username" type="tel" required inputmode="tel" placeholder="+1 555 123 4567" autocomplete="username"></label>
         <label class="field"><span>Password</span>
           <input id="aPass" name="password" type="password" required minlength="6" placeholder="At least 6 characters" autocomplete="${authMode === "in" ? "current-password" : "new-password"}"></label>
         <button class="btn primary lg" type="submit">${authMode === "in" ? "Sign in" : "Create account"}</button>
@@ -1300,7 +1303,7 @@ function openGroupDialog() {
       const id = newId();
       await setDoc(doc(db, "groups", id), {
         name, emoji, color: "#FFE0B2", ownerId: myUid(), memberUids,
-        members: { [myUid()]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "" } },
+        members: { [myUid()]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "", zelle: S.profile.zelle || "", cashapp: S.profile.cashapp || "", birthday: S.profile.birthday || "" } },
         createdAt: Date.now()
       });
       closeDialog(); go("#/g/" + id); toast("Group created");
@@ -1434,7 +1437,7 @@ async function acceptInvite(gid, btn) {
       invitedEmails: (g.invitedEmails || []).filter(e => e !== (S.user.email || "").toLowerCase()),
       invitedPhones: (g.invitedPhones || []).filter(p => p !== (S.profile.phoneE164 || "-")),
       [`invitedPhoneNames.${S.profile.phoneE164 || "-"}`]: deleteField(),
-      [`members.${myUid()}`]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "", photo: S.profile.photo || "", birthday: S.profile.birthday || "" }
+      [`members.${myUid()}`]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "", zelle: S.profile.zelle || "", cashapp: S.profile.cashapp || "", photo: S.profile.photo || "", birthday: S.profile.birthday || "" }
     });
     toast("You're in! Welcome to " + g.name);
     go("#/groups");
@@ -1468,9 +1471,9 @@ async function leaveGroup(g) {
 
 // ---------- COMPOSE (create event) ----------
 const compose = { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji",
-  title: "", date: "", time: "", end: "", where: "", notes: "", cap: "", approval: false,
+  title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false,
   questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "" };
-function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", repeat: "", _restored: false, _fromDraft: false, _plan: null }); }
+function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", repeat: "", _restored: false, _fromDraft: false, _plan: null }); }
 // ---- "Let me plan it": say the plan, Dot drafts it, you review it in the composer. Nothing is created or sent until you tap Create.
 function planContext(text, mode, ctx) {
   const d = new Date(), pad = n => String(n).padStart(2, "0");
@@ -1478,7 +1481,7 @@ function planContext(text, mode, ctx) {
   const groups = [...S.groups.values()].map(g => g.name).filter(Boolean).slice(0, 40);
   const base = { mode, text: text.slice(0, 1500), today: todayStr(), weekday: d.toLocaleDateString("en-US", { weekday: "long" }), now: pad(d.getHours()) + ":" + pad(d.getMinutes()), tz: (Intl.DateTimeFormat().resolvedOptions().timeZone || ""), people, groups };
   if (mode === "event" && ctx.groupId) { const g = S.groups.get(ctx.groupId); if (g) base.groupHint = g.name; }
-  if (mode === "edit" && ctx.ev) { const e = ctx.ev; base.current = { title: e.title, date: e.date, time: e.time || "", endTime: e.endTime || "", location: e.location || "", notes: e.notes || "", capacity: e.capacity || 0 }; }
+  if (mode === "edit" && ctx.ev) { const e = ctx.ev; base.current = { title: e.title, date: e.date, time: e.time || "", endTime: e.endTime || "", location: e.location || "", food: e.food || "", notes: e.notes || "", capacity: e.capacity || 0 }; }
   return base;
 }
 const PLAN_COPY = {
@@ -1584,7 +1587,7 @@ function applyPlan(p, said) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(p.date || "")) compose.date = p.date;
   if (/^\d{2}:\d{2}$/.test(p.time || "")) compose.time = p.time;
   if (/^\d{2}:\d{2}$/.test(p.endTime || "")) compose.end = p.endTime;
-  compose.where = String(p.location || "").slice(0, 200); compose.notes = String(p.notes || "").slice(0, 1000);
+  compose.where = String(p.location || "").slice(0, 200); compose.food = String(p.food || "").slice(0, 120); compose.notes = String(p.notes || "").slice(0, 1000);
   if (p.capacity > 0) compose.cap = String(Math.min(500, p.capacity));
   compose.questions = (p.questions || []).slice(0, 5).map(q => ({ id: newId().slice(0, 6), q: String(q).slice(0, 120) }));
   const gname = String(p.group || "").trim().toLowerCase();
@@ -1635,7 +1638,7 @@ function applyEdit(d, ev) {
   editEvent(ev);
   const p = d.patch || {}, changed = [];
   const set = (id, v, label) => { const f = el(id); if (f && v != null && v !== "") { f.value = v; changed.push(label); } };
-  set("eTitle", p.title, "title"); set("eDate", p.date, "date"); set("eTime", p.time, "time"); set("eWhere", p.location, "place"); set("eNotes", p.notes, "details");
+  set("eTitle", p.title, "title"); set("eDate", p.date, "date"); set("eTime", p.time, "time"); set("eWhere", p.location, "place"); set("eFood", p.food, "food"); set("eNotes", p.notes, "details");
   const extra = [];
   if (p.endTime) extra.push(`End time (${p.endTime}) isn't in this form; change it from the composer.`);
   if (p.capacity) extra.push(`Max spots (${p.capacity}) isn't in this form; change it from the composer.`);
@@ -1710,6 +1713,7 @@ function composeBody() {
         <label class="field"><span>Max spots</span><input id="cCap" type="number" min="1" max="1000" value="${compose.cap}" placeholder="No limit"></label>
       </div>
       <label class="field"><span>Where</span><input id="cWhere" maxlength="90" value="${esc(compose.where)}" placeholder="Address or vibe"></label>
+      ${compose.kind === "meeting" ? "" : `<label class="field"><span>Food &amp; drinks <span class="muted">(optional)</span></span><input id="cFood" maxlength="120" value="${esc(compose.food || "")}" placeholder="Tacos and margs · BYOB · we'll order pizza"></label>`}
       <label class="field"><span>The details</span><textarea id="cNotes" maxlength="600" placeholder="Dress code, what to bring, parking…">${esc(compose.notes)}</textarea></label>
       <label class="field"><span>Repeats</span><select id="cRepeat"><option value="" ${!compose.repeat ? "selected" : ""}>Never</option><option value="weekly" ${compose.repeat === "weekly" ? "selected" : ""}>Every week</option><option value="biweekly" ${compose.repeat === "biweekly" ? "selected" : ""}>Every 2 weeks</option><option value="monthly" ${compose.repeat === "monthly" ? "selected" : ""}>Every month</option></select></label>
       <p class="muted sm" style="margin:-4px 0 0">Guests get a calendar invite at their email on file.</p>
@@ -1822,7 +1826,7 @@ function openComposeInviteDialog() {
 }
 function syncCompose() {
   compose.title = el("cTitle").value; compose.date = el("cDate").value; compose.time = el("cTime").value;
-  compose.end = el("cEnd").value; compose.where = el("cWhere").value; compose.notes = el("cNotes").value;
+  compose.end = el("cEnd").value; compose.where = el("cWhere").value; compose.notes = el("cNotes").value; if (el("cFood")) compose.food = el("cFood").value;
   compose.cap = el("cCap").value; if (el("cApproval")) compose.approval = el("cApproval").checked;
   if (el("cRepeat")) compose.repeat = el("cRepeat").value;
   // Co-host ticks live only in the DOM otherwise, so any re-render (picking a
@@ -1908,7 +1912,7 @@ async function createEvent() {
     names: Object.fromEntries(invitedUids.map(u => [u, u === myUid() ? S.profile.name : nameOf(u)])),
     title, emoji: compose.emoji, theme: compose.theme, customTheme: compose.theme === "custom" ? compose.customTheme : null, cover: compose.cover || "",
     date, time: el("cTime").value || "", endTime: el("cEnd").value || "",
-    location: el("cWhere").value.trim(), notes: el("cNotes").value.trim(),
+    location: el("cWhere").value.trim(), food: el("cFood") ? el("cFood").value.trim() : "", notes: el("cNotes").value.trim(),
     capacity: Number(el("cCap").value) || 0, approval: !!el("cApproval").checked,
     questions, rsvps: { [myUid()]: "going" }, plusOnes: {}, hypes: {}, answers: {},
     // The event's own unguessable id is the access token behind the "add people" flow
@@ -2027,6 +2031,7 @@ function eventInner(ev) {
     <div class="ev-when">${esc(fmtWhen(ev))}</div>
     <div class="ev-count">${countdown(ev)}</div>
     ${ev.location ? `<div class="ev-where"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}" target="_blank" rel="noopener" title="Open in Google Maps">📍 ${esc(ev.location)}</a></div>${/zoom|meet\.google|teams|http|online|call/i.test(ev.location) ? "" : `<details class="map-wrap"><summary>Show map</summary><iframe class="map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="https://maps.google.com/maps?q=${encodeURIComponent(ev.location)}&output=embed" title="Map"></iframe></details>`}` : ""}
+    ${ev.food ? `<div class="ev-food">🍽️ ${esc(ev.food)}</div>` : ""}
     <div class="ev-hosts">Hosted by ${hosts.map(u => esc(first(nameOf(u)))).join(" & ")}${grp ? ` · <span class="grp-tag">${esc(grp.emoji || "")} ${esc(grp.name)}</span>` : ""}</div>
     ${ev.capacity > 0 ? `<div class="ev-cap ${full ? "full" : ""}">${going} / ${ev.capacity} spots${full ? " · full" : ""}</div>` : ""}
     ${hypeBar}
@@ -2055,10 +2060,13 @@ function eventInner(ev) {
     ${manage && (ev.invitedUids || []).filter(u => u !== me && !(ev.rsvps || {})[u]).length ? `<button class="btn-th ghost small" id="nudgeBtn">Nudge ${(ev.invitedUids || []).filter(u => u !== me && !(ev.rsvps || {})[u]).length} who haven't answered</button>` : ""}
   </div>
 
-  ${(ev.invitedPhones || []).length ? `<div class="ev-card-glass">
-    <div class="glass-head">Invited <span>${ev.invitedPhones.length} pending</span></div>
-    ${ev.invitedPhones.map(p => { const nm = (ev.invitedPhoneNames || {})[p]; return `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">💬</span><div style="flex:1;min-width:0"><b>${esc(nm || p)}</b><div class="muted sm">${nm ? esc(p) + " · " : ""}Hasn't joined yet</div></div>${manage ? `<span class="btnrow" style="gap:6px"><button class="btn ghost small" data-textinvite="${esc(p)}">Text</button><button class="btn ghost small" data-uninvitephone="${esc(p)}">✕</button></span>` : ""}</div>`; }).join("")}
-  </div>` : ""}
+  ${(ev.invitedPhones || []).length ? (() => { let open = true; try { open = localStorage.getItem("friendlyInvOpen:" + ev.id) !== "0"; } catch {} return `<div class="ev-card-glass inv-card ${open ? "open" : ""}" id="invCard">
+    <button type="button" class="glass-head inv-toggle" id="invToggle" aria-expanded="${open}"><span>Not on Friendly yet <span class="muted-th sm">· ${ev.invitedPhones.length} invited by text</span></span><span class="inv-chev">›</span></button>
+    <div class="inv-body">
+      <p class="muted-th sm" style="margin:0 0 8px">They got a text with the link. Once they sign up, they'll move into the guest list above.</p>
+      ${ev.invitedPhones.map(p => { const nm = (ev.invitedPhoneNames || {})[p]; return `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">💬</span><div style="flex:1;min-width:0"><b>${esc(nm || p)}</b><div class="muted sm">${nm ? esc(p) + " · " : ""}Hasn't joined yet</div></div>${manage ? `<span class="btnrow" style="gap:6px"><button class="btn ghost small" data-textinvite="${esc(p)}">Text again</button><button class="btn ghost small" data-uninvitephone="${esc(p)}" title="Remove">✕</button></span>` : ""}</div>`; }).join("")}
+    </div>
+  </div>`; })() : ""}
 
   <div class="ev-card-glass" id="dayCard">${dayInner(ev)}</div>
   <div class="ev-card-glass" id="pollsCard">${pollsInner(ev)}</div>
@@ -2355,6 +2363,7 @@ function wireEventPage(ev) {
   const share = $("[data-share]"); if (share) share.onclick = () => shareEvent(ev);
   if (el("addPeopleBtn")) el("addPeopleBtn").onclick = () => openEventInviteDialog(ev);
   document.querySelectorAll("[data-textinvite]").forEach(b => b.onclick = () => { location.href = smsLink([b.dataset.textinvite], eventInviteText({ ...ev, openLink: true })); });
+  if (el("invToggle")) el("invToggle").onclick = () => { const c = el("invCard"); const open = !c.classList.contains("open"); c.classList.toggle("open", open); el("invToggle").setAttribute("aria-expanded", open); try { localStorage.setItem("friendlyInvOpen:" + ev.id, open ? "1" : "0"); } catch {} };
   document.querySelectorAll("[data-uninvitephone]").forEach(b => b.onclick = () => uninviteEventPhone(ev, b.dataset.uninvitephone));
   const join = $("[data-join]"); if (join) join.onclick = () => joinViaLink(ev, join);
   const cal = $("[data-cal]"); if (cal) cal.onclick = () => downloadIcs(ev);
@@ -2653,12 +2662,13 @@ function editEvent(ev) {
     <div class="two"><label class="field"><span>Date</span><input id="eDate" type="date" value="${ev.date}"></label>
     <label class="field"><span>Start</span><input id="eTime" type="time" value="${ev.time || ""}"></label></div>
     <label class="field"><span>Where</span><input id="eWhere" value="${esc(ev.location || "")}"></label>
+    ${ev.kind === "meeting" ? "" : `<label class="field"><span>Food &amp; drinks</span><input id="eFood" maxlength="120" value="${esc(ev.food || "")}" placeholder="Tacos and margs · BYOB"></label>`}
     <label class="field"><span>Repeats</span><select id="eRepeat"><option value="" ${!ev.repeat ? "selected" : ""}>Never</option><option value="weekly" ${ev.repeat === "weekly" ? "selected" : ""}>Every week</option><option value="biweekly" ${ev.repeat === "biweekly" ? "selected" : ""}>Every 2 weeks</option><option value="monthly" ${ev.repeat === "monthly" ? "selected" : ""}>Every month</option></select></label>
     <label class="field"><span>Details</span><textarea id="eNotes">${esc(ev.notes || "")}</textarea></label>
     <span class="field-label" style="margin-top:10px">Co-hosts (can edit &amp; manage)</span><div class="check-grid">${contactChecks("ecoh", new Set(ev.cohostUids || []))}</div>`,
     "Save", async () => {
       const cohostUids = [...document.querySelectorAll("input[name=ecoh]:checked")].map(i => i.value).filter(u => u !== ev.hostId);
-      try { await updateDoc(doc(db, "events", ev.id), { cohostUids, ...(cohostUids.length ? { invitedUids: arrayUnion(...cohostUids) } : {}), title: el("eTitle").value.trim(), date: el("eDate").value, time: el("eTime").value, location: el("eWhere").value.trim(), notes: el("eNotes").value.trim(), repeat: el("eRepeat").value }); closeDialog(); toast("Saved"); } catch (e) { toast(e.message); }
+      try { await updateDoc(doc(db, "events", ev.id), { cohostUids, ...(cohostUids.length ? { invitedUids: arrayUnion(...cohostUids) } : {}), title: el("eTitle").value.trim(), date: el("eDate").value, time: el("eTime").value, location: el("eWhere").value.trim(), ...(el("eFood") ? { food: el("eFood").value.trim() } : {}), notes: el("eNotes").value.trim(), repeat: el("eRepeat").value }); closeDialog(); toast("Saved"); } catch (e) { toast(e.message); }
     });
   attachPlaces(el("eWhere"));
 }
@@ -2694,7 +2704,12 @@ function moneyBody() {
   ${mine.length ? `<div class="section-head"><h2>Settle up</h2>${pairs.length > 1 ? `<button class="btn small ${S.simplePay ? "primary" : ""}" id="simplePay" title="Combine debts into the fewest payments">${S.simplePay ? "✓ Fewest payments" : "Fewest payments"}</button>` : ""}</div><div class="stack">${mine.map(p => {
     const other = S.contacts.get(p.from === me ? p.to : p.from) || {};
     let pay = "";
-    if (p.from === me) { if (other.venmo) pay += `<button class="btn small venmo" data-venmo="${p.to}" data-amt="${p.amount}">Venmo</button>`; if (other.phone) pay += `<button class="btn small apple" data-apple="${p.to}" data-amt="${p.amount}"> Cash</button>`; }
+    if (p.from === me) {
+      if (other.venmo) pay += `<button class="btn small venmo" data-venmo="${p.to}" data-amt="${p.amount}">Venmo</button>`;
+      if (other.cashapp) pay += `<button class="btn small cashapp" data-cashapp="${p.to}" data-amt="${p.amount}">Cash App</button>`;
+      if (other.zelle) pay += `<button class="btn small zelle" data-zelle="${p.to}" data-amt="${p.amount}" title="Zelle has no payment links: this copies their Zelle handle for your bank app">Zelle</button>`;
+      if (other.phone) pay += `<button class="btn small apple" data-apple="${p.to}" data-amt="${p.amount}"> Cash</button>`;
+    }
     else if (other.venmo) pay = `<button class="btn small venmo" data-request="${p.from}" data-amt="${p.amount}">Request</button>`;
     return `<div class="card settle-row"><div class="settle-top">${avatar(p.from)}<div style="flex:1"><b>${p.from === me ? "You owe " + esc(nameOf(p.to)) : esc(nameOf(p.from)) + " owes you"}</b></div><span class="amt sm">${fmt$(p.amount)}</span></div><div class="settle-actions">${pay}<button class="btn small" data-record="${p.from}|${p.to}|${p.amount}">${p.from === me ? "Mark as paid" : "Mark as received"}</button></div></div>`;
   }).join("")}</div>` : ""}
@@ -2712,6 +2727,8 @@ function wireMoney() {
   document.querySelectorAll("[data-venmo]").forEach(b => b.onclick = () => payVenmo(b.dataset.venmo, +b.dataset.amt, "pay"));
   document.querySelectorAll("[data-request]").forEach(b => b.onclick = () => payVenmo(b.dataset.request, +b.dataset.amt, "charge"));
   document.querySelectorAll("[data-apple]").forEach(b => b.onclick = () => payApple(b.dataset.apple, +b.dataset.amt));
+  document.querySelectorAll("[data-cashapp]").forEach(b => b.onclick = () => payCashApp(b.dataset.cashapp, +b.dataset.amt));
+  document.querySelectorAll("[data-zelle]").forEach(b => b.onclick = () => payZelle(b.dataset.zelle, +b.dataset.amt));
   document.querySelectorAll("[data-record]").forEach(b => b.onclick = () => { const [f, t, a] = b.dataset.record.split("|"); openSettle(f, t, +a); });
   document.querySelectorAll("[data-dele]").forEach(b => b.onclick = () => deleteDoc(doc(db, "expenses", b.dataset.dele)).catch(e => toast(e.message)));
   document.querySelectorAll("[data-dels]").forEach(b => b.onclick = () => deleteDoc(doc(db, "settlements", b.dataset.dels)).catch(e => toast(e.message)));
@@ -2755,6 +2772,13 @@ async function markPaid(from, to, cents, note) {
   toast(note ? `Opened ${note} · marked as paid` : "Marked as paid", "Undo", () => deleteDoc(ref).then(() => toast("Undone")).catch(e => toast(e.message)));
 }
 function payApple(uid, cents) { const p = (S.contacts.get(uid) || {}).phone; if (!p) return; const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?"; location.href = "sms:" + p.replace(/[^+\d]/g, "") + sep + "body=" + encodeURIComponent(`Sending $${(cents / 100).toFixed(2)} Apple Cash for our Friendly tab 🤝`); markPaid(myUid(), uid, cents, "Apple Cash"); }
+function payCashApp(uid, cents) { const t = ((S.contacts.get(uid) || {}).cashapp || "").replace(/^\$/, ""); if (!t) return; window.open(`https://cash.app/$${encodeURIComponent(t)}/${(cents / 100).toFixed(2)}`, "_blank"); markPaid(myUid(), uid, cents, "Cash App"); }
+// Zelle lives inside each bank's app and has no payment links, so the best we can do is hand over the handle.
+function payZelle(uid, cents) {
+  const z = (S.contacts.get(uid) || {}).zelle; if (!z) return;
+  const done = () => dialog(`<h3>Pay with Zelle</h3><p>Send <b>${fmt$(cents)}</b> to <b>${esc(first(nameOf(uid)))}</b> in your bank app. Their Zelle is <b class="mono">${esc(z)}</b>${navigator.clipboard ? " (copied)" : ""}.</p><p class="muted sm">When it's sent, mark it paid so the balance clears for both of you.</p>`, "I sent it", () => { closeDialog(); markPaid(myUid(), uid, cents, "Zelle"); });
+  if (navigator.clipboard) navigator.clipboard.writeText(z).then(done, done); else done();
+}
 const payerOptions = (people, sel) => people.map(([u, i]) => `<option value="${u}" ${u === (sel || myUid()) ? "selected" : ""}>${esc(first(i.name))}</option>`).join("");
 // An expense between exactly the members of one group belongs to that group,
 // even when it was added from the Money tab instead of the group page.
@@ -2908,8 +2932,10 @@ function profileBody() {
     <label class="field"><span>Email <span class="muted">(calendar invites, password reset)</span></span><input id="pEmail" type="email" value="${esc(p.email || "")}" placeholder="you@example.com" autocomplete="email"></label>
     <div class="two"><label class="field"><span>Venmo</span><input id="pVenmo" value="${esc(p.venmo || "")}" placeholder="@sam-rivera"></label>
     <label class="field"><span>Phone (Apple Cash)</span><input id="pPhone" value="${esc(p.phone || "")}" placeholder="+1 555 123 4567"></label></div>
+    <div class="two"><label class="field"><span>Zelle <span class="muted">(phone or email)</span></span><input id="pZelle" value="${esc(p.zelle || "")}" placeholder="+1 555 123 4567"></label>
+    <label class="field"><span>Cash App</span><input id="pCashapp" value="${esc(p.cashapp || "")}" placeholder="$samrivera"></label></div>
     <label class="field"><span>Birthday <span class="muted">(so your groups can plan something)</span></span><input id="pBday" type="date" value="${esc(p.birthday || "")}"></label>
-    <p class="muted sm">Your Venmo and phone are shared only with people in your groups, so they can pay you back.</p>
+    <p class="muted sm">Your payment handles are shared only with people in your groups, so they can pay you back.</p>
     <button class="btn primary" id="saveProfile">Save profile</button>
   </div>
   <button class="btn" id="memoriesBtn" style="margin-top:14px">📸 Memories: photos from all your events</button>
@@ -2955,13 +2981,13 @@ function wireProfile() {
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
   if (el("saveProfile")) el("saveProfile").onclick = async () => {
     const name = el("pName").value.trim(); if (!name) return toast("Name can't be empty.");
-    const venmo = el("pVenmo").value.trim(), phone = el("pPhone").value.trim();
+    const venmo = el("pVenmo").value.trim(), phone = el("pPhone").value.trim(), zelle = ((el("pZelle") || {}).value || "").trim(), cashapp = ((el("pCashapp") || {}).value || "").trim();
     try {
       const birthday = (el("pBday") || {}).value || "";
       const email = (el("pEmail") || {}).value || ""; if (email && !email.includes("@")) return toast("That email doesn't look right.");
-      await updateDoc(doc(db, "users", myUid()), { name, venmo, phone, phoneE164: toE164(phone) || myPhoneE164(), birthday, email: email.trim().toLowerCase() });
+      await updateDoc(doc(db, "users", myUid()), { name, venmo, phone, zelle, cashapp, phoneE164: toE164(phone) || myPhoneE164(), birthday, email: email.trim().toLowerCase() });
       // propagate name/contact into each group's denormalized members map
-      for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}`]: { name, venmo, phone, photo: S.profile.photo || "", birthday } }).catch(() => {});
+      for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}`]: { name, venmo, phone, zelle, cashapp, photo: S.profile.photo || "", birthday } }).catch(() => {});
       toast("Profile saved");
     } catch (e) { toast(e.message); }
   };
@@ -3094,6 +3120,7 @@ function wireMeeting(ev) {
   const cal = $("[data-cal]"); if (cal) cal.onclick = () => downloadIcs(ev);
   if (el("addPeopleBtn")) el("addPeopleBtn").onclick = () => openEventInviteDialog(ev);
   document.querySelectorAll("[data-textinvite]").forEach(b => b.onclick = () => { location.href = smsLink([b.dataset.textinvite], eventInviteText({ ...ev, openLink: true })); });
+  if (el("invToggle")) el("invToggle").onclick = () => { const c = el("invCard"); const open = !c.classList.contains("open"); c.classList.toggle("open", open); el("invToggle").setAttribute("aria-expanded", open); try { localStorage.setItem("friendlyInvOpen:" + ev.id, open ? "1" : "0"); } catch {} };
   document.querySelectorAll("[data-uninvitephone]").forEach(b => b.onclick = () => uninviteEventPhone(ev, b.dataset.uninvitephone));
   const nd = $("[data-nudge]"); if (nd) nd.onclick = () => nudge(ev, nd);
   const ed = $("[data-edit]"); if (ed) ed.onclick = () => editEvent(ev);
