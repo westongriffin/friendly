@@ -543,3 +543,16 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .demo-bar{display:flex;align-items:center;justify-content:center;gap:8px;text-align:left}
 .demo-bar .blip{flex:none}
 .cover-spin .blip{margin-bottom:-4px}
+
+/* ---- Dot at the edge: the create button ---- */
+.edge-dot{position:fixed;right:-27px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:30;display:flex;align-items:flex-end;gap:8px;transition:right .35s cubic-bezier(.34,1.56,.64,1);cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none}
+.edge-dot.in{right:14px}
+.edge-dot .edge-art{display:block;flex:none}
+.edge-dot .blip{filter:drop-shadow(0 6px 14px rgba(60,40,20,.25))}
+.edge-dot:not(.in) .eye>*{transform:translate(-3px,0)}
+.edge-menu{display:none;flex-direction:column;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:10px 12px 12px;box-shadow:var(--shadow-lg);margin-bottom:10px;position:relative;min-width:190px}
+.edge-menu::after{content:"";position:absolute;right:-8px;bottom:22px;border:8px solid transparent;border-left-color:var(--surface);border-right:0}
+.edge-menu b{font-family:var(--display);font-size:14px;margin-bottom:2px}
+.edge-menu button{text-align:left;background:var(--surface2);border-radius:999px;padding:9px 12px;font-weight:600;font-size:14px}
+.edge-menu button:active{background:var(--line)}
+.edge-dot.in .edge-menu{display:flex}

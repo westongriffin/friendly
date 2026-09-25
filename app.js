@@ -185,6 +185,7 @@ function toast(msg, action, onAction, mood) {
   if (action) { const b = document.createElement("button"); b.type = "button"; b.className = "toast-act"; b.textContent = action; b.onclick = () => { t.classList.remove("show"); onAction(); }; t.appendChild(b); }
   t.classList.add("show"); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), action ? 7000 : 3400);
 }
+document.addEventListener("click", () => { const x = el("edgeDot"); if (x && x.classList.contains("in")) { x.classList.remove("in"); x.querySelector(".edge-art").innerHTML = dot("idle", 66); } });
 window.addEventListener("offline", () => toast("You're offline. Changes will send when you're back.", null, null, "oops"));
 window.addEventListener("online", () => toast("Back online.", null, null, "happy"));
 function todayStr() { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
@@ -368,7 +369,7 @@ function attachPlaces(input) {
 }
 
 // ---------- state ----------
-const BOOT_AT = Date.now(), SPLASH_MIN = 2000; let splashTimer = null;
+const BOOT_AT = Date.now(), SPLASH_MIN = 2600, SPLASH_MAX = 5000; let splashTimer = null, splashHold = false;
 const S = {
   user: null, profile: null, ready: false,
   groups: new Map(), pendingInvites: new Map(), events: new Map(),
@@ -556,14 +557,16 @@ function mountSplash(root, msg) {
   if (cur && cur.querySelector(".splash-blip")) { const p = cur.querySelector("p"); if (p) p.textContent = msg; return; }
   root.innerHTML = `<div class="splash">${splashInner(msg)}</div>`;
   if (splashStop) { splashStop(); splashStop = null; }
-  const svg = root.querySelector(".splash-blip"); if (svg && window.Blip) splashStop = window.Blip.play(svg, { dur: 1.7, delay: .15 });
+  const svg = root.querySelector(".splash-blip");
+  if (svg && window.Blip) { splashHold = true; splashStop = window.Blip.play(svg, { dur: 1.7, delay: .15, onDone: () => { setTimeout(() => { splashHold = false; render(); }, 600); } }); }
 }
 function renderNow() {
   if (BLOCKED_MOBILE_WEB) return;
   const root = el("app");
   // The loading screen stays up for at least two seconds so it never flashes.
-  if (!S.ready || Date.now() - BOOT_AT < SPLASH_MIN) {
-    if (S.ready && !splashTimer) splashTimer = setTimeout(() => { splashTimer = null; render(); }, SPLASH_MIN - (Date.now() - BOOT_AT) + 20);
+  const holdSplash = splashHold && Date.now() - BOOT_AT < SPLASH_MAX;   // let Dot finish forming, then settle for a beat
+  if (!S.ready || Date.now() - BOOT_AT < SPLASH_MIN || holdSplash) {
+    if (S.ready && !splashTimer) splashTimer = setTimeout(() => { splashTimer = null; render(); }, Math.max(SPLASH_MIN - (Date.now() - BOOT_AT), holdSplash ? 400 : 0) + 20);
     mountSplash(root, "Getting everyone here…"); return; }
   if (splashStop && !root.querySelector(".splash-blip")) { splashStop(); splashStop = null; }
   if (RESET_OOB) { renderResetPassword(root); return; }
@@ -795,11 +798,30 @@ function shell(body) {
     ${T("money", "Money", "#/money")}
   </nav>
   <main class="wrap">${updateBanner()}${inviteBanner()}${body}</main>
-  ${["new", "group", "expense", "profile"].includes(tab) ? "" : `<div class="fab-scrim"></div><button class="fab" id="fabBtn" title="${tab === "groups" ? "New group" : "Create event"}">＋</button>`}`;
+  ${["new", "group", "expense", "profile"].includes(tab) ? "" : window.Blip ? `<div class="fab-scrim"></div><div class="edge-dot" id="edgeDot" role="button" aria-label="${tab === "groups" ? "New group" : "Make something"}">
+    ${tab === "groups" ? "" : `<div class="edge-menu"><b>What are we making?</b><button type="button" data-make="event">🎉 An event</button><button type="button" data-make="meeting">📅 A meeting</button><button type="button" data-make="expense">💸 An expense</button></div>`}
+    <span class="edge-art">${dot("idle", 66)}</span></div>` : `<div class="fab-scrim"></div><button class="fab" id="fabBtn" title="${tab === "groups" ? "New group" : "Create event"}">＋</button>`}`;
 }
 function wireShell() {
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
   if (el("fabBtn")) el("fabBtn").onclick = () => S.route.name === "groups" ? openGroupDialog() : go("#/new");
+  const ed = el("edgeDot");
+  if (ed) {
+    // Dot peeks in from the right edge; tap and Dot slides in asking what to make. On Groups there is one thing to make, so it just opens.
+    const setMood = m => { ed.querySelector(".edge-art").innerHTML = dot(m, 66); };
+    ed.onclick = e => {
+      e.stopPropagation();
+      if (S.route.name === "groups") { setMood("happy"); setTimeout(() => setMood("idle"), 900); openGroupDialog(); return; }
+      const open = !ed.classList.contains("in"); ed.classList.toggle("in", open); setMood(open ? "happy" : "idle");
+    };
+    ed.querySelectorAll("[data-make]").forEach(b => b.onclick = e => {
+      e.stopPropagation(); ed.classList.remove("in");
+      const k = b.dataset.make;
+      if (k === "event") { if (compose.kind === "meeting") resetCompose(); go("#/new"); }
+      else if (k === "meeting") { resetCompose(); compose.kind = "meeting"; go("#/new"); }
+      else openExpense(null, null);
+    });
+  }
   wireUpdateBanner();
   document.querySelectorAll("[data-accept]").forEach(b => b.onclick = () => acceptInvite(b.dataset.accept, b));
   if (S.route.name === "home") wireHome();

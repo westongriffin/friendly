@@ -78,9 +78,12 @@
     const mouthLen = mouth.getTotalLength(); mouth.setAttribute("stroke-dasharray", mouthLen);
     let G = null;
     function layout() {
-      const fx = 60, wF = tF.getComputedTextLength(), wL = tL.getComputedTextLength(), wY = tY.getComputedTextLength();
+      const wF = tF.getComputedTextLength(), wL = tL.getComputedTextLength(), wY = tY.getComputedTextLength();
+      // centre the whole wordmark (letters + dot) in the 720-wide stage; Blip then lands at the exact centre
+      const total = wF + 8 + wL + 1 + wY + 12 + 10, fx = Math.round((720 - total) / 2);
+      tF.setAttribute("x", fx);
       const lx = fx + wF + 8, yx = lx + wL + 1; tL.setAttribute("x", lx); tY.setAttribute("x", yx);
-      const dx = yx + wY + 12, dy = 98, bx = Math.round((fx + dx) / 2), by = 150;
+      const dx = yx + wY + 12, dy = 98, bx = 360, by = 150;
       // the l's ink (not its layout box), measured from the same font on a canvas
       const b = tL.getBBox(); let inkL = b.x, inkR = b.x + b.width, inkT = b.y, inkB = 190;
       try {
@@ -144,27 +147,29 @@
 
   // Play the origin story once inside svgEl (wordmark -> Blip over `dur` seconds), then idle.
   // Returns a stop() function. Waits briefly for the display font so the wordmark measures right.
-  function play(svgEl, { dur = 1.9, delay = .25, ink = "#fff" } = {}) {
-    let stopped = false, raf = 0;
+  function play(svgEl, { dur = 1.9, delay = .25, ink = "#fff", onDone } = {}) {
+    let stopped = false, raf = 0, done = false;
+    const finish = () => { if (!done) { done = true; if (onDone) try { onDone(); } catch (e) {} } };
     const m = morph(svgEl, { ink });
     const start = () => {
       if (stopped) return;
       m.layout();
       const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-      if (reduce) { m.draw(1, 0); return; }
+      if (reduce) { m.draw(1, 0); finish(); return; }
       let t0 = null;
       const tick = now => {
         if (stopped) return;
         if (t0 === null) t0 = now;
         const t = (now - t0) / 1000, p = clamp((t - delay) / dur);
         m.draw(p, t);
+        if (p >= 1) finish();
         raf = requestAnimationFrame(tick);
       };
       raf = requestAnimationFrame(tick);
     };
     const fontReady = document.fonts && document.fonts.load ? Promise.race([document.fonts.load('700 112px "Bricolage Grotesque"'), new Promise(r => setTimeout(r, 700))]) : Promise.resolve();
     fontReady.then(start, start);
-    return () => { stopped = true; cancelAnimationFrame(raf); };
+    return () => { stopped = true; cancelAnimationFrame(raf); finish(); };
   }
 
   // Dot in a party hat: the one prop Dot ever wears (birthdays, the day of an event).
