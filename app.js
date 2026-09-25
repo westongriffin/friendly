@@ -193,12 +193,14 @@ const LOGO_TIPS = {
   money: ["Fewest payments combines debts so fewer people have to pay.", "Snap a receipt and I'll read the total for you."]
 };
 let logoTipTimer = null;
-function showLogoTip() {
+let dotTapped = false, dotHopped = false;
+function showLogoTip(custom) {
   if (!window.Blip || document.getElementById("logoTip")) return;
   const dotEl = el("brandDot"); if (!dotEl) return;
+  dotTapped = true;
   const key = ["event", "groups", "money"].includes(S.route.name) ? S.route.name : "home";
-  const list = LOGO_TIPS[key]; let i = 0; try { i = (parseInt(localStorage.getItem("friendlyTip:" + key) || "0", 10) || 0); localStorage.setItem("friendlyTip:" + key, String(i + 1)); } catch {}
-  const tip = list[i % list.length];
+  let tip = custom;
+  if (!tip) { const list = LOGO_TIPS[key]; let i = 0; try { i = (parseInt(localStorage.getItem("friendlyTip:" + key) || "0", 10) || 0); localStorage.setItem("friendlyTip:" + key, String(i + 1)); } catch {} tip = list[i % list.length]; }
   const r = dotEl.getBoundingClientRect();
   const wrap = document.createElement("div"); wrap.id = "logoTip";
   wrap.style.left = r.left + "px"; wrap.style.top = r.top + "px";
@@ -213,6 +215,18 @@ function showLogoTip() {
   };
   logoTipTimer = setTimeout(hide, 6500);
   setTimeout(() => document.addEventListener("click", hide, true), 250);
+}
+// So people learn the dot is Dot: one hello per device the first time home renders, and a
+// small silent hop once per session if the dot hasn't been tapped yet. Never an unprompted tip after that.
+function dotIntro() {
+  if (!window.Blip || !el("brandDot")) return;
+  let seen = false; try { seen = !!localStorage.getItem("friendlyDotHello"); } catch {}
+  if (!seen) {
+    try { localStorage.setItem("friendlyDotHello", "1"); } catch {}
+    setTimeout(() => { if (S.route.name === "home" && el("brandDot")) showLogoTip("Hi, I'm Dot. Tap me up here any time you want a tip."); }, 1600);
+    dotHopped = true; return;
+  }
+  if (!dotHopped) { dotHopped = true; setTimeout(() => { const d = el("brandDot"); if (d && !dotTapped && !document.getElementById("logoTip")) { d.classList.add("hop"); setTimeout(() => d.classList.remove("hop"), 1400); } }, 25000); }
 }
 document.addEventListener("click", () => { const x = el("edgeDot"); if (x && x.classList.contains("in")) { x.classList.remove("in"); x.querySelector(".edge-art").innerHTML = dot("idle", 66); } });
 window.addEventListener("offline", () => toast("You're offline. Changes will send when you're back.", null, null, "oops"));
@@ -618,7 +632,7 @@ function onboardingBody() {
     <canvas id="authbg" class="auth-bg"></canvas>
     <div class="auth-card card">
       <div class="brand xl">Friend<span class="tilt">l</span>y</div>
-      ${window.Blip ? `<div class="dot-say">${dot("happy", 60)}<div class="say-bubble">Hi ${esc(first(p.name))}, I'm Dot. Let's finish setting up your profile.</div></div>` : `<p class="auth-lede">Welcome, ${esc(p.name)}! Let's finish setting up your profile.</p>`}
+      ${window.Blip ? `<div class="dot-say">${dot("happy", 60)}<div class="say-bubble">Hi ${esc(first(p.name))}, I'm Dot. Let's finish setting up your profile. After that I'll be up in the logo if you ever want a tip.</div></div>` : `<p class="auth-lede">Welcome, ${esc(p.name)}! Let's finish setting up your profile.</p>`}
       <p class="pic-cta">✨ Select a profile pic! ✨</p>
       <button type="button" class="avatar-edit pulse" id="obPhotoBtn" title="Add a photo" style="margin:0 auto 14px;display:block">${avatar(myUid(), "xxl")}<span class="cam">📷</span></button>
       <form id="onboardForm" class="stack">
@@ -854,7 +868,7 @@ function wireShell() {
   }
   wireUpdateBanner();
   document.querySelectorAll("[data-accept]").forEach(b => b.onclick = () => acceptInvite(b.dataset.accept, b));
-  if (S.route.name === "home") wireHome();
+  if (S.route.name === "home") { wireHome(); dotIntro(); }
   if (S.route.name === "new") wireCompose();
   if (S.route.name === "groups") wireGroups();
   if (S.route.name === "group") wireGroupPage();

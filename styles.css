@@ -69,6 +69,8 @@ img{max-width:100%}
 .brand-dot{position:relative;width:8px;height:8px;border-radius:50%;background:var(--sun);margin:2px 0 0 4px;padding:0;flex:none;transition:transform .25s;cursor:pointer}
 .brand-dot::before{content:"";position:absolute;inset:-12px}   /* a finger-sized target around an 8px dot */
 .brand-dot.away{transform:scale(0)}
+.brand-dot.hop{animation:dot-hop 1.3s cubic-bezier(.34,1.56,.64,1)}
+@keyframes dot-hop{0%,100%{transform:translateY(0)}15%{transform:translateY(-6px) scale(1.15)}30%{transform:translateY(0) scale(.95,.85)}45%{transform:translateY(-4px) scale(1.1)}60%{transform:translateY(0)}}
 
 /* public demo (shared sandbox account) */
 .demo-bar{background:var(--ink);color:#fff;font-size:13px;line-height:1.4;text-align:center;padding:calc(8px + env(safe-area-inset-top)) 14px 8px}
