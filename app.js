@@ -173,11 +173,20 @@ const initials = n => (n || "?").trim().split(/\s+/).slice(0, 2).map(w => w[0].t
 const first = n => (n || "Someone").split(" ")[0];
 const fmt$ = c => (c < 0 ? "−" : "") + "$" + (Math.abs(c) / 100).toFixed(2);
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-function toast(msg, action, onAction) {
-  const t = el("toast"); t.textContent = msg;
+// Dot, the mascot (blip.js). Small helpers so call sites stay short; both degrade to nothing/emoji if blip.js failed to load.
+const dot = (mood, size = 72) => window.Blip ? window.Blip.svg({ mood, size }) : "";
+const dotHat = (size = 52) => window.Blip ? window.Blip.hat(size) : "🎂";
+// Toasts carry Dot with a mood: pass one explicitly, or errors are detected from the wording.
+function toast(msg, action, onAction, mood) {
+  const t = el("toast"); t.textContent = "";
+  const m = mood || (/couldn|can['’]t|fail|error|invalid|unable|permission|denied|network|offline|too many|try again|not allowed|wrong/i.test(msg) ? "oops" : "idle");
+  if (window.Blip) { const w = document.createElement("span"); w.className = "toast-dot"; w.innerHTML = dot(m, 30); t.appendChild(w); }
+  t.appendChild(document.createTextNode(msg));
   if (action) { const b = document.createElement("button"); b.type = "button"; b.className = "toast-act"; b.textContent = action; b.onclick = () => { t.classList.remove("show"); onAction(); }; t.appendChild(b); }
   t.classList.add("show"); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), action ? 7000 : 3400);
 }
+window.addEventListener("offline", () => toast("You're offline. Changes will send when you're back.", null, null, "oops"));
+window.addEventListener("online", () => toast("Back online.", null, null, "happy"));
 function todayStr() { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
 function evDate(ev) { const [y, m, d] = (ev.date || "2000-01-01").split("-").map(Number); return new Date(y, m - 1, d); }
 function fmtTime(t) { if (!t) return ""; const [h, mi] = t.split(":").map(Number); const d = new Date(); d.setHours(h, mi); return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }); }
@@ -325,7 +334,7 @@ function planBirthday(b) { resetCompose(); compose.date = b.date; compose.groupI
 function birthdayCard() {
   const list = upcomingBirthdays(30); let dismissed = []; try { dismissed = JSON.parse(localStorage.getItem("friendlyBdayDismissed") || "[]"); } catch {}
   const b = list.find(x => !dismissed.includes(x.uid + ":" + x.date)); if (!b) return "";
-  return `<div class="card notif-card"><span class="notif-ico">🎂</span><div style="flex:1"><b>${esc(first(b.name))}'s birthday is ${b.days === 0 ? "today" : b.days === 1 ? "tomorrow" : "in " + b.days + " days"}</b><div class="muted sm">${esc(fmtDay({ date: b.date }))}. A month out is the sweet spot to plan something.</div></div><span class="btnrow" style="gap:6px"><button class="btn primary small" data-bplan="${b.uid}">Plan something</button><button class="btn ghost small" data-bdismiss="${b.uid}:${b.date}">Later</button></span></div>`;
+  return `<div class="card notif-card"><span class="notif-ico dot-ico">${dotHat(52)}</span><div style="flex:1"><b>${esc(first(b.name))}'s birthday is ${b.days === 0 ? "today" : b.days === 1 ? "tomorrow" : "in " + b.days + " days"}</b><div class="muted sm">${esc(fmtDay({ date: b.date }))}. A month out is the sweet spot to plan something.</div></div><span class="btnrow" style="gap:6px"><button class="btn primary small" data-bplan="${b.uid}">Plan something</button><button class="btn ghost small" data-bdismiss="${b.uid}:${b.date}">Later</button></span></div>`;
 }
 function smsLink(numbers, body) { const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?"; return "sms:" + numbers.map(n => n.replace(/[^+\d]/g, "")).join(",") + sep + "body=" + encodeURIComponent(body); }
 // Address autocomplete via Google Places (New). Active only once `mapsKey` is
@@ -577,7 +586,7 @@ function onboardingBody() {
     <canvas id="authbg" class="auth-bg"></canvas>
     <div class="auth-card card">
       <div class="brand xl">Friend<span class="tilt">l</span>y</div>
-      <p class="auth-lede">Welcome, ${esc(p.name)}! Let's finish setting up your profile.</p>
+      ${window.Blip ? `<div class="dot-say">${dot("happy", 60)}<div class="say-bubble">Hi ${esc(first(p.name))}, I'm Dot. Let's finish setting up your profile.</div></div>` : `<p class="auth-lede">Welcome, ${esc(p.name)}! Let's finish setting up your profile.</p>`}
       <p class="pic-cta">✨ Select a profile pic! ✨</p>
       <button type="button" class="avatar-edit pulse" id="obPhotoBtn" title="Add a photo" style="margin:0 auto 14px;display:block">${avatar(myUid(), "xxl")}<span class="cam">📷</span></button>
       <form id="onboardForm" class="stack">
@@ -723,7 +732,7 @@ function renderResetPassword(root) {
   const shell = inner => `<div class="auth-wrap"><canvas id="authbg" class="auth-bg"></canvas><div class="auth-card card"><div class="brand xl">Friend<span class="tilt">l</span>y</div>${inner}</div></div>`;
   if (resetState === "checking") { root.innerHTML = shell(`<p class="auth-lede">Checking your reset link…</p>`); startParticles(el("authbg"), "confetti"); return; }
   if (resetState === "invalid") {
-    root.innerHTML = shell(`<p class="auth-lede">This reset link is invalid or has expired. Request a new one from the sign-in screen.</p><button class="btn primary lg" id="resetBack">Back to sign in</button>`);
+    root.innerHTML = shell(`<div style="display:flex;justify-content:center">${dot("oops", 72)}</div><p class="auth-lede">This reset link is invalid or has expired. Request a new one from the sign-in screen.</p><button class="btn primary lg" id="resetBack">Back to sign in</button>`);
     startParticles(el("authbg"), "confetti"); el("resetBack").onclick = goHome; return;
   }
   if (resetState === "done") {
@@ -773,7 +782,7 @@ function shell(body) {
   const tab = S.route.name;
   const T = (name, label, path) => `<button class="tab ${tab === name ? "on" : ""}" data-go="${path}">${label}</button>`;
   return `
-  ${isDemo() ? `<div class="demo-bar">Demo mode -- this is Riley, a shared public sandbox account. Explore freely; changes are visible to other visitors and reset nightly.</div>` : ""}
+  ${isDemo() ? `<div class="demo-bar">${dot("happy", 26)}<span>Demo mode -- this is Riley, a shared public sandbox account. Explore freely; changes are visible to other visitors and reset nightly.</span></div>` : ""}
   <header class="topbar">
     <div class="brand" data-go="#/">Friend<span class="tilt">l</span>y</div>
     <div class="topbar-right"><button class="bell" data-go="#/search" title="Search">🔍</button><button class="bell" data-go="#/activity" title="Activity">🔔${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ""}</button>
@@ -895,8 +904,11 @@ function homeBody() {
     <button class="fchip ${homeFilter === "none" ? "on" : ""}" data-filter="none">Just friends</button>
   </div>` : "";
 
+  const todayEvs = upcoming.filter(e => e.date === todayStr()).slice(0, 2);
+  const todayCards = todayEvs.map(e => `<div class="card notif-card today-card" data-ev="${e.id}" role="button">${dotHat(56)}<div style="flex:1;min-width:0"><div class="eyebrow-sm">Today</div><b>${esc(e.title)}${e.time ? " · " + fmtTime(e.time) : ""}</b><div class="muted sm">${e.kind === "meeting" ? (e.invitedUids || []).filter(u => (e.rsvps || {})[u] === "going").length + " accepted" : goingCount(e) + " going"}${e.location ? " · " + esc(e.location) : ""}</div></div><span class="chev">›</span></div>`).join("");
   return `
   ${notifCard()}
+  ${todayCards}
   ${birthdayCard()}
   <div class="section-head"><h2>${homeView === "calendar" ? "Calendar" : "Upcoming"}</h2><span class="btnrow" style="gap:8px"><button class="btn small" id="viewToggle" title="Switch view">${homeView === "calendar" ? "🗂 Cards" : "📅 Calendar"}</button><button class="btn primary small" data-go="#/new">＋ New event</button></span></div>
   ${filterBar}
@@ -967,7 +979,7 @@ function wireGroups() {
 
 function groupPageBody(gid) {
   const g = S.groups.get(gid);
-  if (!g) return `<div class="card empty"><b>Group not found</b><p class="muted">You may have left it or it was deleted.</p><button class="btn" data-go="#/groups">Back to groups</button></div>`;
+  if (!g) return `<div class="card empty">${dot("oops", 72)}<b>Group not found</b><p class="muted">You may have left it or it was deleted.</p><button class="btn" data-go="#/groups">Back to groups</button></div>`;
   const members = (g.memberUids || []).map(u => ({ uid: u, ...(g.members || {})[u] }));
   const owner = g.ownerId === myUid();
   // Hosts: the owner plus anyone in hostUids. Hosts invite, manage, and promote; only the owner can delete.
@@ -1134,7 +1146,7 @@ function openInviteDialog(g) {
       for (const p of texted) if (p.e164) updates[`invitedPhoneNames.${p.e164}`] = p.name || "";
       try {
         if (Object.keys(updates).length) await updateDoc(doc(db, "groups", g.id), updates);
-        closeDialog(); toast(direct.length ? direct.length + " added" + (texted.length ? ", texting the rest" : "") : texted.length ? "Opening Messages…" : "Invites sent");
+        closeDialog(); toast(direct.length ? direct.length + " added" + (texted.length ? ", texting the rest" : "") : texted.length ? "Opening Messages…" : "Invites sent", null, null, "happy");
         if (texted.length === 1) setTimeout(() => { location.href = smsLink([texted[0].e164], groupInviteText(g)); }, 400);
         else if (texted.length > 1) setTimeout(() => openTextInviteDialog(texted, groupInviteText(g)), 400);
       } catch (e) { toast(e.message); }
@@ -1449,7 +1461,7 @@ function wireCover() {
   };
   if (el("aiGo")) el("aiGo").onclick = async () => {
     const p = el("aiPrompt").value.trim(); if (!p) return toast("Describe the vibe first.");
-    el("coverPanel").innerHTML = `<div class="cover-spin"><div class="spinner"></div>Painting your cover…</div>`;
+    el("coverPanel").innerHTML = `<div class="cover-spin">${dot("thinking", 64) || `<div class="spinner"></div>`}Painting your cover…</div>`;
     try { compose.cover = await generateCover(p); refreshCoverUI(); toast("Fresh cover, made for you ✨"); }
     catch (e) { toast(e.message || "Generator busy, try again."); compose.coverTab = "ai"; refreshCoverUI(); }
   };
@@ -1513,7 +1525,7 @@ function cleanupEvent() { S.evSubs.forEach(fn => fn()); S.evSubs = []; eventBgSt
 function renderEventPage(root, id) {
   cleanupEvent();
   const ev = S.events.get(id);
-  if (!ev) { root.innerHTML = shell(`<div class="card empty"><b>Loading event…</b><p class="muted">If this stays, you may not have access.</p><button class="btn" data-go="#/">Home</button></div>`); wireShell(); getDoc(doc(db, "events", id)).then(d => { if (d.exists()) { S.events.set(id, { id, ...d.data() }); render(); } }).catch(() => {}); return; }
+  if (!ev) { root.innerHTML = shell(`<div class="card empty">${dot("thinking", 72)}<b>Loading event…</b><p class="muted">If this stays, you may not have access.</p><button class="btn" data-go="#/">Home</button></div>`); wireShell(); getDoc(doc(db, "events", id)).then(d => { if (d.exists()) { S.events.set(id, { id, ...d.data() }); render(); } }).catch(() => {}); return; }
   if (ev.kind === "meeting") { root.innerHTML = shell(meetingBody(ev)); wireShell(); wireMeeting(ev); return; }
   const th = themeOf(ev.theme, ev.customTheme);
   root.innerHTML = `<div class="event-page t-${esc(th.id)}" id="evPage" style="--th-font:${esc(th.font)},system-ui;--th-ink:${esc(th.ink)};--th-sub:${esc(th.sub)};--th-accent:${esc(th.accent)};--th-on-accent:${esc(th.onAccent)};--th-chip:${esc(th.chip)};--th-card:${esc(th.card)}">
@@ -1619,6 +1631,7 @@ function eventInner(ev) {
     ${guestList || `<p class="muted-th">No guests yet.</p>`}
     ${manage ? `<button class="btn-th ghost small" id="addPeopleBtn">＋ Add people</button>` : ""}
     ${manage && (ev.questions || []).length ? `<button class="btn-th ghost small" id="viewAnswers">View RSVP answers</button>` : ""}
+    ${manage && (ev.invitedUids || []).length > 1 && !(ev.invitedUids || []).filter(u => u !== me && !(ev.rsvps || {})[u]).length ? `<div class="dot-note">${dot("party", 44)}<span>Everyone has answered.</span></div>` : ""}
     ${manage && (ev.invitedUids || []).filter(u => u !== me && !(ev.rsvps || {})[u]).length ? `<button class="btn-th ghost small" id="nudgeBtn">Nudge ${(ev.invitedUids || []).filter(u => u !== me && !(ev.rsvps || {})[u]).length} who haven't answered</button>` : ""}
   </div>
 
@@ -1789,6 +1802,7 @@ function dayInner(ev) {
         ${iAmIn ? `<button type="button" class="btn-th small accent" data-claim="${c.id}">✓ Bringing it</button>` : covered ? "" : `<button type="button" class="btn-th small" data-claim="${c.id}">I'll bring it</button>`}
         </span>${c.authorId === me || canManage(ev) ? `<button type="button" class="wall-del" data-delc="${c.id}" title="Remove">✕</button>` : ""}</div>`;
     }).join("") : `<p class="muted-th sm" style="margin:2px 0 8px">Nothing on the list yet. Add what's needed and people claim it.</p>`}
+    ${(() => { const withTarget = items.filter(c => Number.isFinite(parseInt(c.qty, 10)) && parseInt(c.qty, 10) > 0); if (!withTarget.length) return ""; const allCovered = withTarget.every(c => { const who = ((c.reactions || {}).claim || []); const q = (c.reactions || {}).claimQty || {}; return who.reduce((t, u) => t + (q[u] || 1), 0) >= parseInt(c.qty, 10); }); return allCovered ? `<div class="dot-note">${dot("happy", 44)}<span>Everything's covered. Thanks, everyone.</span></div>` : ""; })()}
     <div class="glass-sub">Carpool <button type="button" class="btn-th ghost small" id="addRide">🚗 Offer a ride</button></div>
     ${rides.length ? rides.map(c => { const riders = ((c.reactions || {}).ride || []); const left = Math.max(0, (c.seats || 0) - riders.length); const inCar = riders.includes(me); const driver = c.authorId === me; return `<div class="day-row"><span style="flex:1;min-width:0"><b>${esc(first(c.authorName || nameOf(c.authorId)))} is driving</b>${c.from ? ` <span class="muted-th sm">from ${esc(c.from)}</span>` : ""}<div class="muted-th sm">${left} seat${left === 1 ? "" : "s"} left${riders.length ? " · " + riders.map(u => esc(first(nameOf(u)))).join(", ") : ""}${c.note ? " · " + esc(c.note) : ""}</div></span>
         ${driver ? `<button type="button" class="wall-del" data-delc="${c.id}" title="Remove">✕</button>` : `<button type="button" class="btn-th small ${inCar ? "accent" : ""}" data-ride="${c.id}" ${!inCar && !left ? "disabled" : ""}>${inCar ? "✓ Riding" : left ? "Need a seat" : "Full"}</button>`}</div>`; }).join("") : `<p class="muted-th sm" style="margin:2px 0 4px">No rides offered yet.</p>`}`;
@@ -2032,7 +2046,12 @@ async function setRsvp(ev, status) {
   const me = myUid();
   if (status === "going" && ev.approval && ev.hostId !== me && !(ev.cohostUids || []).includes(me)) status = "pending";
   else if (status === "going" && isFull(ev) && (ev.rsvps || {})[me] !== "going") status = "waitlist";
-  try { await updateDoc(doc(db, "events", ev.id), { [`rsvps.${me}`]: status }); }
+  try {
+    await updateDoc(doc(db, "events", ev.id), { [`rsvps.${me}`]: status });
+    if (status === "going") toast("You're going to " + ev.title + "!", null, null, "party");
+    else if (status === "waitlist") toast("You're on the waitlist. We'll tell you if a spot opens.", null, null, "idle");
+    else if (status === "pending") toast("Sent to the host to approve.", null, null, "idle");
+  }
   catch (e) { toast("Couldn't RSVP: " + e.message); }
 }
 // Going/Maybe with unanswered host questions saves the answers first (as their
@@ -2170,7 +2189,7 @@ function openEventInviteDialog(ev) {
       if (texted.length && !ev.openLink) updates.openLink = true;
       try {
         if (Object.keys(updates).length) await updateDoc(doc(db, "events", ev.id), updates);
-        closeDialog(); toast(direct.length ? direct.length + " added" + (texted.length ? ", texting the rest" : "") : texted.length ? "Opening Messages…" : "Invites sent");
+        closeDialog(); toast(direct.length ? direct.length + " added" + (texted.length ? ", texting the rest" : "") : texted.length ? "Opening Messages…" : "Invites sent", null, null, "happy");
         const text = eventInviteText({ ...ev, openLink: true });
         if (texted.length === 1) setTimeout(() => { location.href = smsLink([texted[0].e164], text); }, 400);
         else if (texted.length > 1) setTimeout(() => openTextInviteDialog(texted, text), 400);
@@ -2251,6 +2270,7 @@ function moneyBody() {
   <div class="section-head"><h2>Money</h2><button class="btn primary small" id="addExpense">＋ Expense</button></div>
   <div class="tiles"><div class="card tile owe"><span class="muted sm">You owe</span><div class="amt">${fmt$(iOwe)}</div></div>
     <div class="card tile owed"><span class="muted sm">Owed to you</span><div class="amt">${fmt$(owed)}</div></div></div>
+  ${!mine.length && rows.length ? `<div class="card empty compact">${dot("party", 72)}<b>All squared up</b><p class="muted">Nobody owes anybody. Nice.</p></div>` : ""}
   ${mine.length ? `<div class="section-head"><h2>Settle up</h2>${pairs.length > 1 ? `<button class="btn small ${S.simplePay ? "primary" : ""}" id="simplePay" title="Combine debts into the fewest payments">${S.simplePay ? "✓ Fewest payments" : "Fewest payments"}</button>` : ""}</div><div class="stack">${mine.map(p => {
     const other = S.contacts.get(p.from === me ? p.to : p.from) || {};
     let pay = "";
@@ -2279,7 +2299,7 @@ function wireMoney() {
 // ---------- EXPENSE PAGE (details + discussion) ----------
 function expenseBody(id) {
   const x = S.expenses.get(id);
-  if (!x) return `<div class="card empty"><b>Expense not found</b><p class="muted">It may have been deleted.</p><button class="btn" data-go="#/money">Back to Money</button></div>`;
+  if (!x) return `<div class="card empty">${dot("oops", 72)}<b>Expense not found</b><p class="muted">It may have been deleted.</p><button class="btn" data-go="#/money">Back to Money</button></div>`;
   const n = (x.split || []).length || 1, share = Math.round(x.amountCents / n);
   const ev = x.eventId ? S.events.get(x.eventId) : null;
   return `
@@ -2359,7 +2379,7 @@ function requestViaFirestore(col, payload, timeoutMs = 90000) {
 async function scanReceipt(eventId, restrict, seed, groupId) {
   if (isDemo()) return toast("Receipt scanning is off in the demo -- try Add expense instead.");
   const f = await pickFile("image/*"); if (!f) return;
-  toast("Reading the receipt…");
+  toast("Reading the receipt…", null, null, "thinking");
   try {
     const image = await compressImage(f, 2000, 0.85);
     const thumb = await compressImage(f, 1000, 0.72);   // kept on the expense for reference
@@ -2601,7 +2621,8 @@ function activityBody() {
   if (S._actOpenSeen == null) S._actOpenSeen = seenAt();   // keep "new" highlights until you leave the page
   const rows = S.activity || [];
   return `<div class="section-head"><h2>Activity</h2></div>
-  <div class="card">${rows.length ? rows.map(a => `<a class="act-row ${a.createdAt > S._actOpenSeen ? "new" : ""}" data-act="${esc(a.url || "#/")}"><span class="li">${actIcon(a)}</span><div style="flex:1;min-width:0"><b>${esc(a.title)}</b><div class="muted sm" style="overflow-wrap:anywhere">${esc(a.body || "")}</div></div><span class="muted sm">${ago(a.createdAt)}</span></a>`).join("") : emptyState("🔔", "Nothing yet", "Invites, comments, RSVPs, and reminders will show up here.")}</div>`;
+  <div class="card">${rows.length ? rows.map(a => `<a class="act-row ${a.createdAt > S._actOpenSeen ? "new" : ""}" data-act="${esc(a.url || "#/")}"><span class="li">${actIcon(a)}</span><div style="flex:1;min-width:0"><b>${esc(a.title)}</b><div class="muted sm" style="overflow-wrap:anywhere">${esc(a.body || "")}</div></div><span class="muted sm">${ago(a.createdAt)}</span></a>`).join("") : emptyState("🔔", "Nothing yet", "Invites, comments, RSVPs, and reminders will show up here.", "sleepy")}</div>
+  ${rows.length ? `<div class="empty caughtup">${dot("sleepy", 64)}<b>You're all caught up</b><p class="muted">Nothing new since you last looked.</p></div>` : ""}`;
 }
 function wireActivity() {
   document.querySelectorAll("[data-act]").forEach(a => a.onclick = e => { e.preventDefault(); location.hash = String(a.dataset.act).replace(/^.*#/, "#"); });

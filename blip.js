@@ -167,5 +167,10 @@
     return () => { stopped = true; cancelAnimationFrame(raf); };
   }
 
-  window.Blip = { svg, morph, play, SHAPES };
+  // Dot in a party hat: the one prop Dot ever wears (birthdays, the day of an event).
+  function hat(size = 56, mood = "party") {
+    const f = n => (size * n).toFixed(1);
+    return `<span class="blip-hat" style="position:relative;display:inline-block;width:${size}px;height:${size}px;flex:none">${svg({ mood, size })}<svg viewBox="0 0 40 40" style="position:absolute;left:${f(.36)}px;top:${f(-.16)}px;width:${f(.34)}px;height:${f(.34)}px;transform:rotate(14deg)" aria-hidden="true"><path d="M20 2 L34 34 L6 34 Z" fill="#FF6B57"/><path d="M13 20 L27 20 L30 27 L10 27 Z" fill="#FFF7EA" opacity=".8"/><circle cx="20" cy="3" r="4" fill="#FFC145"/></svg></span>`;
+  }
+  window.Blip = { svg, hat, morph, play, SHAPES };
 })();

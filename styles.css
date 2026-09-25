@@ -196,6 +196,7 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 /* toast */
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--bg);padding:11px 18px;border-radius:12px;font-size:14px;font-weight:500;opacity:0;pointer-events:none;transition:.28s;z-index:100;max-width:92vw;text-align:center;box-shadow:var(--shadow-lg)}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#toast{display:flex;align-items:center;gap:9px;text-align:left;padding:8px 16px 8px 9px} .toast-dot{flex:none;display:flex} .toast-dot .blip{display:block}
 
 /* ---------- AUTH ---------- */
 .auth-wrap{min-height:100vh;display:grid;place-items:center;position:relative;overflow:hidden;padding:20px}
@@ -526,3 +527,19 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .li.blip-li{background:none;width:44px;height:44px}
 .splash-blip{width:min(440px,92vw);height:auto;display:block;overflow:visible}
 @media (prefers-reduced-motion:reduce){.blip.idle *{animation:none!important}}
+
+/* ---- Dot placements ---- */
+.dot-note{display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;margin:6px 0 4px}
+.dot-note .blip{flex:none}
+.empty.compact{padding:18px 18px 20px;margin-bottom:14px}
+.empty.caughtup{padding:22px 18px 8px;background:none;border:0;box-shadow:none}
+.dot-say{display:flex;gap:10px;align-items:flex-start;margin:4px 0 12px;text-align:left}
+.say-bubble{background:var(--surface2);border-radius:14px;padding:10px 12px;font-size:14px;position:relative;flex:1;line-height:1.4}
+.say-bubble::before{content:"";position:absolute;left:-7px;top:18px;border:7px solid transparent;border-right-color:var(--surface2);border-left:0}
+.notif-ico.dot-ico{background:none;width:auto;height:auto;font-size:0;display:flex;align-items:center;padding-top:6px}
+.today-card{cursor:pointer;border:1.5px solid var(--sun);background:linear-gradient(90deg,#FFF6DC,var(--surface));padding-top:16px}
+.today-card .blip-hat{margin-top:4px}
+.eyebrow-sm{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.demo-bar{display:flex;align-items:center;justify-content:center;gap:8px;text-align:left}
+.demo-bar .blip{flex:none}
+.cover-spin .blip{margin-bottom:-4px}
