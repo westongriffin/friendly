@@ -187,34 +187,157 @@ function toast(msg, action, onAction, mood) {
 }
 // Tap the yellow dot in the logo: Dot drops out of it with a one-line tip, then climbs back in.
 const LOGO_TIPS = {
-  home: ["Tap a group chip up top to see just that crew's plans.", "Long-press an event tile? Not yet. But tap Calendar to see the month.", "The Today card shows up on the morning of anything you're going to.", "Past events keep their photos and wall. Scroll down to revisit them."],
-  event: ["Tap a guest's name to see their Venmo, so settling up is one tap.", "Add a bring list and I'll tell you when everything's covered.", "Hosts can nudge everyone who hasn't answered, in one tap.", "Share the link: anyone who joins shows up in your Activity feed."],
-  groups: ["Plan from inside a group and everyone's invited automatically.", "Group members see each other's birthdays a month out."],
-  money: ["Fewest payments combines debts so fewer people have to pay.", "Snap a receipt and I'll read the total for you."]
+  home: [
+    "Tap a group chip up top to see just that crew's plans.",
+    "Tap Calendar to see the month; tap a day to see what's on it.",
+    "The Today card shows up on the morning of anything you're going to.",
+    "Past events keep their photos and their wall. Scroll down to revisit them.",
+    "Search finds events, places, notes, groups and expenses in one box.",
+    "The bell shows what's new: RSVPs, comments, invites and reminders.",
+    "Tap me at the bottom corner to start an event, a meeting or an expense.",
+    "Meetings are the plain tiles: title, time, place, calendar invite. No theme needed.",
+    "Copy an old event to plan the next one: open it and tap Duplicate.",
+    "Add a friend's birthday and I'll bring it up a month out, with a Plan it button.",
+    "Turn on notifications in your profile and I'll buzz you when plans change.",
+    "Friends who join through your link land in your Activity feed."
+  ],
+  event: [
+    "Tap a guest's name to see their Venmo, so settling up is one tap.",
+    "Add a bring list and I'll tell you when everything's covered.",
+    "Hosts can nudge everyone who hasn't answered, in one tap.",
+    "Share the link: anyone who joins shows up in your Activity feed.",
+    "Bringing someone? Set your plus-ones and add their names so the host knows.",
+    "Add a poll with dates and the winning date can become the plan in one tap.",
+    "Offer a ride under Carpool and people can grab a seat.",
+    "On the day, tap On my way or Running late so the host isn't guessing.",
+    "Drop photos on the wall during the party; they stay with the event forever.",
+    "Add songs to the playlist and the host gets one list to play.",
+    "Hype the event to show the host you're excited before you can commit.",
+    "Cap the guest list and I'll run a waitlist for you.",
+    "Ask RSVP questions, like dietary needs, and read the answers in one place.",
+    "Tap Add to calendar once and I'll keep the calendar entry updated.",
+    "Hosts can paint a new cover any time: Edit, then Paint a cover."
+  ],
+  groups: [
+    "Plan from inside a group and everyone's invited automatically.",
+    "Group members see each other's birthdays a month out.",
+    "The Crew tab shows what the group has spent together and who owes whom.",
+    "Group chat is for the ongoing thread; event walls are for the night itself.",
+    "Add people by phone number; they get a text with the link to join.",
+    "Anyone in the group can add a poll to help decide the next plan.",
+    "Give a group an emoji and a color so its events are easy to spot on the home screen.",
+    "Filter the home screen by group with the chips under Upcoming.",
+    "Hosts can remove someone from a group; they lose access to its events too.",
+    "Leaving a group keeps the events you already RSVP'd to.",
+    "Add your own birthday in your profile so your groups can celebrate you."
+  ],
+  money: [
+    "Fewest payments combines debts so fewer people have to pay.",
+    "Snap a receipt and I'll read the total for you.",
+    "Split an expense unevenly by picking who was in on it.",
+    "Mark as paid logs a payback and updates the balances; you can undo it right after.",
+    "Tap Pay and Venmo opens with the amount and the person already filled in.",
+    "Add your Venmo in your profile so friends can pay you in one tap.",
+    "Expenses can live on an event or on a group, whichever fits.",
+    "The You owe and Owed to you tiles net everything out across all your friends.",
+    "Photos of receipts stay attached to the expense for later.",
+    "Settling in cash? Mark it paid here so the balance clears for both of you.",
+    "When everything's squared up, I'll say so."
+  ]
 };
 let logoTipTimer = null;
-let dotTapped = false, dotHopped = false;
-function showLogoTip(custom) {
+let dotTapped = false, dotHopped = false, dotCurrent = null, dotLastId = null, dotIntroPending = false;
+// custom: a plain line to say. sug: a suggestion {id, kind, text, label, run} (see dotSuggestions). Neither: the next rotating tip,
+// unless a suggestion is waiting, which always comes first.
+function showLogoTip(custom, sug) {
   if (!window.Blip || document.getElementById("logoTip")) return;
   const dotEl = el("brandDot"); if (!dotEl) return;
   dotTapped = true;
+  if (!custom && !sug && dotCurrent) sug = dotCurrent;
   const key = ["event", "groups", "money"].includes(S.route.name) ? S.route.name : "home";
-  let tip = custom;
+  let tip = custom || (sug && sug.text);
   if (!tip) { const list = LOGO_TIPS[key]; let i = 0; try { i = (parseInt(localStorage.getItem("friendlyTip:" + key) || "0", 10) || 0); localStorage.setItem("friendlyTip:" + key, String(i + 1)); } catch {} tip = list[i % list.length]; }
   const r = dotEl.getBoundingClientRect();
   const wrap = document.createElement("div"); wrap.id = "logoTip";
   wrap.style.left = r.left + "px"; wrap.style.top = r.top + "px";
-  wrap.innerHTML = `<div class="logo-tip-dot">${dot("happy", 56)}</div><div class="logo-tip-bubble">${esc(tip)}</div>`;
+  wrap.innerHTML = `<div class="logo-tip-dot">${dot(sug ? "thinking" : "happy", 56)}</div><div class="logo-tip-bubble">${esc(tip)}${sug ? `<div class="tip-actions"><button type="button" class="btn primary small" id="tipDo">${esc(sug.label)}</button><button type="button" class="btn small" id="tipSkip">Not now</button></div>` : ""}</div>`;
   document.body.appendChild(wrap);
   dotEl.classList.add("away");
   requestAnimationFrame(() => wrap.classList.add("out"));
-  const hide = () => {
+  let acted = false;
+  const hide = e => {
+    if (e && wrap.contains(e.target)) return;                       // taps inside the bubble are for its buttons
     clearTimeout(logoTipTimer); document.removeEventListener("click", hide, true);
     wrap.classList.remove("out"); wrap.classList.add("back");
     setTimeout(() => { wrap.remove(); const d = el("brandDot"); if (d) d.classList.remove("away"); }, 420);
+    if (sug) { dotMarkSeen(sug, !acted); dotCurrent = null; const d = el("brandDot"); if (d) d.classList.remove("has-tip"); }
   };
-  logoTipTimer = setTimeout(hide, 6500);
+  if (sug) {
+    el("tipDo").onclick = ev => { ev.stopPropagation(); acted = true; hide(); try { sug.run(); } catch (e2) { toast(e2.message); } };
+    el("tipSkip").onclick = ev => { ev.stopPropagation(); hide(); };
+  }
+  logoTipTimer = setTimeout(hide, sug ? 14000 : 8500);
   setTimeout(() => document.addEventListener("click", hide, true), 250);
+}
+
+// ---- Dot's suggestions: moments the app can already see, offered through the logo dot.
+// Loud kinds may speak unprompted (at most one a day); quiet kinds only put a ring on the dot and wait for a tap.
+// Every suggestion shows once per subject; a kind dismissed twice is dropped for that device.
+const DOT_KINDS = { invite: "loud", address: "loud", nudge: "loud", venmo: "loud", request: "quiet", bring: "quiet", calendar: "quiet", birthday: "quiet", cover: "quiet" };
+function dotStore(k) { try { return JSON.parse(localStorage.getItem(k) || "{}"); } catch { return {}; } }
+function dotSave(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+function dotMarkSeen(sug, dismissed) {
+  const seen = dotStore("friendlyDotSeen"); seen[sug.id] = Date.now(); dotSave("friendlyDotSeen", seen);
+  if (dismissed) { const m = dotStore("friendlyDotMute"); m[sug.kind] = (m[sug.kind] || 0) + 1; dotSave("friendlyDotMute", m); }
+}
+function dotSuggestions() {
+  if (!S.profile || !S.ready) return [];
+  const me = myUid(), now = Date.now(), today = todayStr(), out = [];
+  const seen = dotStore("friendlyDotSeen"), mute = dotStore("friendlyDotMute");
+  const push = (kind, subj, text, label, run) => { const id = kind + ":" + subj; if (seen[id] || (mute[kind] || 0) >= 2) return; out.push({ id, kind, tier: DOT_KINDS[kind], text, label, run }); };
+  const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+  const daysTo = e => Math.round((evDate(e) - midnight) / 864e5);
+  const pendingOf = e => (e.invitedUids || []).filter(u => u !== me && !(e.rsvps || {})[u]);
+  const route = S.route;
+  try {
+    for (const e of S.events.values()) {
+      if (!e.date || e.date < today) continue;
+      const mine = canManage(e), n = (e.invitedUids || []).length, age = now - (e.createdAt || 0);
+      if (e.hostId === me && n <= 1 && !(e.invitedPhones || []).length && age > 60e3 && age < 3 * 864e5)
+        push("invite", e.id, `Nobody's on “${e.title}” yet. Want a hand inviting people?`, "Add people", () => { go("#/e/" + e.id); setTimeout(() => { const x = S.events.get(e.id); if (x) openEventInviteDialog(x); }, 500); });
+      if (mine && e.date === today && !e.location && e.kind !== "meeting")
+        push("address", e.id, `“${e.title}” is today and has no address. Add one so people can tap for directions.`, "Add location", () => editEvent(e));
+      if (e.hostId === me && daysTo(e) <= 3 && pendingOf(e).length >= 2)
+        push("nudge", e.id, `${pendingOf(e).length} people haven't answered for “${e.title}”. Want me to nudge them?`, "Nudge them", () => nudge(e));
+      if (route.name === "event" && route.id === e.id && mine && e.kind !== "meeting") {
+        if (n >= 6 && !typed("bring").length) push("bring", e.id, "Big group. A bring list keeps it from being all chips.", "Start a list", () => { const b = el("addBring"); if (b) b.click(); });
+        if (!e.cover) push("cover", e.id, "Want me to paint a cover for this one?", "Paint it", () => editEvent(e));
+      }
+    }
+    if ([...S.expenses.values()].some(x => x.paidBy === me) && !(S.profile.venmo || "").trim())
+      push("venmo", "me", "Add your Venmo so friends can pay you back in one tap.", "Add Venmo", () => go("#/profile"));
+    if (S.expenses.size) for (const p of pairwise()) { if (p.to === me && (S.contacts.get(p.from) || {}).venmo && p.amount >= 500) { push("request", p.from, `${first(nameOf(p.from))} owes you ${fmt$(p.amount)}. One tap to request it.`, "Request", () => payVenmo(p.from, p.amount, "charge")); break; } }
+    const hosted = [...S.events.values()].filter(e => e.hostId === me);
+    if (hosted.length >= 2 && !S.profile.calToken)
+      push("calendar", "me", "Connect your calendar and every plan lands on it automatically.", "Connect", () => openCalendarDialog(hosted.find(e => e.date >= today) || hosted[0]));
+    if (S.groups.size && !S.profile.birthday)
+      push("birthday", "me", "Add your birthday and your friends get a nudge a month out.", "Add it", () => go("#/profile"));
+  } catch (e) { /* a suggestion is never worth an error */ }
+  const rank = { loud: 0, quiet: 1 };
+  return out.sort((a, b) => rank[a.tier] - rank[b.tier]);
+}
+// Runs after every shell render: ring the dot if something is waiting, hop when it is new, speak up for loud ones (once a day).
+function dotWatch() {
+  const d = el("brandDot"); if (!d || !window.Blip) return;
+  const sug = dotSuggestions()[0] || null; dotCurrent = sug;
+  d.classList.toggle("has-tip", !!sug);
+  if (!sug) return;
+  if (sug.id !== dotLastId) { dotLastId = sug.id; d.classList.add("hop"); setTimeout(() => d.classList.remove("hop"), 1400); }
+  let loudDay = ""; try { loudDay = localStorage.getItem("friendlyDotLoudDay") || ""; } catch {}
+  if (sug.tier === "loud" && loudDay !== todayStr() && !document.getElementById("logoTip") && !dotIntroPending) {
+    try { localStorage.setItem("friendlyDotLoudDay", todayStr()); } catch {}
+    setTimeout(() => { if (dotCurrent && dotCurrent.id === sug.id) showLogoTip(null, sug); }, 1500);
+  }
 }
 // So people learn the dot is Dot: one hello per device the first time home renders, and a
 // small silent hop once per session if the dot hasn't been tapped yet. Never an unprompted tip after that.
@@ -223,7 +346,8 @@ function dotIntro() {
   let seen = false; try { seen = !!localStorage.getItem("friendlyDotHello"); } catch {}
   if (!seen) {
     try { localStorage.setItem("friendlyDotHello", "1"); } catch {}
-    setTimeout(() => { if (S.route.name === "home" && el("brandDot")) showLogoTip("Hi, I'm Dot. Tap me up here any time you want a tip."); }, 1600);
+    dotIntroPending = true;
+    setTimeout(() => { if (S.route.name === "home" && el("brandDot")) showLogoTip("Hi, I'm Dot. Tap me up here any time you want a tip."); setTimeout(() => { dotIntroPending = false; dotWatch(); }, 8000); }, 1600);
     dotHopped = true; return;
   }
   if (!dotHopped) { dotHopped = true; setTimeout(() => { const d = el("brandDot"); if (d && !dotTapped && !document.getElementById("logoTip")) { d.classList.add("hop"); setTimeout(() => d.classList.remove("hop"), 1400); } }, 25000); }
@@ -869,6 +993,7 @@ function wireShell() {
   wireUpdateBanner();
   document.querySelectorAll("[data-accept]").forEach(b => b.onclick = () => acceptInvite(b.dataset.accept, b));
   if (S.route.name === "home") { wireHome(); dotIntro(); }
+  dotWatch();
   if (S.route.name === "new") wireCompose();
   if (S.route.name === "groups") wireGroups();
   if (S.route.name === "group") wireGroupPage();

@@ -69,6 +69,7 @@ img{max-width:100%}
 .brand-dot{position:relative;width:8px;height:8px;border-radius:50%;background:var(--sun);margin:2px 0 0 4px;padding:0;flex:none;transition:transform .25s;cursor:pointer}
 .brand-dot::before{content:"";position:absolute;inset:-12px}   /* a finger-sized target around an 8px dot */
 .brand-dot.away{transform:scale(0)}
+.brand-dot.has-tip{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--accent)}
 .brand-dot.hop{animation:dot-hop 1.3s cubic-bezier(.34,1.56,.64,1)}
 @keyframes dot-hop{0%,100%{transform:translateY(0)}15%{transform:translateY(-6px) scale(1.15)}30%{transform:translateY(0) scale(.95,.85)}45%{transform:translateY(-4px) scale(1.1)}60%{transform:translateY(0)}}
 
@@ -568,5 +569,7 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 #logoTip.out{transform:translate(-4px,26px) scale(1);opacity:1}
 #logoTip.back{transform:translate(0,0) scale(.14);opacity:0;transition:transform .4s ease-in,opacity .25s .15s}
 #logoTip .logo-tip-dot{flex:none;filter:drop-shadow(0 6px 14px rgba(60,40,20,.22))}
-#logoTip .logo-tip-bubble{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:10px 13px;font-size:14px;line-height:1.4;box-shadow:var(--shadow-lg);max-width:min(300px,calc(100vw - 110px));position:relative;margin-top:6px;color:var(--ink)}
+#logoTip .logo-tip-bubble{pointer-events:auto;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:10px 13px;font-size:14px;line-height:1.4;box-shadow:var(--shadow-lg);max-width:min(300px,calc(100vw - 110px));position:relative;margin-top:6px;color:var(--ink)}
 #logoTip .logo-tip-bubble::before{content:"";position:absolute;left:-7px;top:16px;border:7px solid transparent;border-right-color:var(--surface);border-left:0}
+#logoTip .tip-actions{display:flex;gap:6px;margin-top:9px}
+#logoTip .tip-actions .btn{padding:6px 12px;font-size:13px}
