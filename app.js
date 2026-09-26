@@ -1396,13 +1396,26 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), subm
   if (el("invPick")) el("invPick").onclick = async () => {
     try {
       if (nativeContacts) {
-        const r = await nativeContacts.pickContact({ projection: { name: true, emails: true, phones: true } });
-        const c = (r && (r.contact || (r.contacts && r.contacts[0]))) || (r && r.name ? r : null);
-        if (!c) return toast("No contact came back from the picker.");
-        const nm = c.name ? (c.name.display || [c.name.given, c.name.family].filter(Boolean).join(" ")) : (c.displayName || "");
-        const rawPhones = (c.phones || c.phoneNumbers || []).map(p => (p && p.number) || (typeof p === "string" ? p : "")).filter(Boolean);
-        const phone = rawPhones.find(p => toE164(p)) || rawPhones[0] || "";
-        addPicked(nm, phone);
+        const projection = { name: true, emails: true, phones: true };
+        // App builds from 1.0.3 have pickContacts (check several, tap Done); older installs pick one at a time.
+        let list;
+        try {
+          const r = await nativeContacts.pickContacts({ projection });
+          list = (r && r.contacts) || [];
+          if (!list.length) return;   // cancelled, or nobody checked
+        } catch (e) {
+          if (!/not implemented|unimplemented|not a function/i.test(String((e && (e.code || e.message)) || e))) throw e;
+          const r = await nativeContacts.pickContact({ projection });
+          const c = (r && (r.contact || (r.contacts && r.contacts[0]))) || (r && r.name ? r : null);
+          if (!c) return toast("No contact came back from the picker.");
+          list = [c];
+        }
+        for (const c of list) {
+          const nm = c.name ? (c.name.display || [c.name.given, c.name.family].filter(Boolean).join(" ")) : (c.displayName || "");
+          const rawPhones = (c.phones || c.phoneNumbers || []).map(p => (p && p.number) || (typeof p === "string" ? p : "")).filter(Boolean);
+          const phone = rawPhones.find(p => toE164(p)) || rawPhones[0] || "";
+          await addPicked(nm, phone);
+        }
       }
       else { const rows = await navigator.contacts.select(["name", "tel"], { multiple: true }); rows.forEach(r => addPicked((r.name || [])[0] || "", (r.tel || [])[0] || "")); }
     } catch (e) { const m = String((e && e.message) || e || ""); toast(/cancel/i.test(m) || !m ? "Contact picking was cancelled." : "Couldn't read that contact: " + m); }
