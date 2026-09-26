@@ -1706,7 +1706,7 @@ function openNightBuilder() {
   const VIBES = [["🛋️", "Chill"], ["🎉", "Big night"], ["💛", "Date night"], ["🌳", "Outdoors"], ["🎭", "Something cultural"], ["🍽️", "Just a great dinner"], ["🎲", "Surprise me"]];
   const WHO = ["Just us two", "3–5 people", "6–10 people", "The whole group"], WHEN = ["Tonight", "Tomorrow", "This weekend", "Pick a date"], BUDGET = ["Under $30", "$30–75", "Splurge"];
   const opt = (k, list) => `<div class="opts">${list.map(o => { const v = Array.isArray(o) ? o[1] : o, ic = Array.isArray(o) ? o[0] : ""; return `<button type="button" class="opt ${B[k] === v ? "on" : ""}" data-k="${k}" data-v="${esc(v)}">${ic ? `<span>${ic}</span>` : ""}${esc(v)}</button>`; }).join("")}</div>`;
-  const crumbs = () => [B.vibe, B.who, B.when === "Pick a date" ? B.date : B.when, B.budget].filter(Boolean).join(" · ");
+  const crumbs = () => B.freeOnly ? `“${B.free}”` : [B.vibe, B.who, B.when === "Pick a date" ? B.date : B.when, B.budget].filter(Boolean).join(" · ");
   const windowFor = () => { const t = todayStr(); if (B.when === "Tonight") return [t, t]; if (B.when === "Tomorrow") return [addDays(t, 1), addDays(t, 1)]; if (B.when === "Pick a date") return [B.date, B.date]; const dow = new Date().getDay(); const toFri = dow <= 5 ? 5 - dow : 6; const from = dow === 6 || dow === 0 ? t : addDays(t, toFri); const to = dow === 0 ? t : addDays(from, dow === 6 ? 1 : 2); return [from, to]; };
   dialog(`<div id="nb"></div>`, null, null);
   const draw = () => {
@@ -1720,7 +1720,7 @@ function openNightBuilder() {
     box.innerHTML = `<div class="dot-say">${dot("happy", 52)}<div class="say-bubble">${esc(q)}</div></div>${crumbs() ? `<p class="muted sm" style="margin:-4px 0 8px"><a id="nbBack" style="color:var(--accent);font-weight:600">‹ Back</a> · ${esc(crumbs())}</p>` : ""}${body}`;
     box.querySelectorAll(".opt").forEach(b => b.onclick = () => { B[b.dataset.k] = b.dataset.v; if (b.dataset.k === "when" && b.dataset.v !== "Pick a date") B.date = ""; draw(); });
     if (el("nbBack")) el("nbBack").onclick = () => { if (B.budget) B.budget = ""; else if (B.when === "Pick a date" && B.date) B.date = ""; else if (B.when) B.when = ""; else if (B.who) B.who = ""; else B.vibe = ""; draw(); };
-    if (el("nbFreeGo")) el("nbFreeGo").onclick = () => { B.free = el("nbFree0").value.trim(); if (B.free.length < 6) return toast("Tell me a little more."); B.vibe = "Surprise me"; B.who = B.who || "a few friends"; B.when = B.when || "This weekend"; B.budget = B.budget || "flexible"; run(); };
+    if (el("nbFreeGo")) el("nbFreeGo").onclick = () => { B.free = el("nbFree0").value.trim(); if (B.free.length < 6) return toast("Tell me a little more."); B.freeOnly = true; B.vibe = "Surprise me"; B.who = B.who || "a few friends"; B.when = B.when || "This weekend"; B.budget = B.budget || "flexible"; run(); };
     if (el("nbDateGo")) el("nbDateGo").onclick = () => { const v = el("nbDate").value; if (!v) return toast("Pick a day."); B.date = v; draw(); };
     if (el("nbGo")) el("nbGo").onclick = () => { B.free = el("nbFree").value.trim(); if (!B.budget) B.budget = "flexible"; run(); };
   };

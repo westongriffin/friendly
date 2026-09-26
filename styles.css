@@ -651,3 +651,5 @@ html{background:var(--bg)}
 /* the intro dissolves into the app: a gentle fade with a slight lift */
 .splash.splash-leave{transition:opacity .6s ease,transform .6s cubic-bezier(.2,.7,.2,1);pointer-events:none}
 .splash.splash-leave.out{opacity:0;transform:scale(1.05)}
+/* meeting tiles: the status pills sit in their own row above the Meeting tag instead of floating over it */
+.meet-tile .ev-pills{position:static;justify-content:flex-start;max-width:none;margin:0 0 6px}
