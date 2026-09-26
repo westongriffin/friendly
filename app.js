@@ -316,8 +316,8 @@ function dotSuggestions() {
         if (!e.cover) push("cover", e.id, "Want me to paint a cover for this one?", "Paint it", () => editEvent(e));
       }
     }
-    if ([...S.expenses.values()].some(x => x.paidBy === me) && !(S.profile.venmo || "").trim())
-      push("venmo", "me", "Add your Venmo so friends can pay you back in one tap.", "Add Venmo", () => go("#/profile"));
+    if ([...S.expenses.values()].some(x => x.paidBy === me) && !(S.profile.venmo || S.profile.zelle || S.profile.cashapp || "").trim())
+      push("venmo", "me", "Add a way to get paid back (Venmo, Zelle or Cash App) so friends can settle in one tap.", "Add it", () => go("#/profile"));
     if (S.expenses.size) for (const p of pairwise()) { if (p.to === me && (S.contacts.get(p.from) || {}).venmo && p.amount >= 500) { push("request", p.from, `${first(nameOf(p.from))} owes you ${fmt$(p.amount)}. One tap to request it.`, "Request", () => payVenmo(p.from, p.amount, "charge")); break; } }
     const hosted = [...S.events.values()].filter(e => e.hostId === me);
     if (hosted.length >= 2 && !S.profile.calToken)
@@ -698,7 +698,7 @@ function resubscribeEvents(u) {
 
 function rebuildContacts() {
   const m = new Map();
-  if (S.user && S.profile) m.set(S.user.uid, { name: S.profile.name, venmo: S.profile.venmo, phone: S.profile.phone, zelle: S.profile.zelle || "", cashapp: S.profile.cashapp || "", photo: S.profile.photo || "" });
+  if (S.user && S.profile) m.set(S.user.uid, { name: S.profile.name, venmo: S.profile.venmo, phone: S.profile.phone, zelle: S.profile.zelle || "", cashapp: S.profile.cashapp || "", payPref: S.profile.payPref || "", photo: S.profile.photo || "" });
   for (const g of S.groups.values())
     for (const [uid, info] of Object.entries(g.members || {})) if (!m.has(uid)) m.set(uid, info);
   S.contacts = m;
@@ -783,6 +783,7 @@ function onboardingBody() {
           <input id="obZelle" placeholder="+1 555 123 4567" autocomplete="off"></label>
         <label class="field"><span>Cash App</span>
           <input id="obCashapp" placeholder="$samrivera" autocomplete="off"></label></div>
+        <label class="field"><span>Preferred way to get paid back</span><select id="obPayPref">${payPrefOptions("")}</select></label>
         <p class="muted sm" style="margin:-4px 0 10px">Payment handles are shared only with people in your groups, so they can pay you back. All optional.</p>
         <label class="field"><span>Birthday <span class="muted">(so friends get a heads-up a month out)</span></span>
           <input id="obBday" type="date" autocomplete="bday"></label>
@@ -797,8 +798,9 @@ function wireOnboarding() {
   const finish = async () => {
     const email = el("obEmail").value.trim(), venmo = el("obVenmo").value.trim(), apple = el("obApple").value.trim(), birthday = el("obBday") ? el("obBday").value : "";
     const zelle = ((el("obZelle") || {}).value || "").trim(), cashapp = ((el("obCashapp") || {}).value || "").trim();
+    let payPref = (el("obPayPref") || {}).value || ""; if (payPref && !{ venmo, apple, zelle, cashapp }[payPref]) payPref = "";
     try {
-      await updateDoc(doc(db, "users", myUid()), { email: email.toLowerCase(), venmo, zelle, cashapp, phone: apple, phoneE164: toE164(apple) || myPhoneE164(), ...(birthday ? { birthday } : {}), onboarded: true });
+      await updateDoc(doc(db, "users", myUid()), { email: email.toLowerCase(), venmo, zelle, cashapp, payPref, phone: apple, phoneE164: toE164(apple) || myPhoneE164(), ...(birthday ? { birthday } : {}), onboarded: true });
     } catch (e) { toast(e.message); }
   };
   el("onboardForm").onsubmit = e => { e.preventDefault(); finish(); };
@@ -1309,7 +1311,7 @@ function openGroupDialog() {
       const id = newId();
       await setDoc(doc(db, "groups", id), {
         name, emoji, color: "#FFE0B2", ownerId: myUid(), memberUids,
-        members: { [myUid()]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "", zelle: S.profile.zelle || "", cashapp: S.profile.cashapp || "", birthday: S.profile.birthday || "" } },
+        members: { [myUid()]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "", zelle: S.profile.zelle || "", cashapp: S.profile.cashapp || "", payPref: S.profile.payPref || "", birthday: S.profile.birthday || "" } },
         createdAt: Date.now()
       });
       closeDialog(); go("#/g/" + id); toast("Group created");
@@ -1443,7 +1445,7 @@ async function acceptInvite(gid, btn) {
       invitedEmails: (g.invitedEmails || []).filter(e => e !== (S.user.email || "").toLowerCase()),
       invitedPhones: (g.invitedPhones || []).filter(p => p !== (S.profile.phoneE164 || "-")),
       [`invitedPhoneNames.${S.profile.phoneE164 || "-"}`]: deleteField(),
-      [`members.${myUid()}`]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "", zelle: S.profile.zelle || "", cashapp: S.profile.cashapp || "", photo: S.profile.photo || "", birthday: S.profile.birthday || "" }
+      [`members.${myUid()}`]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "", zelle: S.profile.zelle || "", cashapp: S.profile.cashapp || "", payPref: S.profile.payPref || "", photo: S.profile.photo || "", birthday: S.profile.birthday || "" }
     });
     toast("You're in! Welcome to " + g.name);
     go("#/groups");
@@ -2711,10 +2713,15 @@ function moneyBody() {
     const other = S.contacts.get(p.from === me ? p.to : p.from) || {};
     let pay = "";
     if (p.from === me) {
-      if (other.venmo) pay += `<button class="btn small venmo" data-venmo="${p.to}" data-amt="${p.amount}">Venmo</button>`;
-      if (other.cashapp) pay += `<button class="btn small cashapp" data-cashapp="${p.to}" data-amt="${p.amount}">Cash App</button>`;
-      if (other.zelle) pay += `<button class="btn small zelle" data-zelle="${p.to}" data-amt="${p.amount}" title="Zelle has no payment links: this copies their Zelle handle for your bank app">Zelle</button>`;
-      if (other.phone) pay += `<button class="btn small apple" data-apple="${p.to}" data-amt="${p.amount}"> Cash</button>`;
+      const btns = {
+        venmo: other.venmo ? `<button class="btn small venmo" data-venmo="${p.to}" data-amt="${p.amount}">Venmo</button>` : "",
+        cashapp: other.cashapp ? `<button class="btn small cashapp" data-cashapp="${p.to}" data-amt="${p.amount}">Cash App</button>` : "",
+        zelle: other.zelle ? `<button class="btn small zelle" data-zelle="${p.to}" data-amt="${p.amount}" title="Zelle has no payment links: this copies their Zelle handle for your bank app">Zelle</button>` : "",
+        apple: other.phone ? `<button class="btn small apple" data-apple="${p.to}" data-amt="${p.amount}"> Cash</button>` : ""
+      };
+      const order = [other.payPref, "venmo", "cashapp", "zelle", "apple"].filter((k, i, a) => k && btns[k] && a.indexOf(k) === i);
+      pay = order.map((k, i) => i === 0 && other.payPref === k ? btns[k].replace('class="btn small', 'class="btn small pref') : btns[k]).join("");
+      if (other.payPref && btns[other.payPref]) pay = `<span class="pref-note">Prefers ${PAY_METHODS[other.payPref]}</span>` + pay;
     }
     else if (other.venmo) pay = `<button class="btn small venmo" data-request="${p.from}" data-amt="${p.amount}">Request</button>`;
     return `<div class="card settle-row"><div class="settle-top">${avatar(p.from)}<div style="flex:1"><b>${p.from === me ? "You owe " + esc(nameOf(p.to)) : esc(nameOf(p.from)) + " owes you"}</b></div><span class="amt sm">${fmt$(p.amount)}</span></div><div class="settle-actions">${pay}<button class="btn small" data-record="${p.from}|${p.to}|${p.amount}">${p.from === me ? "Mark as paid" : "Mark as received"}</button></div></div>`;
@@ -2785,6 +2792,8 @@ function payZelle(uid, cents) {
   const done = () => dialog(`<h3>Pay with Zelle</h3><p>Send <b>${fmt$(cents)}</b> to <b>${esc(first(nameOf(uid)))}</b> in your bank app. Their Zelle is <b class="mono">${esc(z)}</b>${navigator.clipboard ? " (copied)" : ""}.</p><p class="muted sm">When it's sent, mark it paid so the balance clears for both of you.</p>`, "I sent it", () => { closeDialog(); markPaid(myUid(), uid, cents, "Zelle"); });
   if (navigator.clipboard) navigator.clipboard.writeText(z).then(done, done); else done();
 }
+const PAY_METHODS = { venmo: "Venmo", apple: "Apple Cash", zelle: "Zelle", cashapp: "Cash App" };
+const payPrefOptions = sel => `<option value="" ${!sel ? "selected" : ""}>No preference</option>` + Object.entries(PAY_METHODS).map(([k, v]) => `<option value="${k}" ${sel === k ? "selected" : ""}>${v}</option>`).join("");
 const payerOptions = (people, sel) => people.map(([u, i]) => `<option value="${u}" ${u === (sel || myUid()) ? "selected" : ""}>${esc(first(i.name))}</option>`).join("");
 // An expense between exactly the members of one group belongs to that group,
 // even when it was added from the Money tab instead of the group page.
@@ -2940,6 +2949,7 @@ function profileBody() {
     <label class="field"><span>Phone (Apple Cash)</span><input id="pPhone" value="${esc(p.phone || "")}" placeholder="+1 555 123 4567"></label></div>
     <div class="two"><label class="field"><span>Zelle <span class="muted">(phone or email)</span></span><input id="pZelle" value="${esc(p.zelle || "")}" placeholder="+1 555 123 4567"></label>
     <label class="field"><span>Cash App</span><input id="pCashapp" value="${esc(p.cashapp || "")}" placeholder="$samrivera"></label></div>
+    <label class="field"><span>Preferred way to get paid back</span><select id="pPayPref">${payPrefOptions(p.payPref || "")}</select></label>
     <label class="field"><span>Birthday <span class="muted">(so your groups can plan something)</span></span><input id="pBday" type="date" value="${esc(p.birthday || "")}"></label>
     <p class="muted sm">Your payment handles are shared only with people in your groups, so they can pay you back.</p>
     <button class="btn primary" id="saveProfile">Save profile</button>
@@ -2987,13 +2997,15 @@ function wireProfile() {
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
   if (el("saveProfile")) el("saveProfile").onclick = async () => {
     const name = el("pName").value.trim(); if (!name) return toast("Name can't be empty.");
-    const venmo = el("pVenmo").value.trim(), phone = el("pPhone").value.trim(), zelle = ((el("pZelle") || {}).value || "").trim(), cashapp = ((el("pCashapp") || {}).value || "").trim();
+    const venmo = el("pVenmo").value.trim(), phone = el("pPhone").value.trim(), zelle = ((el("pZelle") || {}).value || "").trim(), cashapp = ((el("pCashapp") || {}).value || "").trim(), payPref = (el("pPayPref") || {}).value || "";
+    const handleFor = { venmo, apple: phone, zelle, cashapp };
+    if (payPref && !handleFor[payPref]) return toast("Add your " + PAY_METHODS[payPref] + " above, or pick another preferred method.");
     try {
       const birthday = (el("pBday") || {}).value || "";
       const email = (el("pEmail") || {}).value || ""; if (email && !email.includes("@")) return toast("That email doesn't look right.");
-      await updateDoc(doc(db, "users", myUid()), { name, venmo, phone, zelle, cashapp, phoneE164: toE164(phone) || myPhoneE164(), birthday, email: email.trim().toLowerCase() });
+      await updateDoc(doc(db, "users", myUid()), { name, venmo, phone, zelle, cashapp, payPref, phoneE164: toE164(phone) || myPhoneE164(), birthday, email: email.trim().toLowerCase() });
       // propagate name/contact into each group's denormalized members map
-      for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}`]: { name, venmo, phone, zelle, cashapp, photo: S.profile.photo || "", birthday } }).catch(() => {});
+      for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}`]: { name, venmo, phone, zelle, cashapp, payPref, photo: S.profile.photo || "", birthday } }).catch(() => {});
       toast("Profile saved");
     } catch (e) { toast(e.message); }
   };
