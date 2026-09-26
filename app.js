@@ -743,10 +743,10 @@ function withInputKept(fn) {
 function render() { withInputKept(renderNow); }
 // The loading screen: the wordmark flows into Blip (blip.js), then Blip idles until the app is ready.
 let splashStop = null;
-function splashInner(msg) { return window.Blip ? `<svg class="splash-blip"></svg><p>${esc(msg)}</p>` : `<div class="brand splash-brand">Friend<span class="tilt">l</span>y</div><p>${esc(msg)}</p>`; }
+function splashInner(msg) { return window.Blip ? `<svg class="splash-blip"></svg>` : `<div class="brand splash-brand">Friend<span class="tilt">l</span>y</div>`; }
 function mountSplash(root, msg) {
   const cur = root.querySelector(".splash");
-  if (cur && cur.querySelector(".splash-blip")) { const p = cur.querySelector("p"); if (p) p.textContent = msg; return; }
+  if (cur && cur.querySelector(".splash-blip")) return;
   root.innerHTML = `<div class="splash">${splashInner(msg)}</div>`;
   if (splashStop) { splashStop(); splashStop = null; }
   const svg = root.querySelector(".splash-blip");

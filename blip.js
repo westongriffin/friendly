@@ -70,10 +70,16 @@
     svgEl.innerHTML = `<defs><filter id="goo${id}" filterUnits="userSpaceOnUse" x="-80" y="-80" width="880" height="460" color-interpolation-filters="sRGB">
         <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="b"/>
         <feColorMatrix in="b" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 28 -12" result="g"/>
-        <feComposite in="SourceGraphic" in2="g" operator="atop"/></filter></defs>
+        <feComposite in="SourceGraphic" in2="g" operator="atop"/></filter>
+        <clipPath id="lt${id}" clipPathUnits="userSpaceOnUse"><rect class="clT"/></clipPath><clipPath id="lb${id}" clipPathUnits="userSpaceOnUse"><rect class="clB"/></clipPath></defs>
       <g class="wm" fill="${ink}"><text class="tF" x="60" y="190">Friend</text><text class="tY" x="0" y="190">y</text></g>
-      <g filter="url(#goo${id})"><path class="body" fill="${SUN}"/><rect class="d1" fill="${CORAL}"/><rect class="d2" fill="${CORAL}"/></g>
-      <text class="tL" x="0" y="190" fill="${CORAL}">l</text>
+      <g filter="url(#goo${id})"><path class="body" fill="${SUN}"/>
+        <g class="gT"><g clip-path="url(#lt${id})"><text class="lh" x="0" y="190" fill="${CORAL}">l</text></g></g>
+        <g class="gB"><g clip-path="url(#lb${id})"><text class="lh" x="0" y="190" fill="${CORAL}">l</text></g></g>
+        <rect class="d1" fill="${CORAL}"/><rect class="d2" fill="${CORAL}"/></g>
+      <text class="tL" x="0" y="190" fill="${CORAL}" opacity="0">l</text>
+      <g class="hT"><g clip-path="url(#lt${id})"><text class="lh" x="0" y="190" fill="${CORAL}">l</text></g></g>
+      <g class="hB"><g clip-path="url(#lb${id})"><text class="lh" x="0" y="190" fill="${CORAL}">l</text></g></g>
       <rect class="o1" fill="${CORAL}"/><rect class="o2" fill="${CORAL}"/>
       <circle class="dot0" r="10" fill="${SUN}"/>
       <ellipse class="hl" fill="#fff" opacity="0"/>
@@ -82,6 +88,7 @@
       <path class="mouth" d="M-14 20 Q0 30 14 20" fill="none" stroke="${INK}" stroke-width="6" stroke-linecap="round"/>`;
     svgEl.querySelectorAll("text").forEach(t => { t.style.fontFamily = '"Bricolage Grotesque","Avenir Next",system-ui,sans-serif'; t.style.fontWeight = "700"; t.style.fontSize = "112px"; t.style.letterSpacing = "-.03em"; t.style.fontVariationSettings = '"opsz" 24'; t.style.fontOpticalSizing = "none"; });
     const q = c => svgEl.querySelector("." + c);
+    const gT = q("gT"), gB = q("gB"), hT = q("hT"), hB = q("hB"), lhs = [...svgEl.querySelectorAll(".lh")], clT = q("clT"), clB = q("clB");
     const tF = q("tF"), tY = q("tY"), tL = q("tL"), wm = q("wm"), body = q("body"), d1 = q("d1"), d2 = q("d2"), o1 = q("o1"), o2 = q("o2"), dot0 = q("dot0"), hl = q("hl"), eyeL = q("eyeL"), eyeR = q("eyeR"), mouth = q("mouth");
     const mouthLen = mouth.getTotalLength(); mouth.setAttribute("stroke-dasharray", mouthLen);
     let G = null;
@@ -107,23 +114,31 @@
       const P = [fx + M.lLeft + M.lW / 2, BL + M.lMidY];                  // the logo tilts the l about the centre of its box
       tL.setAttribute("transform", `rotate(-9 ${P[0]} ${P[1]})`);
       const dx = fx + M.dCx, dy = BL + M.dCy, bx = 360, by = 150;
-      // the l's ink, so the liquid halves cover exactly the glyph
-      const lx = fx + M.lLeft; let inkL = lx, inkR = lx + M.lW, inkT = BL - 80, inkB = BL;
+      // the l's ink, measured from pixels: draw it at the header's 24px size (8x oversampled) and scan for coverage
+      const lx = fx + M.lLeft; let inkL = lx + M.lW * .2, inkR = lx + M.lW * .8, inkT = BL - 80, inkB = BL;
       try {
-        const c = document.createElement("canvas").getContext("2d"); c.font = "700 24px " + FAMILY; const k = 112 / 24;
-        const mt = c.measureText("l");
-        if (mt.actualBoundingBoxAscent) { inkL = lx - mt.actualBoundingBoxLeft * k; inkR = lx + mt.actualBoundingBoxRight * k; inkT = BL - mt.actualBoundingBoxAscent * k; inkB = BL + mt.actualBoundingBoxDescent * k; }
+        const SS = 8, FS = 24, OX = 20, OY = 40, k = 112 / FS, cv = document.createElement("canvas"); cv.width = 60 * SS; cv.height = 60 * SS;
+        const c = cv.getContext("2d"); c.scale(SS, SS); c.font = `700 ${FS}px ${FAMILY}`; c.fillStyle = "#000"; c.fillText("l", OX, OY);
+        const px = c.getImageData(0, 0, cv.width, cv.height).data; let x0 = 1e9, x1 = -1, y0 = 1e9, y1 = -1;
+        for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) if (px[(y * cv.width + x) * 4 + 3] > 110) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+        if (x1 > x0 && y1 > y0) { inkL = lx + (x0 / SS - OX) * k; inkR = lx + ((x1 + 1) / SS - OX) * k; inkT = BL + (y0 / SS - OY) * k; inkB = BL + ((y1 + 1) / SS - OY) * k; }
       } catch (e) {}
       const inkCx = (inkL + inkR) / 2, inkCy = (inkT + inkB) / 2;
+      const rotAttr = `rotate(-9 ${P[0]} ${P[1]})`, cut = (inkT + inkB) / 2;
+      lhs.forEach(t => { t.setAttribute("x", lx); t.setAttribute("transform", rotAttr); });
+      clT.setAttribute("x", lx - 200); clT.setAttribute("width", 400); clT.setAttribute("y", cut - 400); clT.setAttribute("height", 400); clT.setAttribute("transform", rotAttr);
+      clB.setAttribute("x", lx - 200); clB.setAttribute("width", 400); clB.setAttribute("y", cut); clB.setAttribute("height", 400); clB.setAttribute("transform", rotAttr);
       G = { fx, base: M.base, dx, dy, dR: M.dR, bx, by, P, u: rot(0, -1, -9), v: rot(1, 0, -9), w: inkR - inkL, h: inkB - inkT, a0: -(inkCy - P[1]), c0: inkCx - P[0] };
       dot0.setAttribute("cx", dx); dot0.setAttribute("cy", dy); dot0.setAttribute("r", M.dR);
     }
     const loc = (a, c) => [G.P[0] + G.u[0] * a + G.v[0] * c, G.P[1] + G.u[1] * a + G.v[1] * c];
+    // how far each half of the l has pulled from the middle: a slow pull, then the snap, with a small recoil
+    const splitGap = p => { const W = (a, b) => clamp((p - a) / (b - a)), rc = W(.34, .46); return io(W(.02, .24)) * 4 + ei(W(.22, .40)) * 34 + (ob(rc) - rc) * 10; };
     function drop(el, ov, half, p, at, kx) {
       const W = (a, b) => clamp((p - a) / (b - a));
       const w = G.w, h = G.h, mid = G.a0;                               // halves sit either side of the ink centre
-      const round = io(W(.02, .30)), len = lerp(h / 2, w, io(W(.08, .40)));
-      const rc = W(.34, .46), gap = io(W(.06, .26)) * 3 + ei(W(.24, .40)) * 34 + (ob(rc) - rc) * 10;
+      const round = io(W(.28, .42)), len = lerp(h / 2, w, io(W(.30, .44)));
+      const gap = splitGap(p);
       const S = loc(mid + half * (gap + len / 2), G.c0);
       const e = io(W(half > 0 ? .36 : .38, half > 0 ? .80 : .82));
       const T = at(half > 0 ? -44 : 44, 16);
@@ -138,14 +153,19 @@
         r.setAttribute("width", size); r.setAttribute("height", ht); r.setAttribute("x", -size / 2); r.setAttribute("y", -ht / 2); r.setAttribute("rx", (size / 2) * round);
         r.setAttribute("transform", `translate(${Pt[0]} ${Pt[1]}) matrix(${ma} ${mb} ${mb} ${md} 0 0) rotate(-9)`);
       }
-      el.setAttribute("fill", mix(CORAL_RGB, CHEEK_RGB, W(.78, .92))); el.setAttribute("opacity", W(.01, .05));
-      ov.setAttribute("opacity", p <= 0 ? 0 : 1 - W(.02, .10));
+      el.setAttribute("fill", mix(CORAL_RGB, CHEEK_RGB, W(.78, .92))); el.setAttribute("opacity", W(.26, .32));
+      ov.setAttribute("opacity", W(.26, .32) * (1 - W(.38, .46)));
     }
     function draw(p, t) {
       if (!G) return;
       const W = (a, b) => clamp((p - a) / (b - a));
       wm.setAttribute("opacity", 1 - W(0, .3));
-      tL.setAttribute("opacity", 1 - W(.02, .07));
+      // the real l, cut in two, pulls apart along its own axis; a liquid copy underneath makes the neck between them
+      const gp = splitGap(p), ux = G.u[0] * gp, uy = G.u[1] * gp;
+      hT.setAttribute("transform", `translate(${ux} ${uy})`); gT.setAttribute("transform", `translate(${ux} ${uy})`);
+      hB.setAttribute("transform", `translate(${-ux} ${-uy})`); gB.setAttribute("transform", `translate(${-ux} ${-uy})`);
+      const crisp = p <= 0 ? 0 : 1 - W(.26, .32), liquid = W(.01, .06) * (1 - W(.28, .34));
+      hT.setAttribute("opacity", crisp); hB.setAttribute("opacity", crisp); gT.setAttribute("opacity", liquid); gB.setAttribute("opacity", liquid);
       const em = io(W(0, .55)), mq = 1 - em, s = lerp(G.dR / 10, S0, ob(W(.3, .78)));
       const cx = mq * mq * G.dx + 2 * mq * em * ((G.dx + G.bx) / 2) + em * em * G.bx, cy = mq * mq * G.dy + 2 * mq * em * (G.dy - 115) + em * em * G.by;
       const amp = W(.92, 1), sq = Math.sin(Math.PI * W(.78, .96)) * 0.07, br = Math.sin(t * 2 * Math.PI / 2.8) * 0.03 * amp;
