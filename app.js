@@ -549,7 +549,7 @@ function attachPlaces(input) {
 }
 
 // ---------- state ----------
-const BOOT_AT = Date.now(), SPLASH_MIN = 2600, SPLASH_MAX = 5000; let splashTimer = null, splashHold = false;
+const BOOT_AT = Date.now(), SPLASH_MIN = 4100, SPLASH_MAX = 6500; let splashTimer = null, splashHold = false;
 const S = {
   user: null, profile: null, ready: false,
   groups: new Map(), pendingInvites: new Map(), events: new Map(),
@@ -573,6 +573,7 @@ function parseRoute() {
   if (p[0] === "search") return { name: "search" };
   if (p[0] === "new") return { name: "new" };
   if (p[0] === "money") return { name: "money" };
+  if (p[0] === "curate") return { name: "curate" };
   if (p[0] === "groups") return { name: "groups" };
   if (p[0] === "profile") return { name: "profile" };
   return { name: "home" };
@@ -738,7 +739,19 @@ function mountSplash(root, msg) {
   root.innerHTML = `<div class="splash">${splashInner(msg)}</div>`;
   if (splashStop) { splashStop(); splashStop = null; }
   const svg = root.querySelector(".splash-blip");
-  if (svg && window.Blip) { splashHold = true; splashStop = window.Blip.play(svg, { dur: 1.7, delay: .15, onDone: () => { setTimeout(() => { splashHold = false; render(); }, 600); } }); }
+  if (svg && window.Blip) { splashHold = true; splashStop = window.Blip.play(svg, { dur: 1.7, delay: 1.65, onDone: () => { setTimeout(() => { splashHold = false; render(); }, 600); } }); }
+}
+// The intro plays again whenever the app comes back to the foreground after being away a while, as an overlay on top of the live app.
+let hiddenAt = 0;
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  const away = hiddenAt ? Date.now() - hiddenAt : 0; hiddenAt = 0;
+  if (away > 15 * 60 * 1000 && S.ready && window.Blip && !document.querySelector(".splash")) replaySplash();   // away 15 minutes or more
+});
+function replaySplash() {
+  const o = document.createElement("div"); o.className = "splash splash-replay"; o.innerHTML = splashInner("Getting everyone here…"); document.body.appendChild(o);
+  const svg = o.querySelector(".splash-blip"); if (!svg) { o.remove(); return; }
+  const stop = window.Blip.play(svg, { dur: 1.7, delay: 1.65, onDone: () => setTimeout(() => { o.classList.add("out"); setTimeout(() => { stop(); o.remove(); }, 450); }, 600) });
 }
 function renderNow() {
   if (BLOCKED_MOBILE_WEB) return;
@@ -986,6 +999,7 @@ function shell(body) {
     ${T("home", "Events", "#/")}
     ${T("groups", "Groups", "#/groups")}
     ${T("money", "Money", "#/money")}
+    ${T("curate", `<span class="curate-lbl">${CURATE_LABEL}<i class="spark">✦</i></span>`, "#/curate")}
   </nav>
   <main class="wrap">${updateBanner()}${inviteBanner()}${body}</main>
   ${edgeDotHtml()}`;
@@ -1010,7 +1024,7 @@ function edgeMenu() {
     return { title: `For ${esc(g.name)}`, items: [item("plan", "✨ Let me plan it. Just tell me.", "plan-btn"), item("event", "🎉 An event for this group"), item("meeting", "📅 A meeting"), item("expense", "💸 An expense for this group"), item("ask", "💬 Ask me anything")] };
   }
   if (r.name === "groups") return { title: "What are we making?", items: [item("group", "👥 A new group"), item("plan", "✨ Let me plan something", "plan-btn"), item("event", "🎉 An event"), item("ask", "💬 Ask me anything")] };
-  return { title: "What are we making?", items: [item("plan", "✨ Let me plan it. Just tell me.", "plan-btn"), item("event", "🎉 An event"), item("meeting", "📅 A meeting"), item("expense", "💸 An expense"), item("ask", "💬 Ask me anything")] };
+  return { title: "What are we making?", items: [item("plan", "✨ Let me plan it. Just tell me.", "plan-btn"), item("night", "🌆 Build me a night out"), item("event", "🎉 An event"), item("meeting", "📅 A meeting"), item("expense", "💸 An expense"), item("ask", "💬 Ask me anything")] };
 }
 function edgeDotHtml() {
   const m = edgeMenu();
@@ -1034,6 +1048,7 @@ function wireEdgeDot() {
     else if (k === "edit") { const ev = S.events.get(r.id); if (ev) openPlanDialog("edit", { ev }); }
     else if (k === "group") openGroupDialog();
     else if (k === "ask") openAskDialog();
+    else if (k === "night") openNightBuilder();
   });
 }
 function wireShell() {
@@ -1048,6 +1063,7 @@ function wireShell() {
   if (S.route.name === "groups") wireGroups();
   if (S.route.name === "group") wireGroupPage();
   if (S.route.name === "money") wireMoney();
+  if (S.route.name === "curate") wireCurate();
   if (S.route.name === "expense") wireExpensePage();
   if (S.route.name === "activity") wireActivity();
   if (S.route.name === "photos") wirePhotosPage();
@@ -1082,6 +1098,7 @@ function routeBody(r) {
   if (r.name === "group") return `<div class="group-page">${groupPageBody(r.id)}</div>`;
   if (r.name === "join") return joinBody(r.id);
   if (r.name === "money") return moneyBody();
+  if (r.name === "curate") return curateBody();
   if (r.name === "expense") return expenseBody(r.id);
   if (r.name === "activity") return activityBody();
   if (r.name === "photos") return photosPageBody();
@@ -1147,9 +1164,11 @@ function homeBody() {
 
   const todayEvs = upcoming.filter(e => e.date === todayStr()).slice(0, 2);
   const todayCards = todayEvs.map(e => `<div class="card notif-card today-card" data-ev="${e.id}" role="button">${dotHat(56)}<div style="flex:1;min-width:0"><div class="eyebrow-sm">Today</div><b>${esc(e.title)}${e.time ? " · " + fmtTime(e.time) : ""}</b><div class="muted sm">${e.kind === "meeting" ? (e.invitedUids || []).filter(u => (e.rsvps || {})[u] === "going").length + " accepted" : goingCount(e) + " going"}${e.location ? " · " + esc(e.location) : ""}</div></div><span class="chev">›</span></div>`).join("");
+  if ((S.profile.city || "").trim()) ensureCurated();
   return `
   ${notifCard()}
   ${todayCards}
+  ${needIdeaCard(upcoming)}
   ${birthdayCard()}
   <div class="section-head"><h2>${homeView === "calendar" ? "Calendar" : "Upcoming"}</h2><span class="btnrow" style="gap:8px"><button class="btn small" id="viewToggle" title="Switch view">${homeView === "calendar" ? "🗂 Cards" : "📅 Calendar"}</button><button class="btn primary small" data-go="#/new">＋ New event</button></span></div>
   ${filterBar}
@@ -1537,6 +1556,159 @@ function matchFriends(names) {
     if (hits.length === 1) uids.push(hits[0][0]); else unmatched.push(String(raw).trim());
   }
   return { uids, unmatched };
+}
+// ---- Curate: Dot finds real nights out near your city (server-side, web-grounded, cached nightly per city),
+//      pairs each with a place to eat, and turns a pick into a plan, a poll, tickets or a table.
+const CURATE_LABEL = "Curate";
+const CURATE_FILTERS = [["weekend", "This weekend"], ["tonight", "Tonight"], ["date", "Date night"], ["group", "Group of 6+"], ["cheap", "Under $40"], ["family", "Family"]];
+const CURATE_LEADS = { weekend: "A few nights worth leaving the house for this weekend. Tap one and I'll set it up.", tonight: "Short notice, still good.", date: "For just the two of you.", group: "Big group? These places handle it.", cheap: "Good nights that won't hurt.", family: "Kid-friendly, and you'll like it too." };
+let curFilter = "weekend", curSub = null, curCoverSub = null, curKey = "";
+const cityKeyOf = c => String(c || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+const pad2 = n => String(n).padStart(2, "0");
+const addDays = (ymd, n) => { const [y, m, d] = ymd.split("-").map(Number); const x = new Date(y, m - 1, d + n); return x.getFullYear() + "-" + pad2(x.getMonth() + 1) + "-" + pad2(x.getDate()); };
+function nowCtx() { const d = new Date(); return { today: todayStr(), weekday: d.toLocaleDateString("en-US", { weekday: "long" }), now: pad2(d.getHours()) + ":" + pad2(d.getMinutes()), tz: (Intl.DateTimeFormat().resolvedOptions().timeZone || "") }; }
+function registerCity(city) { const key = cityKeyOf(city); if (!key) return; setDoc(doc(db, "curateCities", key), { key, city, tz: nowCtx().tz, updatedAt: Date.now() }, { merge: true }).catch(() => {}); }
+// Subscribe to the city's cached nights; ask the server to build them if there are none for today yet.
+function ensureCurated() {
+  const city = (S.profile && S.profile.city || "").trim(), key = cityKeyOf(city); if (!key) return;
+  if (curKey === key && curSub) return;
+  if (curSub) curSub(); if (curCoverSub) curCoverSub(); curKey = key; S.curated = null; S.curCovers = {}; S._curBuilding = false; S._curError = "";
+  curCoverSub = onSnapshot(collection(db, "curated", key, "covers"), snap => { const m = {}; snap.docs.forEach(d => { m[d.id] = d.data().image; }); S.curCovers = m; if (S.route.name === "curate" || S.route.name === "home") render(); }, () => {});
+  curSub = onSnapshot(doc(db, "curated", key), snap => {
+    const d = snap.exists() ? snap.data() : null; S.curated = d;
+    if ((!d || (d.forDate || "") < addDays(todayStr(), -1)) && !S._curBuilding && !isDemo()) {
+      S._curBuilding = true;
+      S._curPhase = "starting";
+      requestViaFirestore("planRequests", { mode: "curate-city", city, ...nowCtx() }, 280000, d => { if (d.phase && d.phase !== S._curPhase) { S._curPhase = d.phase; render(); } }).then(() => { S._curBuilding = false; }).catch(e => { S._curBuilding = false; S._curError = e.message; render(); });
+    }
+    render();
+  }, err => { S._curError = err.message; render(); });
+}
+function nightWhen(n) { const d = evDate({ date: n.date }); return `${d.toLocaleDateString("en-US", { weekday: "short" })} · ${MONTHS[d.getMonth()]} ${d.getDate()}${n.start ? " · " + fmtTime(n.start) : ""}`; }
+function nightCardHtml(n, id) {
+  S._nightById = S._nightById || {}; S._nightById[id] = n;
+  const eat = n.stops.find(x => x.kind === "eat"), tix = n.ticketUrl || (n.stops.find(x => x.kind === "do" && x.url) || {}).url;
+  const th = themeOf(n.theme || "midnight"), cover = n.coverId && (S.curCovers || {})[n.coverId];
+  return `<div class="card night t-${esc(th.id)} ${cover ? "has-cover" : ""}">
+    <div class="night-head" style="--th-ink:${cover ? "#fff" : esc(th.ink)};font-family:${esc(th.font)},system-ui">${cover ? `<img class="night-cover" src="${esc(cover)}" alt="">` : `<div class="ev-card-bg"></div>`}<div class="night-head-in"><span class="night-emoji">${esc(n.emojis || n.emoji || "🌆")}</span><div class="night-when">${esc(nightWhen(n))}</div><h3>${esc(n.title)}</h3></div></div>
+    <div class="night-body">
+    <div class="stops">${n.stops.map(x => `<div class="stop"><span class="t">${esc(x.time)}</span><span><b>${esc(x.name)}</b>${x.note ? `<small>${esc(x.note)}</small>` : ""}</span></div>`).join("")}</div>
+    ${n.why ? `<p class="why">${esc(n.why)}</p>` : ""}
+    <div class="meta">${[n.cost, n.size, n.parking].filter(Boolean).map(m => `<span>${esc(m)}</span>`).join("")}</div>
+    <div class="acts"><button type="button" class="btn primary small" data-nplan="${id}">Make it a plan</button><button type="button" class="btn small" data-npoll="${id}">Poll the group</button>${tix ? `<a class="btn small" href="${esc(tix)}" target="_blank" rel="noopener">Get tickets</a>` : ""}${eat ? `<a class="btn small" href="https://www.opentable.com/s?term=${encodeURIComponent(eat.name + " " + (S.profile.city || ""))}" target="_blank" rel="noopener">Book a table</a>` : ""}</div>
+    </div></div>`;
+}
+function wireNightCards(root = document) {
+  root.querySelectorAll("[data-nplan]").forEach(b => b.onclick = e => { e.stopPropagation(); const n = S._nightById[b.dataset.nplan]; if (n) { closeDialog(); nightToPlan(n); } });
+  root.querySelectorAll("[data-npoll]").forEach(b => b.onclick = e => { e.stopPropagation(); const n = S._nightById[b.dataset.npoll]; if (n) pollNights([n]); });
+}
+function nightToPlan(n) {
+  resetCompose(); compose._restored = true;
+  const eat = n.stops.find(x => x.kind === "eat"), main = n.stops.find(x => x.kind === "do") || n.stops[0];
+  compose.title = n.title.slice(0, 80); compose.date = n.date; compose.time = n.start || ""; compose.emoji = n.emoji || [...(n.emojis || "🌆")][0] || "🌆"; compose.theme = THEMES.some(t => t.id === n.theme) ? n.theme : "midnight";
+  const cover = n.coverId && (S.curCovers || {})[n.coverId]; if (cover) { compose.cover = cover; compose.coverTab = "upload"; }
+  compose.where = ((main && main.name) || "").slice(0, 200); compose.food = eat ? eat.name.slice(0, 120) : "";
+  compose.notes = [n.stops.map(x => `${x.time} · ${x.name}${x.note ? " (" + x.note + ")" : ""}`).join("\n"), n.parking ? "Parking: " + n.parking : "", n.cost ? "Cost: " + n.cost : "", n.ticketUrl ? "Tickets: " + n.ticketUrl : ""].filter(Boolean).join("\n").slice(0, 1000);
+  compose._plan = { summary: "Here's the night, set up: " + n.title + ". Add who's coming and it's ready.", missing: ["guests"], unmatched: [], bring: [], ideas: [] };
+  go("#/new");
+}
+async function pollNights(nights) {
+  const groups = [...S.groups.values()]; if (!groups.length) return toast("Create a group first, then I can poll them.");
+  const make = async gid => {
+    const dates = {}; let q, options;
+    if (nights.length === 1) { q = nights[0].title + " — " + nightWhen(nights[0]) + ". In?"; options = ["I'm in", "Maybe", "Can't make it"]; dates[0] = nights[0].date; }
+    else { q = "Which night?"; options = nights.map((n, i) => { dates[i] = n.date; return `${n.title} (${nightWhen(n)})`.slice(0, 90); }); }
+    try { await addDoc(collection(db, "groups", gid, "polls"), { q, options, dates, votes: {}, authorId: myUid(), createdAt: Date.now() }); closeDialog(); toast("Poll's up. The winner becomes the plan in one tap.", null, null, "party"); go("#/g/" + gid); } catch (e) { toast(e.message); }
+  };
+  if (groups.length === 1) return make(groups[0].id);
+  dialog(`<h3>Which group?</h3><div class="stack">${groups.map(g => `<button type="button" class="btn" data-pg="${g.id}" style="text-align:left">${esc(g.emoji || "")} ${esc(g.name)}</button>`).join("")}</div>`, null, null);
+  document.querySelectorAll("[data-pg]").forEach(b => b.onclick = () => make(b.dataset.pg));
+}
+async function saveCity(city) {
+  city = String(city || "").trim().slice(0, 60); if (city.length < 2) return toast("Tell me a city, like Frisco, TX.");
+  try { await updateDoc(doc(db, "users", myUid()), { city }); registerCity(city); toast("Looking around " + city + "…", null, null, "thinking"); } catch (e) { toast(e.message); }
+}
+function openCityDialog() {
+  dialog(`<h3>Where are you?</h3><label class="field"><span>City</span><input id="cityIn" value="${esc(S.profile.city || "")}" placeholder="Frisco, TX" maxlength="60"></label><p class="muted sm">Used only to find things nearby. No location tracking.</p>`, "Save", () => { const v = el("cityIn").value; closeDialog(); saveCity(v); });
+}
+function curateBody() {
+  const city = (S.profile.city || "").trim();
+  if (!city) return `<div class="section-head"><h2>${CURATE_LABEL}</h2></div>
+    <div class="card empty">${dot("thinking", 72)}<b>Where are you?</b><p class="muted">Tell me your city and I'll find a few good nights out nearby, each with a place to eat and the timing worked out.</p><div class="btnrow" style="justify-content:center;gap:8px;flex-wrap:wrap"><input id="curCity" class="city-in" placeholder="Frisco, TX" maxlength="60"><button type="button" class="btn primary" id="curCitySave">Look around</button></div><p class="muted sm" style="margin-top:8px">No location tracking, just the city.</p></div>`;
+  ensureCurated();
+  const d = S.curated, nights = (d && d.nights) || [];
+  const filtered = nights.filter(n => (n.tags || []).includes(curFilter)), shown = filtered.length ? filtered : nights;
+  const phaseText = { starting: "Warming up", searching: "Searching what's on and pairing places to eat", sorting: "Sorting the good ones" }[S._curPhase] || "Looking around";
+  const lead = !d && !S._curError ? `Give me a minute. ${phaseText} in ${city}…` : S._curError ? "I couldn't look around just now (" + S._curError + "). Try again in a bit." : shown.length ? (filtered.length ? CURATE_LEADS[curFilter] : "Nothing tagged for that yet, so here's everything I found.") : "Nothing yet. Build your own and I'll go looking.";
+  return `<div class="section-head"><h2>${CURATE_LABEL}</h2><span class="btnrow" style="gap:8px"><button type="button" class="btn small" id="curCityBtn">📍 ${esc(city)}</button><button type="button" class="btn primary small" id="curBuild">✨ Build me a night</button></span></div>
+  <div class="dot-say" style="margin-top:4px">${dot(d ? "happy" : "thinking", 52)}<div class="say-bubble">${esc(lead)}</div></div>
+  <div class="chiprow">${CURATE_FILTERS.map(([k, l]) => `<button type="button" class="fchip ${curFilter === k ? "on" : ""}" data-cf="${k}">${l}</button>`).join("")}</div>
+  ${!d && !S._curError ? `<div class="card empty compact">${dot("thinking", 64)}<p class="muted" style="margin:6px 0 0">Searching what's on, pairing dinners, checking the times. About half a minute the first time.</p></div>` : ""}
+  ${S._curError ? `<div style="text-align:center;margin-bottom:12px"><button type="button" class="btn" id="curRetry">Try again</button></div>` : ""}
+  <div id="nights">${shown.map((n, i) => nightCardHtml(n, "c" + i)).join("")}</div>
+  ${d ? `<p class="muted sm" style="margin:6px 4px 0">Found by Dot with web search and refreshed nightly. Double-check times before you go; things change.</p>` : ""}`;
+}
+function wireCurate() {
+  if (el("curCitySave")) el("curCitySave").onclick = () => saveCity(el("curCity").value);
+  if (el("curCity")) el("curCity").onkeydown = e => { if (e.key === "Enter") saveCity(el("curCity").value); };
+  if (el("curCityBtn")) el("curCityBtn").onclick = openCityDialog;
+  if (el("curBuild")) el("curBuild").onclick = () => openNightBuilder();
+  if (el("curRetry")) el("curRetry").onclick = () => { S._curError = ""; curKey = ""; if (curSub) { curSub(); curSub = null; } render(); };
+  document.querySelectorAll("[data-cf]").forEach(b => b.onclick = () => { curFilter = b.dataset.cf; render(); });
+  wireNightCards();
+}
+// The row on the Events tab: shows up when the week ahead is empty, or from Thursday on for the weekend.
+function needIdeaCard(upcoming) {
+  if (!window.Blip || isDemo()) return "";
+  const t = todayStr(), soon = upcoming.some(e => e.date >= t && e.date <= addDays(t, 7)), dow = new Date().getDay(), weekendish = dow >= 4 || dow === 0;
+  if (soon && !weekendish) return "";
+  const city = (S.profile.city || "").trim(), nights = (S.curated && S.curated.nights) || [];
+  const n = nights.find(x => (x.tags || []).includes("weekend")) || nights[0];
+  const text = n ? `${n.title} · ${nightWhen(n)}. Two more where that came from.` : city ? "I'm putting a few ideas together." : "Tell me your city and I'll find a few nights out.";
+  return `<div class="card notif-card idea-row" role="button" data-go="#/curate">${dot("thinking", 48)}<div style="flex:1;min-width:0"><b>Need an idea for ${weekendish ? "the weekend" : "this week"}?</b><div class="muted sm">${esc(text)}</div></div><span class="chev">›</span></div>`;
+}
+// "Build me a night": Dot asks four quick questions with chips (or take free text), then brings back three.
+function openNightBuilder() {
+  if (isDemo()) return toast("Building nights is off in the demo.");
+  const city = (S.profile.city || "").trim(); if (!city) { go("#/curate"); return; }
+  const B = { vibe: "", who: "", when: "", date: "", budget: "", free: "" };
+  const VIBES = [["🛋️", "Chill"], ["🎉", "Big night"], ["💛", "Date night"], ["🌳", "Outdoors"], ["🎭", "Something cultural"], ["🍽️", "Just a great dinner"], ["🎲", "Surprise me"]];
+  const WHO = ["Just us two", "3–5 people", "6–10 people", "The whole group"], WHEN = ["Tonight", "Tomorrow", "This weekend", "Pick a date"], BUDGET = ["Under $30", "$30–75", "Splurge"];
+  const opt = (k, list) => `<div class="opts">${list.map(o => { const v = Array.isArray(o) ? o[1] : o, ic = Array.isArray(o) ? o[0] : ""; return `<button type="button" class="opt ${B[k] === v ? "on" : ""}" data-k="${k}" data-v="${esc(v)}">${ic ? `<span>${ic}</span>` : ""}${esc(v)}</button>`; }).join("")}</div>`;
+  const crumbs = () => [B.vibe, B.who, B.when === "Pick a date" ? B.date : B.when, B.budget].filter(Boolean).join(" · ");
+  const windowFor = () => { const t = todayStr(); if (B.when === "Tonight") return [t, t]; if (B.when === "Tomorrow") return [addDays(t, 1), addDays(t, 1)]; if (B.when === "Pick a date") return [B.date, B.date]; const dow = new Date().getDay(); const toFri = dow <= 5 ? 5 - dow : 6; const from = dow === 6 || dow === 0 ? t : addDays(t, toFri); const to = dow === 0 ? t : addDays(from, dow === 6 ? 1 : 2); return [from, to]; };
+  dialog(`<div id="nb"></div>`, null, null);
+  const draw = () => {
+    const box = el("nb"); if (!box) return;
+    let q, body;
+    if (!B.vibe) { q = "Let's build one. What's the vibe?"; body = opt("vibe", VIBES) + `<label class="field" style="margin-top:10px"><span>Or just tell me</span><textarea id="nbFree0" rows="2" maxlength="300" placeholder="Something low-key for six, we've done tacos to death, under $40 a head">${esc(B.free)}</textarea></label><button type="button" class="btn small" id="nbFreeGo">Build from that</button>`; }
+    else if (!B.who) { q = "Who's coming?"; body = opt("who", WHO); }
+    else if (!B.when) { q = "When?"; body = opt("when", WHEN); }
+    else if (B.when === "Pick a date" && !B.date) { q = "Which day?"; body = `<label class="field"><span>Date</span><input type="date" id="nbDate" min="${todayStr()}"></label><button type="button" class="btn small" id="nbDateGo">That day</button>`; }
+    else { q = B.budget ? "Anything else before I go looking?" : "Rough budget per person, all in?"; body = opt("budget", BUDGET) + `<label class="field" style="margin-top:10px"><span>Anything to include or avoid? <span class="muted">(optional)</span></span><textarea id="nbFree" rows="2" maxlength="300" placeholder="Near Plano · no sports · somewhere new">${esc(B.free)}</textarea></label><button type="button" class="btn primary" id="nbGo">Build it</button>`; }
+    box.innerHTML = `<div class="dot-say">${dot("happy", 52)}<div class="say-bubble">${esc(q)}</div></div>${crumbs() ? `<p class="muted sm" style="margin:-4px 0 8px"><a id="nbBack" style="color:var(--accent);font-weight:600">‹ Back</a> · ${esc(crumbs())}</p>` : ""}${body}`;
+    box.querySelectorAll(".opt").forEach(b => b.onclick = () => { B[b.dataset.k] = b.dataset.v; if (b.dataset.k === "when" && b.dataset.v !== "Pick a date") B.date = ""; draw(); });
+    if (el("nbBack")) el("nbBack").onclick = () => { if (B.budget) B.budget = ""; else if (B.when === "Pick a date" && B.date) B.date = ""; else if (B.when) B.when = ""; else if (B.who) B.who = ""; else B.vibe = ""; draw(); };
+    if (el("nbFreeGo")) el("nbFreeGo").onclick = () => { B.free = el("nbFree0").value.trim(); if (B.free.length < 6) return toast("Tell me a little more."); B.vibe = "Surprise me"; B.who = B.who || "a few friends"; B.when = B.when || "This weekend"; B.budget = B.budget || "flexible"; run(); };
+    if (el("nbDateGo")) el("nbDateGo").onclick = () => { const v = el("nbDate").value; if (!v) return toast("Pick a day."); B.date = v; draw(); };
+    if (el("nbGo")) el("nbGo").onclick = () => { B.free = el("nbFree").value.trim(); if (!B.budget) B.budget = "flexible"; run(); };
+  };
+  const run = async () => {
+    const box = el("nb"); if (!box) return;
+    const [from, to] = windowFor();
+    box.innerHTML = `<div class="dot-say">${dot("thinking", 52)}<div class="say-bubble">On it. Searching what's on, pairing a place to eat, checking the times. Give me half a minute.</div></div><p class="muted sm">${esc(crumbs())}</p>`;
+    try {
+      const res = await requestViaFirestore("planRequests", { mode: "night", city, vibe: B.vibe, who: B.who, budget: B.budget, free: B.free, from, to, ...nowCtx() }, 240000);
+      const nights = (res.data && res.data.nights) || []; if (!nights.length) throw new Error("nothing found");
+      box.innerHTML = `<div class="dot-say">${dot("happy", 52)}<div class="say-bubble">Three ways to do it. Pick one and I'll set it up, or send all three to the group as a poll.</div></div>
+        <div class="btnrow" style="gap:6px;margin:0 0 10px;flex-wrap:wrap"><button type="button" class="btn primary small" id="nbPollAll">Poll the group with all three</button><button type="button" class="btn small" id="nbAgain">Try another three</button></div>
+        ${nights.map((n, i) => nightCardHtml(n, "b" + i)).join("")}`;
+      wireNightCards(box);
+      el("nbPollAll").onclick = () => pollNights(nights);
+      el("nbAgain").onclick = () => { B.free = (B.free ? B.free + ". " : "") + "Different from: " + nights.map(n => n.title).join("; "); run(); };
+    } catch (e) { box.innerHTML = `<div class="dot-say">${dot("oops", 52)}<div class="say-bubble">That didn't come together. Try again?</div></div><button type="button" class="btn" id="nbRetry">Try again</button>`; el("nbRetry").onclick = run; toast("Couldn't build that: " + e.message); }
+  };
+  draw();
 }
 // ---- Ask me anything: a question, answered from your own plans (titles, dates, counts, first names; never phone numbers or notes).
 function askContext() {
@@ -2826,7 +2998,7 @@ function openExpense(eventId, restrict, groupId) {
 // ----- Receipt scan → itemize → assign -----
 // Generic request/response doc: write {uid, ...payload, status:"pending"},
 // resolve with the doc once a Cloud Function marks it done.
-function requestViaFirestore(col, payload, timeoutMs = 90000) {
+function requestViaFirestore(col, payload, timeoutMs = 90000, onUpdate) {
   return new Promise(async (resolve, reject) => {
     const uid = S.user && S.user.uid; if (!uid) return reject(new Error("signed out"));
     const ref = doc(db, col, newId());
@@ -2834,7 +3006,7 @@ function requestViaFirestore(col, payload, timeoutMs = 90000) {
     const done = (fn, arg) => { clearTimeout(timer); if (unsub) unsub(); deleteDoc(ref).catch(() => {}); fn(arg); };
     try { await setDoc(ref, { uid, ...payload, status: "pending", createdAt: Date.now() }); } catch (e) { return reject(e); }
     timer = setTimeout(() => done(reject, new Error("timed out")), timeoutMs);
-    unsub = onSnapshot(ref, s => { const d = s.data(); if (!d) return; if (d.status === "done") done(resolve, d); else if (d.status === "error") done(reject, new Error(d.error || "failed")); }, err => done(reject, err));
+    unsub = onSnapshot(ref, s => { const d = s.data(); if (!d) return; if (onUpdate) try { onUpdate(d); } catch {} if (d.status === "done") done(resolve, d); else if (d.status === "error") done(reject, new Error(d.error || "failed")); }, err => done(reject, err));
   });
 }
 async function scanReceipt(eventId, restrict, seed, groupId) {
@@ -2951,6 +3123,7 @@ function profileBody() {
     <label class="field"><span>Cash App</span><input id="pCashapp" value="${esc(p.cashapp || "")}" placeholder="$samrivera"></label></div>
     <label class="field"><span>Preferred way to get paid back</span><select id="pPayPref">${payPrefOptions(p.payPref || "")}</select></label>
     <label class="field"><span>Birthday <span class="muted">(so your groups can plan something)</span></span><input id="pBday" type="date" value="${esc(p.birthday || "")}"></label>
+    <label class="field"><span>Home city <span class="muted">(for nights out nearby)</span></span><input id="pCity" value="${esc(p.city || "")}" placeholder="Frisco, TX" maxlength="60" autocomplete="address-level2"></label>
     <p class="muted sm">Your payment handles are shared only with people in your groups, so they can pay you back.</p>
     <button class="btn primary" id="saveProfile">Save profile</button>
   </div>
@@ -3003,7 +3176,9 @@ function wireProfile() {
     try {
       const birthday = (el("pBday") || {}).value || "";
       const email = (el("pEmail") || {}).value || ""; if (email && !email.includes("@")) return toast("That email doesn't look right.");
-      await updateDoc(doc(db, "users", myUid()), { name, venmo, phone, zelle, cashapp, payPref, phoneE164: toE164(phone) || myPhoneE164(), birthday, email: email.trim().toLowerCase() });
+      const city = ((el("pCity") || {}).value || "").trim();
+      await updateDoc(doc(db, "users", myUid()), { name, venmo, phone, zelle, cashapp, payPref, city, phoneE164: toE164(phone) || myPhoneE164(), birthday, email: email.trim().toLowerCase() });
+      if (city) registerCity(city);
       // propagate name/contact into each group's denormalized members map
       for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}`]: { name, venmo, phone, zelle, cashapp, payPref, photo: S.profile.photo || "", birthday } }).catch(() => {});
       toast("Profile saved");

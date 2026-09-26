@@ -609,3 +609,36 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .group-page .chiprow .fchip,.group-page .btn:not(.primary){background:#fff}
 .btn.pref{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--sun)}
 .pref-note{font-size:11.5px;font-weight:700;color:var(--muted);align-self:center;margin-right:2px}
+/* ---- Curate: nights out ---- */
+.city-in{border:1px solid var(--line);border-radius:12px;padding:9px 12px;font:inherit;font-size:15px;min-width:180px;background:var(--surface);color:var(--ink)}
+.night{padding:0;margin-bottom:14px;overflow:hidden}
+.night-head{position:relative;isolation:isolate;padding:16px 16px 14px;min-height:118px;display:flex;align-items:flex-end;color:var(--th-ink,#222)}
+.night-head .ev-card-bg{border-radius:0}
+.night-head-in{position:relative;width:100%}
+.night-emoji{position:absolute;right:0;top:-2px;font-size:30px;line-height:1}
+.night-when{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;opacity:.85}
+.night h3{margin:2px 40px 0 0;font-size:20px;line-height:1.12;letter-spacing:-.01em}
+.night-body{padding:12px 14px 12px}
+.stops{display:grid;gap:6px;margin:0 0 8px}.stop{display:flex;gap:10px;align-items:flex-start;font-size:14px}.stop .t{flex:none;width:64px;color:var(--muted);font-weight:600;font-variant-numeric:tabular-nums;font-size:13px;padding-top:1px}.stop b{font-weight:600}.stop small{display:block;color:var(--muted);font-size:12.5px}
+.night .why{margin:0 0 8px;font-size:13.5px;color:var(--muted);font-style:italic}
+.night .meta{display:flex;gap:10px;font-size:12.5px;color:var(--muted);margin:0 0 10px;flex-wrap:wrap}
+.night .acts{display:flex;gap:6px;flex-wrap:wrap}.night .acts a.btn{text-decoration:none}
+.opts{display:flex;flex-wrap:wrap;gap:6px}.opt{border:1.5px solid var(--line);background:var(--surface);border-radius:12px;padding:8px 11px;font-weight:600;font-size:13.5px;cursor:pointer;display:flex;gap:6px;align-items:center;color:var(--ink);font-family:inherit}.opt.on{border-color:var(--accent);background:#FFF1EC}
+.idea-row .chev{margin-left:auto}
+/* night cards: the painted cover of that night */
+.night.has-cover .night-head{min-height:150px;padding-top:70px;color:#fff}
+.night-cover{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:-2}
+.night.has-cover .night-head::before{content:"";position:absolute;inset:0;background:linear-gradient(rgba(0,0,0,0) 28%,rgba(0,0,0,.32) 55%,rgba(0,0,0,.78));z-index:-1}
+.night.has-cover .night-when,.night.has-cover h3{text-shadow:0 1px 3px rgba(0,0,0,.55)}
+.night-emoji{letter-spacing:2px}
+.night.has-cover .night-emoji{background:rgba(255,255,255,.9);border-radius:999px;padding:3px 8px;font-size:18px;top:-56px;right:-2px;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+/* the Curate tab sparkles: gradient text, a twinkling star, a soft glow when active */
+.curate-lbl{background:linear-gradient(90deg,#FF6B57,#FFC145,#FF6B57);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;font-weight:700;animation:curate-shimmer 4s linear infinite;display:inline-flex;align-items:center;gap:2px}
+.curate-lbl .spark{font-style:normal;font-size:11px;-webkit-text-fill-color:#FFC145;color:#FFC145;transform-origin:center;animation:curate-twinkle 2.6s ease-in-out infinite}
+.tab.on .curate-lbl{animation-duration:2.2s}
+.tab.on .curate-lbl .spark{-webkit-text-fill-color:#FF6B57;color:#FF6B57}
+@keyframes curate-shimmer{0%{background-position:0 0}100%{background-position:-200% 0}}
+@keyframes curate-twinkle{0%,100%{transform:scale(.7) rotate(0);opacity:.55}50%{transform:scale(1.25) rotate(90deg);opacity:1}}
+@media (prefers-reduced-motion:reduce){.curate-lbl,.curate-lbl .spark{animation:none}}
+.splash.splash-replay{transition:opacity .45s ease}
+.splash.splash-replay.out{opacity:0;pointer-events:none}

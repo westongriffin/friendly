@@ -5,8 +5,9 @@
 // Push works once the native app registers an FCM token (saved to
 // users/{uid}.pushTokens by the client). SMS is only active if you set Twilio
 // credentials:  firebase functions:config:set twilio.sid=... twilio.token=... twilio.from=+1...
-const { onDocumentCreated, onDocumentUpdated, onDocumentDeleted } = require("firebase-functions/v2/firestore");
+const { onDocumentCreated, onDocumentWritten, onDocumentUpdated, onDocumentDeleted } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const nodeCrypto = require("crypto");
 const functionsV1 = require("firebase-functions/v1");
 const { onRequest } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
@@ -358,14 +359,112 @@ ${q}`;
       .filter(a => a.kind && a.label && (a.kind !== "open_event" || ids.has(a.id)))
   };
 }
-exports.onPlanRequest = onDocumentCreated({ document: "planRequests/{id}", region: "us-central1", timeoutSeconds: 60, memory: "256MiB" }, async e => {
-  const d = e.data && e.data.data(); if (!d || !d.text) return;
+// ---- Curate: Dot finds real things happening nearby (Gemini with Google Search grounding), pairs each
+//      with a place to eat and the logistics, and the app turns a pick into a plan, a poll, tickets or a table.
+//      curated/{cityKey} is rebuilt nightly for every city someone has set; "night" mode builds three on demand.
+const TAGS = ["weekend", "tonight", "date", "group", "cheap", "family"];
+async function askGrounded(prompt, maxTokens = 6000, onPhase) {
+  const token = (await (await gauth.getClient()).getAccessToken()).token;
+  const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${LOCATION}/publishers/google/models/${PLAN_MODEL}:generateContent`;
+  const body = { contents: [{ role: "user", parts: [{ text: prompt }] }], tools: [{ googleSearch: {} }], generationConfig: { temperature: 0.4, maxOutputTokens: maxTokens, thinkingConfig: { thinkingBudget: 0 } } };
+  const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 200000);
+  const t0 = Date.now(); if (onPhase) await onPhase("searching");
+  let r; try { r = await fetch(url, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body), signal: ctl.signal }); }
+  catch (e) { throw new Error(e.name === "AbortError" ? "the search took too long" : e.message); } finally { clearTimeout(timer); }
+  if (!r.ok) throw new Error(PLAN_MODEL + " " + r.status + ": " + (await r.text()).slice(0, 160));
+  const j = await r.json();
+  logger.info("grounded call took " + Math.round((Date.now() - t0) / 1000) + "s");
+  const text = ((((j.candidates || [])[0] || {}).content || {}).parts || []).map(p => p.text || "").join("");
+  if (onPhase) await onPhase("sorting");
+  const m = text.replace(/```json|```/g, "").match(/\[[\s\S]*\]/); if (!m) throw new Error("no JSON in answer: " + text.slice(0, 80));
+  return JSON.parse(m[0]);
+}
+const isUrl = u => /^https?:\/\//i.test(String(u || ""));
+function cleanNight(n) {
+  const stops = (Array.isArray(n.stops) ? n.stops : []).slice(0, 5).map(x => ({ time: sv(x && x.time, 10), name: sv(x && x.name, 80), note: sv(x && x.note, 110), kind: ["eat", "do", "go"].includes(x && x.kind) ? x.kind : "do", url: isUrl(x && x.url) ? sv(x.url, 300) : "" })).filter(x => x.name);
+  return {
+    title: sv(n.title, 80), date: /^\d{4}-\d{2}-\d{2}$/.test(n.date || "") ? n.date : "", start: /^\d{2}:\d{2}$/.test(n.start || "") ? n.start : "",
+    tags: clean(n.tags, 6, 10).filter(t => TAGS.includes(t)), stops,
+    cost: sv(n.cost, 40), size: sv(n.size, 30), parking: sv(n.parking, 70), why: sv(n.why, 220), ticketUrl: isUrl(n.ticketUrl) ? sv(n.ticketUrl, 300) : "",
+    emoji: sv(n.emoji, 8).replace(/[A-Za-z0-9\s]/g, "").slice(0, 4), emojis: sv(n.emojis, 12).replace(/[A-Za-z0-9\s]/g, "").slice(0, 8),
+    scene: sv(n.scene, 140), theme: THEME_IDS.includes(n.theme) ? n.theme : "midnight",
+    coverId: nodeCrypto.createHash("md5").update(sv(n.title, 80) + "|" + sv(n.date, 10)).digest("hex").slice(0, 12)
+  };
+}
+const nightShape = `Return ONLY a JSON array, no prose: [{"title": short and specific, "date": "YYYY-MM-DD", "start": 24-hour "HH:MM" of the first stop, "tags": [any of weekend, tonight, date, group, cheap, family], "stops": [{"time": like "5:30 PM", "name": the real venue or event name, "note": one useful detail (walk time, what to order, parking), "kind": "eat" | "do" | "go", "url": the listing or booking page if you found one}], "cost": like "$45 a head all in", "size": like "Best for 2–6", "parking": one short line, "why": one sentence in Dot's voice on why this night works, "ticketUrl": the ticket page if tickets are sold, "emoji": one emoji for the night, "emojis": exactly two emojis, the thing to do then the food (like "⚾🌮"), "scene": a 10-to-16-word visual description of the night for an illustration, concrete objects and setting only, no people's faces, no text (like "a baseball game under stadium lights beside a plate of street tacos"), "theme": the one of ${THEME_IDS.join(", ")} that fits the vibe (sunset or golden for dinners, confetti for parties, garden or blossom for brunch and outdoors, midnight or cosmic for nights out and shows, disco, rave or retro for dance and costume nights, citrus or bubblegum for playful daytime plans, aurora for big arena events)}]. Only include things you actually found; never invent an event, a venue or a price. Times must make sense in sequence.`;
+async function curateCity(d, onPhase) {
+  const city = sv(d.city, 60); if (city.length < 2) throw new Error("no city");
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(d.today || "") ? d.today : new Date().toISOString().slice(0, 10);
+  const end = new Date(today + "T12:00:00Z"); end.setUTCDate(end.getUTCDate() + 9);
+  const prompt = `You are Dot, the helper in Friendly, an app friends use to plan nights out. Using search, find real, specific things happening in or near ${city} between ${today} (${sv(d.weekday, 10)}) and ${end.toISOString().slice(0, 10)}: concerts, games, comedy, theater, markets, festivals, exhibitions, outdoor events. Build 6 "nights": each pairs one thing to do with one real place to eat or drink within a short walk or drive, before or after, with times that work in sequence (seated about 90 minutes before doors, and a leave-by stop). Also add 2 nights that need no ticket (a neighborhood evening, a hike then dinner). Cover a mix: something tonight, the weekend, a date night, a big-group night, a cheap night and a family one; tag each with every tag that applies. Keep every string short; at most 3 stops per night; no markdown. ${nightShape}`;
+  const raw = await askGrounded(prompt, 3500, onPhase);
+  const nights = raw.map(cleanNight).filter(n => n.title && n.date && n.date >= today && n.stops.length).slice(0, 14);
+  if (!nights.length) throw new Error("nothing found");
+  return nights;
+}
+const cityKeyOf = c => String(c || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+async function buildAndCacheCity(city, tz, today, weekday, onPhase) {
+  const nights = await curateCity({ city, tz, today, weekday }, onPhase);
+  await db.doc("curated/" + cityKeyOf(city)).set({ city, nights, updatedAt: Date.now(), forDate: today });
+  return nights;
+}
+async function buildNight(d) {
+  const city = sv(d.city, 60); if (city.length < 2) throw new Error("no city");
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(d.today || "") ? d.today : new Date().toISOString().slice(0, 10);
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(d.from || "") ? d.from : today, to = /^\d{4}-\d{2}-\d{2}$/.test(d.to || "") ? d.to : from;
+  const prompt = `You are Dot, the helper in Friendly, an app friends use to plan nights out. Build 3 different nights out in or near ${city} for ${from === to ? from : from + " to " + to} (today is ${today}, ${sv(d.weekday, 10)}), using search to find real, specific events, venues, restaurants and bars.
+The ask: vibe "${sv(d.vibe, 30) || "surprise me"}", for ${sv(d.who, 30) || "a few friends"}, budget ${sv(d.budget, 30) || "flexible"} per person all in.${d.free ? " Also: " + sv(d.free, 300) + "." : ""}
+Make the three genuinely different from each other (different neighborhoods or kinds of thing). Each pairs one thing to do with one real place to eat or drink nearby, with times that work in sequence. Respect the budget and the group size (bar tables and counter service for big groups, a reservation for a date). ${nightShape}`;
+  const raw = await askGrounded(prompt, 3000, d.onPhase);
+  const nights = raw.map(cleanNight).filter(n => n.title && n.date && n.stops.length).slice(0, 3);
+  if (!nights.length) throw new Error("nothing found");
+  return nights;
+}
+// Each night gets a small painted cover made from its own scene (the ballgame and the tacos, not a stock palette).
+// Runs after curated/{city} changes; covers are keyed by title+date so unchanged nights keep theirs across rebuilds.
+exports.onCuratedWritten = onDocumentWritten({ document: "curated/{cityKey}", region: "us-central1", timeoutSeconds: 540, memory: "1GiB" }, async e => {
+  const after = e.data && e.data.after && e.data.after.exists ? e.data.after.data() : null; if (!after) return;
+  const nights = (after.nights || []).filter(n => n.coverId);
+  const col = e.data.after.ref.collection("covers");
+  const have = new Set((await col.get()).docs.map(d => d.id));
+  const todo = nights.filter(n => !have.has(n.coverId)).slice(0, 12);
+  const paint = async n => {
+    const prompt = (n.scene || n.title) + ", " + (n.title || "") + ", warm evening light";
+    let image = null;
+    try { image = (await geminiGenerate(prompt)).image; } catch (err) { logger.warn("cover via vertex failed: " + err.message); try { image = await pollinationsGenerate(prompt); } catch (e2) { logger.warn("cover fallback failed: " + e2.message); } }
+    if (image) await col.doc(n.coverId).set({ image, title: n.title, createdAt: Date.now() });
+  };
+  for (let i = 0; i < todo.length; i += 3) await Promise.all(todo.slice(i, i + 3).map(paint));
+  // drop covers no night uses any more
+  const keep = new Set(nights.map(n => n.coverId));
+  await Promise.all([...have].filter(id => !keep.has(id)).map(id => col.doc(id).delete().catch(() => {})));
+});
+exports.curateNightly = onSchedule({ schedule: "30 3 * * *", timeZone: "America/Chicago", timeoutSeconds: 540, memory: "512MiB" }, async () => {
+  const cities = await db.collection("curateCities").get();
+  const cutoff = Date.now() - 45 * 864e5;
+  for (const doc of cities.docs) {
+    const c = doc.data(); if (!c.city || (c.updatedAt || 0) < cutoff) continue;
+    try {
+      const tz = c.tz || "America/Chicago";
+      const now = new Date(); const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" });
+      const today = fmt.format(now); const weekday = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" }).format(now);
+      await buildAndCacheCity(c.city, tz, today, weekday);
+    } catch (err) { logger.warn("curate failed for " + c.city + ": " + err.message); }
+  }
+});
+
+exports.onPlanRequest = onDocumentCreated({ document: "planRequests/{id}", region: "us-central1", timeoutSeconds: 300, memory: "512MiB" }, async e => {
+  const d = e.data && e.data.data(); if (!d) return;
+  if (!d.text && d.mode !== "curate-city" && d.mode !== "night") return;   // the curate modes carry no text
   const ref = e.data.ref;
   try {
-    const data = d.mode === "expense" ? await draftExpense(d) : d.mode === "edit" ? await draftEdit(d) : d.mode === "ask" ? await answerQuestion(d) : await draftPlan(d);
+    const data = d.mode === "expense" ? await draftExpense(d) : d.mode === "edit" ? await draftEdit(d) : d.mode === "ask" ? await answerQuestion(d)
+      : d.mode === "curate-city" ? { nights: await buildAndCacheCity(sv(d.city, 60), sv(d.tz, 40), d.today, d.weekday, phase => ref.update({ phase }).catch(() => {})) }
+      : d.mode === "night" ? { nights: await buildNight({ ...d, onPhase: phase => ref.update({ phase }).catch(() => {}) }) }
+      : await draftPlan(d);
     await ref.update({ status: "done", data });
   }
-  catch (err) { logger.error("plan draft failed: " + err.message); await ref.update({ status: "error", error: "couldn't work that out" }); }
+  catch (err) { logger.error("plan draft failed (" + (d.mode || "event") + "): " + err.message); await ref.update({ status: "error", error: (d.mode === "curate-city" || d.mode === "night") ? err.message.slice(0, 120) : "couldn't work that out" }); }
 });
 
 // ---- Email calendar invites (iMIP over Resend) ----
