@@ -1586,12 +1586,12 @@ function ensureCurated() {
   if (curSub) curSub(); if (curCoverSub) curCoverSub(); curKey = key; S.curCovers = {}; S._curBuilding = false; S._curError = "";
   // Show the last nights this phone saw right away; the live copy replaces them when it arrives.
   S.curated = null; try { const c = JSON.parse(localStorage.getItem("friendlyCurated:" + key) || "null"); if (c && c.nights) S.curated = c; } catch {}
-  curCoverSub = onSnapshot(collection(db, "curated", key, "covers"), snap => { const m = {}; snap.docs.forEach(d => { m[d.id] = d.data().image; }); S.curCovers = m; if (S.route.name === "curate" || S.route.name === "home") render(); }, () => {});
+
   curSub = onSnapshot(doc(db, "curated", key), snap => {
-    const d = snap.exists() ? snap.data() : null;
+    const d = snap.exists() ? snap.data() : null;   // just the nights and which covers exist; the images load separately
     if (!d && snap.metadata.fromCache && S.curated) return;               // no local copy yet; keep showing the saved one
     S.curated = d; if (d) try { localStorage.setItem("friendlyCurated:" + key, JSON.stringify(d)); } catch {}
-    if ((!d || (d.forDate || "") < addDays(todayStr(), -1) || (d.v || 1) < 3) && !S._curBuilding && !isDemo()) {   // v3 = four per filter, de-duplicated
+    if ((!d || (d.forDate || "") < addDays(todayStr(), -1) || (d.v || 1) < 4) && !S._curBuilding && !isDemo()) {   // v3 = four per filter, de-duplicated
       S._curBuilding = true;
       S._curPhase = "starting";
       requestViaFirestore("planRequests", { mode: "curate-city", city, ...nowCtx() }, 280000, d => { if (d.phase && d.phase !== S._curPhase) { S._curPhase = d.phase; render(); } }).then(() => { S._curBuilding = false; }).catch(e => { S._curBuilding = false; S._curError = e.message; render(); });
@@ -1599,11 +1599,13 @@ function ensureCurated() {
     render();
   }, err => { S._curError = err.message; render(); });
 }
+// Painted covers are served one image at a time (cached by the phone) instead of riding along with the nights list.
+function coverUrl(n) { const ids = (S.curated && S.curated.coverIds) || []; return n && n.coverId && curKey && ids.includes(n.coverId) ? `${FN_BASE}/curateCover?c=${curKey}&id=${n.coverId}` : ""; }
 function nightWhen(n) { const d = evDate({ date: n.date }); return `${d.toLocaleDateString("en-US", { weekday: "short" })} · ${MONTHS[d.getMonth()]} ${d.getDate()}${n.start ? " · " + fmtTime(n.start) : ""}`; }
 function nightCardHtml(n, id) {
   S._nightById = S._nightById || {}; S._nightById[id] = n;
   const eat = n.stops.find(x => x.kind === "eat"), tix = n.ticketUrl || (n.stops.find(x => x.kind === "do" && x.url) || {}).url;
-  const th = themeOf(n.theme || "midnight"), cover = n.coverId && (S.curCovers || {})[n.coverId];
+  const th = themeOf(n.theme || "midnight"), cover = coverUrl(n);
   return `<div class="card night t-${esc(th.id)} ${cover ? "has-cover" : ""}">
     <div class="night-head" style="--th-ink:${cover ? "#fff" : esc(th.ink)};font-family:${esc(th.font)},system-ui">${cover ? `<img class="night-cover" src="${esc(cover)}" alt="">` : `<div class="ev-card-bg"></div>`}<div class="night-head-in"><span class="night-emoji">${esc(n.emojis || n.emoji || "🌆")}</span><div class="night-when">${esc(nightWhen(n))}</div><h3>${esc(n.title)}</h3></div></div>
     <div class="night-body">
@@ -1621,7 +1623,7 @@ function nightToPlan(n) {
   resetCompose(); compose._restored = true;
   const eat = n.stops.find(x => x.kind === "eat"), main = n.stops.find(x => x.kind === "do") || n.stops[0];
   compose.title = n.title.slice(0, 80); compose.date = n.date; compose.time = n.start || ""; compose.emoji = n.emoji || [...(n.emojis || "🌆")][0] || "🌆"; compose.theme = THEMES.some(t => t.id === n.theme) ? n.theme : "midnight";
-  const cover = n.coverId && (S.curCovers || {})[n.coverId]; if (cover) { compose.cover = cover; compose.coverTab = "upload"; }
+  const cover = coverUrl(n); if (cover) { compose.cover = cover; compose.coverTab = "upload"; }
   compose.where = ((main && main.name) || "").slice(0, 200); compose.food = eat ? eat.name.slice(0, 120) : "";
   compose.notes = [n.stops.map(x => `${x.time} · ${x.name}${x.note ? " (" + x.note + ")" : ""}`).join("\n"), n.parking ? "Parking: " + n.parking : "", n.cost ? "Cost: " + n.cost : "", n.ticketUrl ? "Tickets: " + n.ticketUrl : ""].filter(Boolean).join("\n").slice(0, 1000);
   compose._plan = { summary: "Here's the night, set up: " + n.title + ". Add who's coming and it's ready.", missing: ["guests"], unmatched: [], bring: [], ideas: [] };

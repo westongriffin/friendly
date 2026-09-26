@@ -439,7 +439,7 @@ async function curateCity(d, onPhase) {
 const cityKeyOf = c => String(c || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
 async function buildAndCacheCity(city, tz, today, weekday, onPhase) {
   const nights = await curateCity({ city, tz, today, weekday }, onPhase);
-  await db.doc("curated/" + cityKeyOf(city)).set({ city, nights, updatedAt: Date.now(), forDate: today, v: 3 });
+  await db.doc("curated/" + cityKeyOf(city)).set({ city, nights, updatedAt: Date.now(), forDate: today, v: 4 });
   return nights;
 }
 async function buildNight(d) {
@@ -462,16 +462,27 @@ exports.onCuratedWritten = onDocumentWritten({ document: "curated/{cityKey}", re
   const col = e.data.after.ref.collection("covers");
   const have = new Set((await col.get()).docs.map(d => d.id));
   const todo = nights.filter(n => !have.has(n.coverId)).slice(0, 30);
+  const shrink = async dataUrl => { const b64 = String(dataUrl).split(",")[1]; const out = await sharp(Buffer.from(b64, "base64")).resize({ width: 720, withoutEnlargement: true }).jpeg({ quality: 74 }).toBuffer(); return "data:image/jpeg;base64," + out.toString("base64"); };
   const paint = async n => {
     const prompt = (n.scene || n.title) + ", " + (n.title || "") + ", warm evening light";
     let image = null;
     try { image = (await geminiGenerate(prompt)).image; } catch (err) { logger.warn("cover via vertex failed: " + err.message); try { image = await pollinationsGenerate(prompt); } catch (e2) { logger.warn("cover fallback failed: " + e2.message); } }
-    if (image) await col.doc(n.coverId).set({ image, title: n.title, createdAt: Date.now() });
+    if (image) { try { image = await shrink(image); } catch (e3) {} await col.doc(n.coverId).set({ image, title: n.title, createdAt: Date.now() }); have.add(n.coverId); }
   };
-  for (let i = 0; i < todo.length; i += 3) await Promise.all(todo.slice(i, i + 3).map(paint));
+  const publish = async () => { const ids = nights.map(n => n.coverId).filter(id => have.has(id)).sort(); const prev = (after.coverIds || []).slice().sort(); if (ids.join() !== prev.join()) await e.data.after.ref.update({ coverIds: ids }); };
+  await publish();
+  for (let i = 0; i < todo.length; i += 3) { await Promise.all(todo.slice(i, i + 3).map(paint)); await publish(); }
   // drop covers no night uses any more
   const keep = new Set(nights.map(n => n.coverId));
   await Promise.all([...have].filter(id => !keep.has(id)).map(id => col.doc(id).delete().catch(() => {})));
+});
+exports.curateCover = onRequest({ region: "us-central1", invoker: "public", memory: "256MiB" }, async (req, res) => {
+  const c = String(req.query.c || "").replace(/[^a-z0-9-]/g, "").slice(0, 60), id = String(req.query.id || "").replace(/[^a-f0-9]/g, "").slice(0, 12);
+  if (!c || !id) { res.status(400).end(); return; }
+  const snap = await db.doc(`curated/${c}/covers/${id}`).get();
+  const img = snap.exists ? String(snap.data().image || "") : ""; const m = /^data:(image\/[a-z]+);base64,(.+)$/.exec(img);
+  if (!m) { res.set("Cache-Control", "public, max-age=60").status(404).end(); return; }
+  res.set("Content-Type", m[1]).set("Cache-Control", "public, max-age=2592000, immutable").send(Buffer.from(m[2], "base64"));
 });
 exports.curateNightly = onSchedule({ schedule: "30 3 * * *", timeZone: "America/Chicago", timeoutSeconds: 540, memory: "512MiB" }, async () => {
   const cities = await db.collection("curateCities").get();
