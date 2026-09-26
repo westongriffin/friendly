@@ -1583,10 +1583,14 @@ function registerCity(city) { const key = cityKeyOf(city); if (!key) return; set
 function ensureCurated() {
   const city = (S.profile && S.profile.city || "").trim(), key = cityKeyOf(city); if (!key) return;
   if (curKey === key && curSub) return;
-  if (curSub) curSub(); if (curCoverSub) curCoverSub(); curKey = key; S.curated = null; S.curCovers = {}; S._curBuilding = false; S._curError = "";
+  if (curSub) curSub(); if (curCoverSub) curCoverSub(); curKey = key; S.curCovers = {}; S._curBuilding = false; S._curError = "";
+  // Show the last nights this phone saw right away; the live copy replaces them when it arrives.
+  S.curated = null; try { const c = JSON.parse(localStorage.getItem("friendlyCurated:" + key) || "null"); if (c && c.nights) S.curated = c; } catch {}
   curCoverSub = onSnapshot(collection(db, "curated", key, "covers"), snap => { const m = {}; snap.docs.forEach(d => { m[d.id] = d.data().image; }); S.curCovers = m; if (S.route.name === "curate" || S.route.name === "home") render(); }, () => {});
   curSub = onSnapshot(doc(db, "curated", key), snap => {
-    const d = snap.exists() ? snap.data() : null; S.curated = d;
+    const d = snap.exists() ? snap.data() : null;
+    if (!d && snap.metadata.fromCache && S.curated) return;               // no local copy yet; keep showing the saved one
+    S.curated = d; if (d) try { localStorage.setItem("friendlyCurated:" + key, JSON.stringify(d)); } catch {}
     if ((!d || (d.forDate || "") < addDays(todayStr(), -1) || (d.v || 1) < 3) && !S._curBuilding && !isDemo()) {   // v3 = four per filter, de-duplicated
       S._curBuilding = true;
       S._curPhase = "starting";
