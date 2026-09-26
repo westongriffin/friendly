@@ -349,7 +349,8 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .profile-hero{display:flex;align-items:center;gap:16px;margin:8px 0 18px} .profile-hero h1{font-size:24px}
 
 /* ---------- DIALOG ---------- */
-.app-dialog{border:0;border-radius:18px;background:var(--surface);color:var(--ink);box-shadow:var(--shadow-lg);padding:0;width:min(460px,calc(100vw - 28px))}
+.app-dialog{border:0;border-radius:18px;background:var(--surface);color:var(--ink);box-shadow:var(--shadow-lg);padding:0;width:min(460px,calc(100vw - 28px));max-height:calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 40px);max-height:calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 40px);overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+/* tall dialogs scroll inside themselves and stay clear of the clock and the home bar */
 .app-dialog::backdrop{background:rgba(30,16,10,.5)}
 .dlg-inner{padding:22px}
 .dlg-inner h3{font-size:20px;margin-bottom:14px}
