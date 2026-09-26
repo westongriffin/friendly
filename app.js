@@ -560,7 +560,7 @@ function attachPlaces(input) {
 }
 
 // ---------- state ----------
-const BOOT_AT = Date.now(), SPLASH_MIN = 4100, SPLASH_MAX = 6500; let splashTimer = null, splashHold = false;
+const BOOT_AT = Date.now(), SPLASH_MIN = 5100, SPLASH_MAX = 7500; let splashTimer = null, splashHold = false;
 const S = {
   user: null, profile: null, ready: false,
   groups: new Map(), pendingInvites: new Map(), events: new Map(),
@@ -750,7 +750,7 @@ function mountSplash(root, msg) {
   root.innerHTML = `<div class="splash">${splashInner(msg)}</div>`;
   if (splashStop) { splashStop(); splashStop = null; }
   const svg = root.querySelector(".splash-blip");
-  if (svg && window.Blip) { splashHold = true; splashStop = window.Blip.play(svg, { dur: 1.7, delay: 1.65, onDone: () => { setTimeout(() => { splashHold = false; render(); }, 600); } }); }
+  if (svg && window.Blip) { splashHold = true; splashStop = window.Blip.play(svg, { dur: 1.7, delay: 1.65, onDone: () => { setTimeout(() => { splashHold = false; render(); }, 1600); } }); }
 }
 // The intro plays again whenever the app comes back to the foreground after being away a while, as an overlay on top of the live app.
 let hiddenAt = 0;
@@ -762,7 +762,7 @@ document.addEventListener("visibilitychange", () => {
 function replaySplash() {
   const o = document.createElement("div"); o.className = "splash splash-replay"; o.innerHTML = splashInner("Getting everyone here…"); document.body.appendChild(o);
   const svg = o.querySelector(".splash-blip"); if (!svg) { o.remove(); return; }
-  const stop = window.Blip.play(svg, { dur: 1.7, delay: 1.65, onDone: () => setTimeout(() => { o.classList.add("out"); setTimeout(() => { stop(); o.remove(); }, 450); }, 600) });
+  const stop = window.Blip.play(svg, { dur: 1.7, delay: 1.65, onDone: () => setTimeout(() => { o.classList.add("out"); setTimeout(() => { stop(); o.remove(); }, 450); }, 1600) });
 }
 function renderNow() {
   if (BLOCKED_MOBILE_WEB) return;
