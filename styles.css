@@ -47,8 +47,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:-.02em;margin:0;text-wrap:bal
 img{max-width:100%}
 
 /* splash */
-.splash{position:fixed;inset:0;z-index:60;display:grid;place-content:center;justify-items:center;gap:16px;color:rgba(255,255,255,.88);font-weight:500;text-align:center;padding:24px;background:linear-gradient(160deg,#FF8A5B,#C84B7A 60%,#3A1A5C)}
-@keyframes splash-wash{0%,100%{background:linear-gradient(160deg,#FF8A5B,#C84B7A 60%,#3A1A5C)}33%{background:linear-gradient(160deg,#BFE7C6,#7CC79B 55%,#1F5A3A)}66%{background:linear-gradient(160deg,#1A1046,#3B2A8C 55%,#FF6B57)}}
+.splash{position:fixed;inset:0;z-index:60;display:grid;place-content:center;justify-items:center;gap:16px;color:rgba(255,255,255,.88);font-weight:500;text-align:center;padding:24px;background:linear-gradient(160deg,#BFE7C6,#7CC79B 55%,#1F5A3A)}
 .splash-brand{font-size:34px;color:#fff} .splash-brand .tilt{color:#FFC145} .splash-brand::after{background:#FFC145}
 .splash-row{display:flex;gap:10px}
 .splash-av{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:700;font-size:13px;font-family:var(--display);box-shadow:0 6px 18px rgba(0,0,0,.18);animation:splash-hop 1.2s ease-in-out infinite}
