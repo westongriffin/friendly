@@ -1587,7 +1587,7 @@ function ensureCurated() {
   curCoverSub = onSnapshot(collection(db, "curated", key, "covers"), snap => { const m = {}; snap.docs.forEach(d => { m[d.id] = d.data().image; }); S.curCovers = m; if (S.route.name === "curate" || S.route.name === "home") render(); }, () => {});
   curSub = onSnapshot(doc(db, "curated", key), snap => {
     const d = snap.exists() ? snap.data() : null; S.curated = d;
-    if ((!d || (d.forDate || "") < addDays(todayStr(), -1)) && !S._curBuilding && !isDemo()) {
+    if ((!d || (d.forDate || "") < addDays(todayStr(), -1) || (d.v || 1) < 3) && !S._curBuilding && !isDemo()) {   // v3 = four per filter, de-duplicated
       S._curBuilding = true;
       S._curPhase = "starting";
       requestViaFirestore("planRequests", { mode: "curate-city", city, ...nowCtx() }, 280000, d => { if (d.phase && d.phase !== S._curPhase) { S._curPhase = d.phase; render(); } }).then(() => { S._curBuilding = false; }).catch(e => { S._curBuilding = false; S._curError = e.message; render(); });
@@ -1648,7 +1648,12 @@ function curateBody() {
     <div class="card empty">${dot("thinking", 72)}<b>Where are you?</b><p class="muted">Tell me your city and I'll find a few good nights out nearby, each with a place to eat and the timing worked out.</p><div class="btnrow" style="justify-content:center;gap:8px;flex-wrap:wrap"><input id="curCity" class="city-in" placeholder="Frisco, TX" maxlength="60"><button type="button" class="btn primary" id="curCitySave">Look around</button></div><p class="muted sm" style="margin-top:8px">No location tracking, just the city.</p></div>`;
   ensureCurated();
   const d = S.curated, nights = (d && d.nights) || [];
-  const filtered = nights.filter(n => (n.tags || []).includes(curFilter)), shown = filtered.length ? filtered : nights;
+  // Tonight and This weekend go by the actual date; the rest by what Dot tagged. Four per filter, the ones from that
+  // filter's own search first, the rest behind "More ideas".
+  const t = todayStr(), dow = new Date().getDay(), fri = addDays(t, dow === 6 ? -1 : dow === 0 ? -2 : 5 - dow), sun = addDays(fri, 2);
+  const fits = n => curFilter === "tonight" ? n.date === t : curFilter === "weekend" ? n.date >= (t > fri ? t : fri) && n.date <= sun : (n.tags || []).includes(curFilter);
+  const filtered = nights.filter(fits).sort((a, b) => ((b.src === curFilter) - (a.src === curFilter)) || (a.date + (a.start || "")).localeCompare(b.date + (b.start || "")));
+  const all = filtered.length ? filtered : nights, shown = S._curMore === curFilter ? all : all.slice(0, 4), extra = all.length - shown.length;
   const phaseText = { starting: "Warming up", searching: "Searching what's on and pairing places to eat", sorting: "Sorting the good ones" }[S._curPhase] || "Looking around";
   const lead = !d && !S._curError ? `Give me a minute. ${phaseText} in ${city}…` : S._curError ? "I couldn't look around just now (" + S._curError + "). Try again in a bit." : shown.length ? (filtered.length ? CURATE_LEADS[curFilter] : "Nothing tagged for that yet, so here's everything I found.") : "Nothing yet. Build your own and I'll go looking.";
   return `<div class="section-head"><h2>${CURATE_LABEL}</h2><span class="btnrow" style="gap:8px"><button type="button" class="btn small" id="curCityBtn">📍 ${esc(city)}</button><button type="button" class="btn primary small" id="curBuild">✨ Build me a night</button></span></div>
@@ -1657,6 +1662,7 @@ function curateBody() {
   ${!d && !S._curError ? `<div class="card empty compact">${dot("thinking", 64)}<p class="muted" style="margin:6px 0 0">Searching what's on, pairing dinners, checking the times. About half a minute the first time.</p></div>` : ""}
   ${S._curError ? `<div style="text-align:center;margin-bottom:12px"><button type="button" class="btn" id="curRetry">Try again</button></div>` : ""}
   <div id="nights">${shown.map((n, i) => nightCardHtml(n, "c" + i)).join("")}</div>
+  ${extra > 0 ? `<div style="text-align:center;margin:4px 0 12px"><button type="button" class="btn" id="curMore">More ideas (${extra})</button></div>` : ""}
   ${d ? `<p class="muted sm" style="margin:6px 4px 0">Found by Dot with web search and refreshed nightly. Double-check times before you go; things change.</p>` : ""}`;
 }
 function wireCurate() {
@@ -1665,7 +1671,8 @@ function wireCurate() {
   if (el("curCityBtn")) el("curCityBtn").onclick = openCityDialog;
   if (el("curBuild")) el("curBuild").onclick = () => openNightBuilder();
   if (el("curRetry")) el("curRetry").onclick = () => { S._curError = ""; curKey = ""; if (curSub) { curSub(); curSub = null; } render(); };
-  document.querySelectorAll("[data-cf]").forEach(b => b.onclick = () => { curFilter = b.dataset.cf; render(); });
+  document.querySelectorAll("[data-cf]").forEach(b => b.onclick = () => { curFilter = b.dataset.cf; S._curMore = null; render(); });
+  if (el("curMore")) el("curMore").onclick = () => { S._curMore = curFilter; render(); };
   wireNightCards();
 }
 // The row on the Events tab: shows up when the week ahead is empty, or from Thursday on for the weekend.

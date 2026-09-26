@@ -392,20 +392,54 @@ function cleanNight(n) {
   };
 }
 const nightShape = `Return ONLY a JSON array, no prose: [{"title": short and specific, "date": "YYYY-MM-DD", "start": 24-hour "HH:MM" of the first stop, "tags": [any of weekend, tonight, date, group, cheap, family], "stops": [{"time": like "5:30 PM", "name": the real venue or event name, "note": one useful detail (walk time, what to order, parking), "kind": "eat" | "do" | "go", "url": the listing or booking page if you found one}], "cost": like "$45 a head all in", "size": like "Best for 2–6", "parking": one short line, "why": one sentence in Dot's voice on why this night works, "ticketUrl": the ticket page if tickets are sold, "emoji": one emoji for the night, "emojis": exactly two emojis, the thing to do then the food (like "⚾🌮"), "scene": a 10-to-16-word visual description of the night for an illustration, concrete objects and setting only, no people's faces, no text (like "a baseball game under stadium lights beside a plate of street tacos"), "theme": the one of ${THEME_IDS.join(", ")} that fits the vibe (sunset or golden for dinners, confetti for parties, garden or blossom for brunch and outdoors, midnight or cosmic for nights out and shows, disco, rave or retro for dance and costume nights, citrus or bubblegum for playful daytime plans, aurora for big arena events)}]. Only include things you actually found; never invent an event, a venue or a price. Times must make sense in sequence.`;
+// Four nights per filter: one grounded search per category, run in parallel, then merged and de-duplicated.
+const CURATE_KINDS = {
+  weekend: from => `for the coming weekend (Friday evening through Sunday, starting ${from}); a mix of the best things on`,
+  tonight: (from, today) => `for TONIGHT only (${today}), starting no earlier than an hour from now; things with tickets still available or no ticket needed`,
+  date: () => `as date nights for two in the next 9 days: a good table and something to do before or after`,
+  group: () => `for groups of 6 to 12 in the next 9 days: places that take big groups (bar tables, counter service, group tickets, bays or lanes)`,
+  cheap: () => `under $40 a person all in, in the next 9 days: free events, cheap eats, happy hours`,
+  family: () => `family-friendly with kids in the next 9 days: daytime or early evening, kid-easy food`
+};
 async function curateCity(d, onPhase) {
   const city = sv(d.city, 60); if (city.length < 2) throw new Error("no city");
   const today = /^\d{4}-\d{2}-\d{2}$/.test(d.today || "") ? d.today : new Date().toISOString().slice(0, 10);
-  const end = new Date(today + "T12:00:00Z"); end.setUTCDate(end.getUTCDate() + 9);
-  const prompt = `You are Dot, the helper in Friendly, an app friends use to plan nights out. Using search, find real, specific things happening in or near ${city} between ${today} (${sv(d.weekday, 10)}) and ${end.toISOString().slice(0, 10)}: concerts, games, comedy, theater, markets, festivals, exhibitions, outdoor events. Build 6 "nights": each pairs one thing to do with one real place to eat or drink within a short walk or drive, before or after, with times that work in sequence (seated about 90 minutes before doors, and a leave-by stop). Also add 2 nights that need no ticket (a neighborhood evening, a hike then dinner). Cover a mix: something tonight, the weekend, a date night, a big-group night, a cheap night and a family one; tag each with every tag that applies. Keep every string short; at most 3 stops per night; no markdown. ${nightShape}`;
-  const raw = await askGrounded(prompt, 3500, onPhase);
-  const nights = raw.map(cleanNight).filter(n => n.title && n.date && n.date >= today && n.stops.length).slice(0, 14);
-  if (!nights.length) throw new Error("nothing found");
+  const end = new Date(today + "T12:00:00Z"); end.setUTCDate(end.getUTCDate() + 9); const endStr = end.toISOString().slice(0, 10);
+  const dow = new Date(today + "T12:00:00Z").getUTCDay(); const toFri = dow <= 5 ? 5 - dow : 6;
+  const fri = new Date(today + "T12:00:00Z"); if (dow !== 6 && dow !== 0) fri.setUTCDate(fri.getUTCDate() + toFri); const weekendFrom = fri.toISOString().slice(0, 10);
+  let started = false;
+  const one = async kind => {
+    const prompt = `You are Dot, the helper in Friendly, an app friends use to plan nights out. Using search, find real, specific things happening in or near ${city} (today is ${today}, ${sv(d.weekday, 10)}; nothing after ${endStr}). Build exactly 4 different nights ${CURATE_KINDS[kind](weekendFrom, today)}. Each pairs one thing to do with one real place to eat or drink within a short walk or drive, with times that work in sequence. Make the 4 genuinely different (different neighborhoods or kinds of thing). Only things friends would actually want to go out for: skip civic and informational events (safety fairs, seminars, council meetings, workshops, expos for businesses). Include "${kind}" in every night's tags, plus any other tags that apply. Keep strings short; at most 3 stops per night; no markdown. ${nightShape}`;
+    const raw = await askGrounded(prompt, 2600, started ? null : (started = true, onPhase));
+    return raw.map(cleanNight).map(n => ({ ...n, src: kind, tags: [...new Set([kind, ...n.tags])] }));
+  };
+  const results = await Promise.allSettled(Object.keys(CURATE_KINDS).map(one));
+  if (onPhase) await onPhase("sorting");
+  // The same event often comes back from several searches under different names ("Oktoberfest at The Star",
+  // "Frisco Oktoberfest Celebration"): collapse nights whose main event shares most of its words, keeping the first.
+  const STOP = new Set(["the", "and", "at", "with", "for", "night", "dinner", "celebration", "annual", "event", ...city.toLowerCase().split(/[^a-z]+/)]);
+  const toks = t => new Set(String(t || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter(w => w.length > 2 && !STOP.has(w)));
+  const jac = (a, b) => { if (!a.size || !b.size) return 0; let k = 0; a.forEach(w => { if (b.has(w)) k++; }); return k / (a.size + b.size - k); };
+  const kept = [];
+  for (const r of results) if (r.status === "fulfilled") for (const n of r.value) {
+    if (!n.title || !n.date || n.date < today || n.date > endStr || !n.stops.length) continue;
+    const main = (n.stops.find(x => x.kind === "do") || n.stops[0]).name;
+    const mt = toks(main), tt = toks(n.title);
+    const dup = kept.find(k => jac(k._mt, mt) >= 0.5 || (k.date === n.date && jac(k._tt, tt) >= 0.6));
+    if (dup) { dup.tags = [...new Set([...dup.tags, ...n.tags])]; continue; }
+    kept.push({ ...n, _mt: mt, _tt: tt });
+  }
+  const byKey = new Map(kept.map((n, i) => { const { _mt, _tt, ...clean } = n; return [i, clean]; }));
+  const failed = results.filter(r => r.status === "rejected").map(r => r.reason && r.reason.message);
+  if (failed.length) logger.warn("curate: " + failed.length + " of 6 searches failed for " + city + ": " + failed.join(" | ").slice(0, 300));
+  const nights = [...byKey.values()].slice(0, 30);
+  if (!nights.length) throw new Error(failed[0] || "nothing found");
   return nights;
 }
 const cityKeyOf = c => String(c || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
 async function buildAndCacheCity(city, tz, today, weekday, onPhase) {
   const nights = await curateCity({ city, tz, today, weekday }, onPhase);
-  await db.doc("curated/" + cityKeyOf(city)).set({ city, nights, updatedAt: Date.now(), forDate: today });
+  await db.doc("curated/" + cityKeyOf(city)).set({ city, nights, updatedAt: Date.now(), forDate: today, v: 3 });
   return nights;
 }
 async function buildNight(d) {
@@ -427,7 +461,7 @@ exports.onCuratedWritten = onDocumentWritten({ document: "curated/{cityKey}", re
   const nights = (after.nights || []).filter(n => n.coverId);
   const col = e.data.after.ref.collection("covers");
   const have = new Set((await col.get()).docs.map(d => d.id));
-  const todo = nights.filter(n => !have.has(n.coverId)).slice(0, 12);
+  const todo = nights.filter(n => !have.has(n.coverId)).slice(0, 30);
   const paint = async n => {
     const prompt = (n.scene || n.title) + ", " + (n.title || "") + ", warm evening light";
     let image = null;
