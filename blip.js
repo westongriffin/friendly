@@ -67,7 +67,7 @@
         <feComposite in="SourceGraphic" in2="g" operator="atop"/></filter></defs>
       <g class="wm" fill="${ink}"><text class="tF" x="60" y="190">Friend</text><text class="tY" x="0" y="190">y</text></g>
       <g filter="url(#goo${id})"><path class="body" fill="${SUN}"/><rect class="d1" fill="${CORAL}"/><rect class="d2" fill="${CORAL}"/></g>
-      <text class="tL" x="0" y="190" opacity="0" fill="${CORAL}">l</text>
+      <text class="tL" x="0" y="190" fill="${CORAL}">l</text>
       <rect class="o1" fill="${CORAL}"/><rect class="o2" fill="${CORAL}"/>
       <circle class="dot0" r="10" fill="${SUN}"/>
       <ellipse class="hl" fill="#fff" opacity="0"/>
@@ -85,7 +85,7 @@
       const total = wF + 8 + wL + 1 + wY + 12 + 10, fx = Math.round((720 - total) / 2);
       tF.setAttribute("x", fx);
       const lx = fx + wF + 8, yx = lx + wL + 1; tL.setAttribute("x", lx); tY.setAttribute("x", yx);
-      const dx = yx + wY + 12, dy = 98, bx = 360, by = 150;
+      const dx = yx + wY + 30, dy = 100, bx = 360, by = 150;
       // the l's ink (not its layout box), measured from the same font on a canvas
       const b = tL.getBBox(); let inkL = b.x, inkR = b.x + b.width, inkT = b.y, inkB = 190;
       try {
@@ -93,14 +93,14 @@
         const m = c.measureText("l");
         if (m.actualBoundingBoxAscent) { inkL = lx - m.actualBoundingBoxLeft; inkR = lx + m.actualBoundingBoxRight; inkT = 190 - m.actualBoundingBoxAscent; inkB = 190 + m.actualBoundingBoxDescent; }
       } catch (e) {}
-      const P = [(inkL + inkR) / 2, inkB];
+      const P = [(inkL + inkR) / 2, (inkT + inkB) / 2];          // centre of the ink: the CSS logo tilts the l about its centre
       tL.setAttribute("transform", `rotate(-9 ${P[0]} ${P[1]})`);
       G = { dx, dy, bx, by, P, u: rot(0, -1, -9), v: rot(1, 0, -9), w: inkR - inkL, h: inkB - inkT };
     }
     const loc = (a, c) => [G.P[0] + G.u[0] * a + G.v[0] * c, G.P[1] + G.u[1] * a + G.v[1] * c];
     function drop(el, ov, half, p, at, kx) {
       const W = (a, b) => clamp((p - a) / (b - a));
-      const w = G.w, h = G.h, mid = h / 2;
+      const w = G.w, h = G.h, mid = 0;                                   // halves sit either side of the pivot
       const round = io(W(.02, .30)), len = lerp(h / 2, w, io(W(.08, .40)));
       const rc = W(.34, .46), gap = io(W(.06, .26)) * 3 + ei(W(.24, .40)) * 34 + (ob(rc) - rc) * 10;
       const S = loc(mid + half * (gap + len / 2), 0);
@@ -118,13 +118,14 @@
         r.setAttribute("transform", `translate(${Pt[0]} ${Pt[1]}) matrix(${ma} ${mb} ${mb} ${md} 0 0) rotate(-9)`);
       }
       el.setAttribute("fill", mix(CORAL_RGB, CHEEK_RGB, W(.78, .92)));
-      ov.setAttribute("opacity", 1 - W(.02, .10));
+      ov.setAttribute("opacity", p <= 0 ? 0 : 1 - W(.02, .10));
     }
     function draw(p, t) {
       if (!G) return;
       const W = (a, b) => clamp((p - a) / (b - a));
       wm.setAttribute("opacity", 1 - W(0, .3));
-      const em = io(W(0, .55)), mq = 1 - em, s = lerp(1, S0, ob(W(.3, .78)));
+      tL.setAttribute("opacity", 1 - W(.02, .07));
+      const em = io(W(0, .55)), mq = 1 - em, s = lerp(1.3, S0, ob(W(.3, .78)));
       const cx = mq * mq * G.dx + 2 * mq * em * ((G.dx + G.bx) / 2) + em * em * G.bx, cy = mq * mq * G.dy + 2 * mq * em * (G.dy - 115) + em * em * G.by;
       const amp = W(.92, 1), sq = Math.sin(Math.PI * W(.78, .96)) * 0.07, br = Math.sin(t * 2 * Math.PI / 2.8) * 0.03 * amp;
       const sx = 1 + sq + br, sy = 1 - sq - br;
@@ -169,7 +170,7 @@
       };
       raf = requestAnimationFrame(tick);
     };
-    const fontReady = document.fonts && document.fonts.load ? Promise.race([document.fonts.load('700 112px "Bricolage Grotesque"'), new Promise(r => setTimeout(r, 700))]) : Promise.resolve();
+    const fontReady = document.fonts && document.fonts.load ? Promise.race([document.fonts.load('700 112px "Bricolage Grotesque"'), new Promise(r => setTimeout(r, 2500))]) : Promise.resolve();
     fontReady.then(start, start);
     return () => { stopped = true; cancelAnimationFrame(raf); finish(); };
   }
