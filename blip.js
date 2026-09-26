@@ -74,7 +74,7 @@
       <g class="eyeL"><ellipse rx="7.4" ry="11.6" fill="${INK}"/><circle cx="2.6" cy="-4.8" r="2.6" fill="#fff"/></g>
       <g class="eyeR"><ellipse rx="7.4" ry="11.6" fill="${INK}"/><circle cx="2.6" cy="-4.8" r="2.6" fill="#fff"/></g>
       <path class="mouth" d="M-14 20 Q0 30 14 20" fill="none" stroke="${INK}" stroke-width="6" stroke-linecap="round"/>`;
-    svgEl.querySelectorAll("text").forEach(t => { t.style.fontFamily = '"Bricolage Grotesque","Avenir Next",system-ui,sans-serif'; t.style.fontWeight = "700"; t.style.fontSize = "112px"; t.style.letterSpacing = "-.03em"; });
+    svgEl.querySelectorAll("text").forEach(t => { t.style.fontFamily = '"Bricolage Grotesque","Avenir Next",system-ui,sans-serif'; t.style.fontWeight = "700"; t.style.fontSize = "112px"; t.style.letterSpacing = "-.03em"; t.style.fontVariationSettings = '"opsz" 24'; t.style.fontOpticalSizing = "none"; });
     const q = c => svgEl.querySelector("." + c);
     const tF = q("tF"), tY = q("tY"), tL = q("tL"), wm = q("wm"), body = q("body"), d1 = q("d1"), d2 = q("d2"), o1 = q("o1"), o2 = q("o2"), dot0 = q("dot0"), hl = q("hl"), eyeL = q("eyeL"), eyeR = q("eyeR"), mouth = q("mouth");
     const mouthLen = mouth.getTotalLength(); mouth.setAttribute("stroke-dasharray", mouthLen);
@@ -86,7 +86,7 @@
     const FAMILY = '"Bricolage Grotesque","Avenir Next",system-ui,sans-serif';
     function measureLogo() {
       const m = document.createElement("div");
-      m.style.cssText = `position:absolute;left:-10000px;top:0;visibility:hidden;white-space:nowrap;font-family:${FAMILY};font-weight:700;font-size:112px;letter-spacing:-.03em;line-height:1.5`;
+      m.style.cssText = `position:absolute;left:-10000px;top:0;visibility:hidden;white-space:nowrap;font-family:${FAMILY};font-weight:700;font-size:112px;letter-spacing:-.03em;line-height:1.5;font-variation-settings:"opsz" 24;font-optical-sizing:none`;
       m.innerHTML = `<span class="a">Friend</span><span class="l" style="display:inline-block">l</span><span class="y">y</span><span class="d" style="display:inline-block;width:.3333em;height:.3333em;margin-left:.1667em;vertical-align:top;margin-top:.0833em"></span><span class="b" style="display:inline-block;width:0;height:0;vertical-align:baseline"></span>`;
       document.body.appendChild(m);
       const q = c => m.querySelector("." + c), L = q("l"), D = q("d"), Bm = q("b"), Y = q("y");
@@ -165,7 +165,7 @@
 
   // Play the origin story once inside svgEl (wordmark -> Blip over `dur` seconds), then idle.
   // Returns a stop() function. Waits briefly for the display font so the wordmark measures right.
-  function play(svgEl, { dur = 1.9, delay = .25, ink = "#fff", onDone } = {}) {
+  function play(svgEl, { dur = 1.9, delay = .25, ink = INK, onDone } = {}) {
     let stopped = false, raf = 0, done = false;
     const finish = () => { if (!done) { done = true; if (onDone) try { onDone(); } catch (e) {} } };
     const m = morph(svgEl, { ink });
