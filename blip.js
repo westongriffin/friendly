@@ -74,36 +74,51 @@
       <g class="eyeL"><ellipse rx="7.4" ry="11.6" fill="${INK}"/><circle cx="2.6" cy="-4.8" r="2.6" fill="#fff"/></g>
       <g class="eyeR"><ellipse rx="7.4" ry="11.6" fill="${INK}"/><circle cx="2.6" cy="-4.8" r="2.6" fill="#fff"/></g>
       <path class="mouth" d="M-14 20 Q0 30 14 20" fill="none" stroke="${INK}" stroke-width="6" stroke-linecap="round"/>`;
-    svgEl.querySelectorAll("text").forEach(t => { t.style.fontFamily = '"Bricolage Grotesque","Avenir Next",system-ui,sans-serif'; t.style.fontWeight = "700"; t.style.fontSize = "112px"; t.style.letterSpacing = "-4px"; });
+    svgEl.querySelectorAll("text").forEach(t => { t.style.fontFamily = '"Bricolage Grotesque","Avenir Next",system-ui,sans-serif'; t.style.fontWeight = "700"; t.style.fontSize = "112px"; t.style.letterSpacing = "-.03em"; });
     const q = c => svgEl.querySelector("." + c);
     const tF = q("tF"), tY = q("tY"), tL = q("tL"), wm = q("wm"), body = q("body"), d1 = q("d1"), d2 = q("d2"), o1 = q("o1"), o2 = q("o2"), dot0 = q("dot0"), hl = q("hl"), eyeL = q("eyeL"), eyeR = q("eyeR"), mouth = q("mouth");
     const mouthLen = mouth.getTotalLength(); mouth.setAttribute("stroke-dasharray", mouthLen);
     let G = null;
+    // The rest state must be the app's logo exactly, so lay the logo out in real HTML with the logo's own rules
+    // (the .brand styles, scaled to 112px) and read every position from it: where "l" and "y" start, the box the
+    // "l" tilts about, and the dot's size and place. Inline-blocks break kerning in the logo, so separate SVG
+    // runs reproduce it faithfully.
+    const FAMILY = '"Bricolage Grotesque","Avenir Next",system-ui,sans-serif';
+    function measureLogo() {
+      const m = document.createElement("div");
+      m.style.cssText = `position:absolute;left:-10000px;top:0;visibility:hidden;white-space:nowrap;font-family:${FAMILY};font-weight:700;font-size:112px;letter-spacing:-.03em;line-height:1.5`;
+      m.innerHTML = `<span class="a">Friend</span><span class="l" style="display:inline-block">l</span><span class="y">y</span><span class="d" style="display:inline-block;width:.3333em;height:.3333em;margin-left:.1667em;vertical-align:top;margin-top:.0833em"></span><span class="b" style="display:inline-block;width:0;height:0;vertical-align:baseline"></span>`;
+      document.body.appendChild(m);
+      const q = c => m.querySelector("." + c), L = q("l"), D = q("d"), Bm = q("b"), Y = q("y");
+      const base = Bm.offsetTop, yLeft = Y.getBoundingClientRect().left - m.getBoundingClientRect().left;
+      const out = { lLeft: L.offsetLeft, lW: L.offsetWidth, lMidY: L.offsetTop + L.offsetHeight / 2 - base, yLeft, dCx: D.offsetLeft + D.offsetWidth / 2, dCy: D.offsetTop + D.offsetHeight / 2 - base, dR: D.offsetWidth / 2, right: D.offsetLeft + D.offsetWidth };
+      m.remove(); return out;
+    }
     function layout() {
-      const wF = tF.getComputedTextLength(), wL = tL.getComputedTextLength(), wY = tY.getComputedTextLength();
-      // centre the whole wordmark (letters + dot) in the 720-wide stage; Blip then lands at the exact centre
-      const total = wF + 8 + wL + 1 + wY + 12 + 10, fx = Math.round((720 - total) / 2);
-      tF.setAttribute("x", fx);
-      const lx = fx + wF + 8, yx = lx + wL + 1; tL.setAttribute("x", lx); tY.setAttribute("x", yx);
-      const dx = yx + wY + 30, dy = 100, bx = 360, by = 150;
-      // the l's ink (not its layout box), measured from the same font on a canvas
-      const b = tL.getBBox(); let inkL = b.x, inkR = b.x + b.width, inkT = b.y, inkB = 190;
-      try {
-        const c = document.createElement("canvas").getContext("2d"); c.font = "700 112px " + getComputedStyle(tL).fontFamily;
-        const m = c.measureText("l");
-        if (m.actualBoundingBoxAscent) { inkL = lx - m.actualBoundingBoxLeft; inkR = lx + m.actualBoundingBoxRight; inkT = 190 - m.actualBoundingBoxAscent; inkB = 190 + m.actualBoundingBoxDescent; }
-      } catch (e) {}
-      const P = [(inkL + inkR) / 2, (inkT + inkB) / 2];          // centre of the ink: the CSS logo tilts the l about its centre
+      const M = measureLogo();
+      const fx = Math.round(360 - M.right / 2), BL = 190;                  // whole logo centred in the 720-wide stage, baseline at 190
+      tF.setAttribute("x", fx); tL.setAttribute("x", fx + M.lLeft); tY.setAttribute("x", fx + M.yLeft);
+      const P = [fx + M.lLeft + M.lW / 2, BL + M.lMidY];                  // the logo tilts the l about the centre of its box
       tL.setAttribute("transform", `rotate(-9 ${P[0]} ${P[1]})`);
-      G = { dx, dy, bx, by, P, u: rot(0, -1, -9), v: rot(1, 0, -9), w: inkR - inkL, h: inkB - inkT };
+      const dx = fx + M.dCx, dy = BL + M.dCy, bx = 360, by = 150;
+      // the l's ink, so the liquid halves cover exactly the glyph
+      const lx = fx + M.lLeft; let inkL = lx, inkR = lx + M.lW, inkT = BL - 80, inkB = BL;
+      try {
+        const c = document.createElement("canvas").getContext("2d"); c.font = "700 112px " + FAMILY;
+        const mt = c.measureText("l");
+        if (mt.actualBoundingBoxAscent) { inkL = lx - mt.actualBoundingBoxLeft; inkR = lx + mt.actualBoundingBoxRight; inkT = BL - mt.actualBoundingBoxAscent; inkB = BL + mt.actualBoundingBoxDescent; }
+      } catch (e) {}
+      const inkCx = (inkL + inkR) / 2, inkCy = (inkT + inkB) / 2;
+      G = { dx, dy, dR: M.dR, bx, by, P, u: rot(0, -1, -9), v: rot(1, 0, -9), w: inkR - inkL, h: inkB - inkT, a0: -(inkCy - P[1]), c0: inkCx - P[0] };
+      dot0.setAttribute("cx", dx); dot0.setAttribute("cy", dy); dot0.setAttribute("r", M.dR);
     }
     const loc = (a, c) => [G.P[0] + G.u[0] * a + G.v[0] * c, G.P[1] + G.u[1] * a + G.v[1] * c];
     function drop(el, ov, half, p, at, kx) {
       const W = (a, b) => clamp((p - a) / (b - a));
-      const w = G.w, h = G.h, mid = 0;                                   // halves sit either side of the pivot
+      const w = G.w, h = G.h, mid = G.a0;                               // halves sit either side of the ink centre
       const round = io(W(.02, .30)), len = lerp(h / 2, w, io(W(.08, .40)));
       const rc = W(.34, .46), gap = io(W(.06, .26)) * 3 + ei(W(.24, .40)) * 34 + (ob(rc) - rc) * 10;
-      const S = loc(mid + half * (gap + len / 2), 0);
+      const S = loc(mid + half * (gap + len / 2), G.c0);
       const e = io(W(half > 0 ? .36 : .38, half > 0 ? .80 : .82));
       const T = at(half > 0 ? -44 : 44, 16);
       const c1 = half > 0 ? [S[0] - 70, S[1] - 150] : [S[0] + 40, S[1] + 110], c2 = half > 0 ? [T[0] - 120, T[1] - 50] : [T[0] + 130, T[1] + 40];
@@ -125,7 +140,7 @@
       const W = (a, b) => clamp((p - a) / (b - a));
       wm.setAttribute("opacity", 1 - W(0, .3));
       tL.setAttribute("opacity", 1 - W(.02, .07));
-      const em = io(W(0, .55)), mq = 1 - em, s = lerp(1.3, S0, ob(W(.3, .78)));
+      const em = io(W(0, .55)), mq = 1 - em, s = lerp(G.dR / 10, S0, ob(W(.3, .78)));
       const cx = mq * mq * G.dx + 2 * mq * em * ((G.dx + G.bx) / 2) + em * em * G.bx, cy = mq * mq * G.dy + 2 * mq * em * (G.dy - 115) + em * em * G.by;
       const amp = W(.92, 1), sq = Math.sin(Math.PI * W(.78, .96)) * 0.07, br = Math.sin(t * 2 * Math.PI / 2.8) * 0.03 * amp;
       const sx = 1 + sq + br, sy = 1 - sq - br;

@@ -642,3 +642,8 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 @media (prefers-reduced-motion:reduce){.curate-lbl,.curate-lbl .spark{animation:none}}
 .splash.splash-replay{transition:opacity .45s ease}
 .splash.splash-replay.out{opacity:0;pointer-events:none}
+/* iOS zooms into any text field under 16px when it's tapped, and the zoomed page then pans around.
+   On iOS every field is 16px so that never happens. */
+@supports (-webkit-touch-callout:none){
+  input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]),select,textarea{font-size:16px!important}
+}

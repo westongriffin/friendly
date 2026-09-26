@@ -61,6 +61,8 @@ if (/^[a-f0-9]{8,64}$/i.test(RESET_PARAMS.get("p") || "")) history.replaceState(
 const APP_STORE_URL = "https://apps.apple.com/app/id6810875052";
 // The public demo (?demo=1 from wes-griffin.com) stays on the web on phones too.
 const BLOCKED_MOBILE_WEB = !NATIVE && !RESET_OOB && !RESET_PARAMS.get("demo") && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+// Inside the native app the layout is fixed: no pinch or focus zoom, so nothing can knock it out of place.
+if (NATIVE) { const vp = document.querySelector('meta[name="viewport"]'); if (vp) vp.setAttribute("content", "width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"); }
 if (BLOCKED_MOBILE_WEB) {
   document.getElementById("app").innerHTML = `
   <div class="auth-wrap">
