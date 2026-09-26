@@ -646,3 +646,7 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 @supports (-webkit-touch-callout:none){
   input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]),select,textarea{font-size:16px!important}
 }
+html{background:var(--bg)}
+/* the intro dissolves into the app: a gentle fade with a slight lift */
+.splash.splash-leave{transition:opacity .6s ease,transform .6s cubic-bezier(.2,.7,.2,1);pointer-events:none}
+.splash.splash-leave.out{opacity:0;transform:scale(1.05)}

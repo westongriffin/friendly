@@ -42,6 +42,12 @@
     return `<svg viewBox="-4 -8 128 132" width="${size}" height="${size}" class="blip ${still ? "" : "idle"} blip-${mood}" aria-hidden="true">${mood === "party" ? confetti(cx, cy) : ""}<g transform="${mood === "thinking" ? `rotate(-7 ${cx} ${cy + 42})` : ""}"><g class="body">${body}${hand}${face(mood, cx, cy)}</g></g></svg>`;
   }
 
+  // The app header's logo, as markup: "Friend" + tilted coral "l" + "y" in one span, the yellow dot beside it,
+  // at the header's proportions (24px type, 8px dot) scaled to 112px, and the header's optical size.
+  function logoHtml(ink) {
+    return `<div class="blip-logo" style="display:inline-flex;align-items:flex-start;white-space:nowrap;font-family:'Bricolage Grotesque','Avenir Next',system-ui,sans-serif;font-weight:700;font-size:112px;letter-spacing:-.03em;line-height:1.5;font-variation-settings:'opsz' 24;font-optical-sizing:none;color:${ink}"><span>Friend<span class="l" style="display:inline-block;color:${CORAL};transform:rotate(-9deg)">l</span><span class="y">y</span><span class="b" style="display:inline-block;width:0;height:0;vertical-align:baseline"></span></span><span class="d" style="flex:none;width:.3333em;height:.3333em;border-radius:50%;background:${SUN};margin:.0833em 0 0 .1667em"></span></div>`;
+  }
+
   // ---- the origin morph -----------------------------------------------------------
   const rot = (x, y, deg) => { const a = deg * Math.PI / 180; return [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a)]; };
   const nums = d => d.match(/-?\d+(\.\d+)?/g).map(Number);
@@ -60,7 +66,7 @@
   // Returns {layout, draw(p, t)}: p 0 = wordmark, 1 = Blip; t = seconds, for idle motion.
   function morph(svgEl, opts = {}) {
     const id = ++uid, ink = opts.ink || INK;
-    svgEl.setAttribute("viewBox", "0 0 720 300");
+    svgEl.setAttribute("viewBox", "0 0 720 300"); svgEl.style.visibility = "hidden";
     svgEl.innerHTML = `<defs><filter id="goo${id}" filterUnits="userSpaceOnUse" x="-80" y="-80" width="880" height="460" color-interpolation-filters="sRGB">
         <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="b"/>
         <feColorMatrix in="b" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 28 -12" result="g"/>
@@ -86,12 +92,12 @@
     const FAMILY = '"Bricolage Grotesque","Avenir Next",system-ui,sans-serif';
     function measureLogo() {
       const m = document.createElement("div");
-      m.style.cssText = `position:absolute;left:-10000px;top:0;visibility:hidden;white-space:nowrap;font-family:${FAMILY};font-weight:700;font-size:112px;letter-spacing:-.03em;line-height:1.5;font-variation-settings:"opsz" 24;font-optical-sizing:none`;
-      m.innerHTML = `<span class="a">Friend</span><span class="l" style="display:inline-block">l</span><span class="y">y</span><span class="d" style="display:inline-block;width:.3333em;height:.3333em;margin-left:.1667em;vertical-align:top;margin-top:.0833em"></span><span class="b" style="display:inline-block;width:0;height:0;vertical-align:baseline"></span>`;
+      m.style.cssText = "position:absolute;left:-10000px;top:0;visibility:hidden";
+      m.innerHTML = logoHtml(INK);
       document.body.appendChild(m);
-      const q = c => m.querySelector("." + c), L = q("l"), D = q("d"), Bm = q("b"), Y = q("y");
-      const base = Bm.offsetTop, yLeft = Y.getBoundingClientRect().left - m.getBoundingClientRect().left;
-      const out = { lLeft: L.offsetLeft, lW: L.offsetWidth, lMidY: L.offsetTop + L.offsetHeight / 2 - base, yLeft, dCx: D.offsetLeft + D.offsetWidth / 2, dCy: D.offsetTop + D.offsetHeight / 2 - base, dR: D.offsetWidth / 2, right: D.offsetLeft + D.offsetWidth };
+      const q = c => m.querySelector("." + c), LG = q("blip-logo"), L = q("l"), D = q("d"), Bm = q("b"), Y = q("y");
+      const base = Bm.offsetTop;
+      const out = { lLeft: L.offsetLeft, lW: L.offsetWidth, lMidY: L.offsetTop + L.offsetHeight / 2 - base, yLeft: Y.offsetLeft, dCx: D.offsetLeft + D.offsetWidth / 2, dCy: D.offsetTop + D.offsetHeight / 2 - base, dR: D.offsetWidth / 2, right: LG.offsetWidth, base };
       m.remove(); return out;
     }
     function layout() {
@@ -104,12 +110,12 @@
       // the l's ink, so the liquid halves cover exactly the glyph
       const lx = fx + M.lLeft; let inkL = lx, inkR = lx + M.lW, inkT = BL - 80, inkB = BL;
       try {
-        const c = document.createElement("canvas").getContext("2d"); c.font = "700 112px " + FAMILY;
+        const c = document.createElement("canvas").getContext("2d"); c.font = "700 24px " + FAMILY; const k = 112 / 24;
         const mt = c.measureText("l");
-        if (mt.actualBoundingBoxAscent) { inkL = lx - mt.actualBoundingBoxLeft; inkR = lx + mt.actualBoundingBoxRight; inkT = BL - mt.actualBoundingBoxAscent; inkB = BL + mt.actualBoundingBoxDescent; }
+        if (mt.actualBoundingBoxAscent) { inkL = lx - mt.actualBoundingBoxLeft * k; inkR = lx + mt.actualBoundingBoxRight * k; inkT = BL - mt.actualBoundingBoxAscent * k; inkB = BL + mt.actualBoundingBoxDescent * k; }
       } catch (e) {}
       const inkCx = (inkL + inkR) / 2, inkCy = (inkT + inkB) / 2;
-      G = { dx, dy, dR: M.dR, bx, by, P, u: rot(0, -1, -9), v: rot(1, 0, -9), w: inkR - inkL, h: inkB - inkT, a0: -(inkCy - P[1]), c0: inkCx - P[0] };
+      G = { fx, base: M.base, dx, dy, dR: M.dR, bx, by, P, u: rot(0, -1, -9), v: rot(1, 0, -9), w: inkR - inkL, h: inkB - inkT, a0: -(inkCy - P[1]), c0: inkCx - P[0] };
       dot0.setAttribute("cx", dx); dot0.setAttribute("cy", dy); dot0.setAttribute("r", M.dR);
     }
     const loc = (a, c) => [G.P[0] + G.u[0] * a + G.v[0] * c, G.P[1] + G.u[1] * a + G.v[1] * c];
@@ -132,7 +138,7 @@
         r.setAttribute("width", size); r.setAttribute("height", ht); r.setAttribute("x", -size / 2); r.setAttribute("y", -ht / 2); r.setAttribute("rx", (size / 2) * round);
         r.setAttribute("transform", `translate(${Pt[0]} ${Pt[1]}) matrix(${ma} ${mb} ${mb} ${md} 0 0) rotate(-9)`);
       }
-      el.setAttribute("fill", mix(CORAL_RGB, CHEEK_RGB, W(.78, .92)));
+      el.setAttribute("fill", mix(CORAL_RGB, CHEEK_RGB, W(.78, .92))); el.setAttribute("opacity", W(.01, .05));
       ov.setAttribute("opacity", p <= 0 ? 0 : 1 - W(.02, .10));
     }
     function draw(p, t) {
@@ -160,7 +166,7 @@
       const m = at(0, 0); mouth.setAttribute("transform", `translate(${m[0]} ${m[1]}) scale(${kx} ${ky})`);
       mouth.setAttribute("stroke-dashoffset", mouthLen * (1 - io(W(.8, .99)))); mouth.setAttribute("opacity", W(.8, .83));
     }
-    return { layout, draw };
+    return { layout, draw, geo: () => G };
   }
 
   // Play the origin story once inside svgEl (wordmark -> Blip over `dur` seconds), then idle.
@@ -169,17 +175,25 @@
     let stopped = false, raf = 0, done = false;
     const finish = () => { if (!done) { done = true; if (onDone) try { onDone(); } catch (e) {} } };
     const m = morph(svgEl, { ink });
+    let clone = null;
     const start = () => {
       if (stopped) return;
       m.layout();
+      // the resting frame is the header logo itself, laid over the stage exactly where the animation's wordmark sits
+      const g = m.geo(), r = svgEl.getBoundingClientRect(), k = r.width / 720;
+      clone = document.createElement("div"); clone.className = "blip-logo-rest";
+      clone.style.cssText = `position:fixed;left:${r.left + g.fx * k}px;top:${r.top + (190 - g.base) * k}px;transform:scale(${k});transform-origin:0 0;pointer-events:none;z-index:1`;
+      clone.innerHTML = logoHtml(ink);
+      (svgEl.parentNode || document.body).appendChild(clone);
       const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-      if (reduce) { m.draw(1, 0); finish(); return; }
+      if (reduce) { if (clone) { clone.remove(); clone = null; } svgEl.style.visibility = "visible"; m.draw(1, 0); finish(); return; }
       let t0 = null;
       const tick = now => {
         if (stopped) return;
         if (t0 === null) t0 = now;
         const t = (now - t0) / 1000, p = clamp((t - delay) / dur);
         m.draw(p, t);
+        if (p > 0 && clone) { svgEl.style.visibility = "visible"; clone.remove(); clone = null; }
         if (p >= 1) finish();
         raf = requestAnimationFrame(tick);
       };
@@ -187,7 +201,7 @@
     };
     const fontReady = document.fonts && document.fonts.load ? Promise.race([document.fonts.load('700 112px "Bricolage Grotesque"'), new Promise(r => setTimeout(r, 2500))]) : Promise.resolve();
     fontReady.then(start, start);
-    return () => { stopped = true; cancelAnimationFrame(raf); finish(); };
+    return () => { stopped = true; cancelAnimationFrame(raf); if (clone) { clone.remove(); clone = null; } finish(); };
   }
 
   // Dot in a party hat: the one prop Dot ever wears (birthdays, the day of an event).

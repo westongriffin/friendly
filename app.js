@@ -772,7 +772,14 @@ function renderNow() {
   if (!S.ready || Date.now() - BOOT_AT < SPLASH_MIN || holdSplash) {
     if (S.ready && !splashTimer) splashTimer = setTimeout(() => { splashTimer = null; render(); }, Math.max(SPLASH_MIN - (Date.now() - BOOT_AT), holdSplash ? 400 : 0) + 20);
     mountSplash(root, "Getting everyone here…"); return; }
-  if (splashStop && !root.querySelector(".splash-blip")) { splashStop(); splashStop = null; }
+  // Leaving the intro: lift the splash out of the page and fade it away over the app instead of cutting.
+  const leaving = root.querySelector(".splash");
+  if (leaving) {
+    const stop = splashStop; splashStop = null;
+    document.body.appendChild(leaving); leaving.classList.add("splash-leave");
+    void leaving.offsetWidth; leaving.classList.add("out");   // force a style flush so the fade runs from full opacity
+    setTimeout(() => { leaving.remove(); if (stop) stop(); }, 700);
+  } else if (splashStop) { splashStop(); splashStop = null; }
   if (RESET_OOB) { renderResetPassword(root); return; }
   if (!S.user) { if (S.route.name === "event") { renderPreview(root, S.route.id); return; } if (S.route.name === "join") { try { localStorage.setItem("friendlyJoin", S.route.id); } catch {} } renderAuth(root); return; }
   if (!S.profile) { mountSplash(root, "Setting up your profile…"); return; }

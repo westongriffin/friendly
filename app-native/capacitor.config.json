@@ -8,7 +8,7 @@
   },
   "ios": {
     "contentInset": "never",
-    "backgroundColor": "#FFFEFC"
+    "backgroundColor": "#BFE7C6"
   },
   "plugins": {
     "PushNotifications": {
@@ -19,5 +19,5 @@
       ]
     }
   },
-  "backgroundColor": "#FFFEFC"
+  "backgroundColor": "#BFE7C6"
 }
