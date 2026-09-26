@@ -380,12 +380,14 @@ async function askGrounded(prompt, maxTokens = 6000, onPhase) {
   return JSON.parse(m[0]);
 }
 const isUrl = u => /^https?:\/\//i.test(String(u || ""));
+// cut long text at a word boundary with an ellipsis instead of mid-word
+const clip = (v, n) => { const t = String(v || "").trim().replace(/\s+/g, " "); if (t.length <= n) return t; const cut = t.slice(0, n - 1); const sp = cut.lastIndexOf(" "); return (sp > n * .6 ? cut.slice(0, sp) : cut).replace(/[\s,;:.\-–—]+$/, "") + "…"; };
 function cleanNight(n) {
-  const stops = (Array.isArray(n.stops) ? n.stops : []).slice(0, 5).map(x => ({ time: sv(x && x.time, 10), name: sv(x && x.name, 80), note: sv(x && x.note, 110), kind: ["eat", "do", "go"].includes(x && x.kind) ? x.kind : "do", url: isUrl(x && x.url) ? sv(x.url, 300) : "" })).filter(x => x.name);
+  const stops = (Array.isArray(n.stops) ? n.stops : []).slice(0, 5).map(x => ({ time: sv(x && x.time, 10), name: sv(x && x.name, 80), note: clip(x && x.note, 170), kind: ["eat", "do", "go"].includes(x && x.kind) ? x.kind : "do", url: isUrl(x && x.url) ? sv(x.url, 300) : "" })).filter(x => x.name);
   return {
     title: sv(n.title, 80), date: /^\d{4}-\d{2}-\d{2}$/.test(n.date || "") ? n.date : "", start: /^\d{2}:\d{2}$/.test(n.start || "") ? n.start : "",
     tags: clean(n.tags, 6, 10).filter(t => TAGS.includes(t)), stops,
-    cost: sv(n.cost, 40), size: sv(n.size, 30), parking: sv(n.parking, 70), why: sv(n.why, 220), ticketUrl: isUrl(n.ticketUrl) ? sv(n.ticketUrl, 300) : "",
+    cost: clip(n.cost, 50), size: clip(n.size, 40), parking: clip(n.parking, 120), why: clip(n.why, 260), ticketUrl: isUrl(n.ticketUrl) ? sv(n.ticketUrl, 300) : "",
     emoji: sv(n.emoji, 8).replace(/[A-Za-z0-9\s]/g, "").slice(0, 4), emojis: sv(n.emojis, 12).replace(/[A-Za-z0-9\s]/g, "").slice(0, 8),
     scene: sv(n.scene, 140), theme: THEME_IDS.includes(n.theme) ? n.theme : "midnight",
     coverId: nodeCrypto.createHash("md5").update(sv(n.title, 80) + "|" + sv(n.date, 10)).digest("hex").slice(0, 12)
