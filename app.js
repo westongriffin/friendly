@@ -18,6 +18,11 @@ import { THEMES, themeOf, applyTheme, startParticles, DEFAULT_THEME, CUSTOM_FONT
 const fb = initializeApp(firebaseConfig);
 const auth = getAuth(fb);
 const db = getFirestore(fb);
+// Startup timing (ms since the page started), kept for the last 8 launches in localStorage "friendlyBootLog".
+const bootLog = { at: new Date().toISOString(), native: !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()), marks: {} };
+const bootMark = k => { if (bootLog.marks[k] != null) return; bootLog.marks[k] = Math.round(performance.now());
+  try { const all = JSON.parse(localStorage.getItem("friendlyBootLog") || "[]").filter(x => x.at !== bootLog.at); all.push(bootLog); localStorage.setItem("friendlyBootLog", JSON.stringify(all.slice(-8))); } catch {} };
+bootMark("appJsRunning");
 
 
 
@@ -615,6 +620,7 @@ window.go = path => { location.hash = path; };
 
 // ---------- auth ----------
 onAuthStateChanged(auth, async u => {
+  bootMark(u ? "authSignedIn" : "authSignedOut");
   S.subs.forEach(fn => fn()); S.subs = [];
   S.user = u;
   if (!u) {
@@ -624,7 +630,7 @@ onAuthStateChanged(auth, async u => {
   }
   const uref = doc(db, "users", u.uid);
   // Ensure a profile doc exists (created at sign-up; guard for older accounts).
-  const snap = await getDoc(uref);
+  const snap = await getDoc(uref); bootMark("profileGetDoc");
   if (!snap.exists()) await setDoc(uref, { name: u.displayName || first(u.email), email: u.email, venmo: "", phone: "", createdAt: Date.now() });
   subscribeAll(u);
   // Open on Events. Only top-level tabs are redirected; a link to an event,
@@ -648,7 +654,7 @@ function subscribeAll(u) {
   S.pendingInvitesPhone = new Map();
   let invitesPhoneUnsub = null, invitesPhoneKey = null;
   add(on("profile", doc(db, "users", u.uid), d => {
-    S.profile = d.data(); rebuildContacts(); S.ready = true;
+    S.profile = d.data(); rebuildContacts(); S.ready = true; bootMark("profileSnapshot" + (d.metadata && d.metadata.fromCache ? "Cache" : ""));
     // Backfill a missing phoneE164 from the sign-in identifier (once), so phone
     // invites and joins match for accounts whose profile phone was left blank.
     if (S.profile && !S.profile.phoneE164 && myPhoneE164() && !S._phoneHealed) { S._phoneHealed = true; updateDoc(doc(db, "users", u.uid), { phoneE164: myPhoneE164() }).catch(() => {}); }
@@ -769,7 +775,7 @@ function mountSplash(root, msg) {
   root.innerHTML = `<div class="splash">${splashInner(msg)}</div>`;
   if (splashStop) { splashStop(); splashStop = null; }
   const svg = root.querySelector(".splash-blip");
-  if (svg && window.Blip) { splashHold = true; splashStop = window.Blip.play(svg, { dur: 1.7, delay: 1.65, onDone: () => { setTimeout(() => { splashHold = false; render(); }, 1600); } }); }
+  if (svg && window.Blip) { splashHold = true; splashStop = window.Blip.play(svg, { dur: 1.7, delay: 1.65, onDone: () => { bootMark("dotFormed"); setTimeout(() => { splashHold = false; render(); }, 1600); } }); }
 }
 // The intro plays again whenever the app comes back to the foreground after being away a while, as an overlay on top of the live app.
 let hiddenAt = 0;
@@ -793,7 +799,7 @@ function renderNow() {
     mountSplash(root, "Getting everyone here…"); return; }
   // Leaving the intro: lift the splash out of the page and fade it away over the app instead of cutting.
   const leaving = root.querySelector(".splash");
-  if (leaving) {
+  if (leaving) { bootMark("appShown");
     const stop = splashStop; splashStop = null;
     document.body.appendChild(leaving); leaving.classList.add("splash-leave");
     void leaving.offsetWidth; leaving.classList.add("out");   // force a style flush so the fade runs from full opacity
