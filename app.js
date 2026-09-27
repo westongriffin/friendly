@@ -588,7 +588,8 @@ async function resolveCity(input) {
   try { const hits = await placeSuggestions(typed, true); return hits.length ? cityLabel(hits[0].structuredFormat || {}) : null; } catch { return typed; }
 }
 // ---------- state ----------
-const BOOT_AT = Date.now(), SPLASH_MIN = 5100, SPLASH_MAX = 7500; let splashTimer = null, splashHold = false;
+// The intro is a flat 6 seconds, every time.
+const BOOT_AT = Date.now(), SPLASH_MIN = 6000, SPLASH_MAX = 6000; let splashTimer = null, splashHold = false;
 const S = {
   user: null, profile: null, ready: false,
   groups: new Map(), pendingInvites: new Map(), events: new Map(),
@@ -779,7 +780,7 @@ function mountSplash(root, msg) {
   root.innerHTML = `<div class="splash">${splashInner(msg)}</div>`;
   if (splashStop) { splashStop(); splashStop = null; }
   const svg = root.querySelector(".splash-blip");
-  if (svg && window.Blip) { splashHold = true; splashStop = window.Blip.play(svg, { dur: 1.7, delay: 1.65, onDone: () => { bootMark("dotFormed"); setTimeout(() => { splashHold = false; render(); }, 1600); } }); }
+  if (svg && window.Blip) { splashHold = true; splashStop = window.Blip.play(svg, { dur: 1.7, delay: 1.65, onDone: () => { bootMark("dotFormed"); splashHold = false; } }); }
 }
 // The intro plays again whenever the app comes back to the foreground after being away a while, as an overlay on top of the live app.
 let hiddenAt = 0;
@@ -791,7 +792,8 @@ document.addEventListener("visibilitychange", () => {
 function replaySplash() {
   const o = document.createElement("div"); o.className = "splash splash-replay"; o.innerHTML = splashInner("Getting everyone here…"); document.body.appendChild(o);
   const svg = o.querySelector(".splash-blip"); if (!svg) { o.remove(); return; }
-  const stop = window.Blip.play(svg, { dur: 1.7, delay: 1.65, onDone: () => setTimeout(() => { o.classList.add("out"); setTimeout(() => { stop(); o.remove(); }, 450); }, 1600) });
+  const stop = window.Blip.play(svg, { dur: 1.7, delay: 1.65 });
+  setTimeout(() => { o.classList.add("out"); setTimeout(() => { stop(); o.remove(); }, 450); }, 6000);   // same flat 6 seconds as the opening intro
 }
 // What shows while the account is still loading: the real header and tabs, with soft placeholder cards.
 function loadingShell() {
@@ -804,9 +806,8 @@ function renderNow() {
   const root = el("app");
   // The intro runs its own course (logo, Dot forms, a beat of rest) and then always gets out of the way.
   // It never waits on data: if the account hasn't loaded yet, the app appears with placeholders instead.
-  const holdSplash = splashHold && Date.now() - BOOT_AT < SPLASH_MAX;   // let Dot finish forming, then settle for a beat
-  if (!S._introOver && (Date.now() - BOOT_AT < SPLASH_MIN || holdSplash)) {
-    if (!splashTimer) splashTimer = setTimeout(() => { splashTimer = null; render(); }, Math.max(SPLASH_MIN - (Date.now() - BOOT_AT), holdSplash ? 400 : 0) + 20);
+  if (!S._introOver && Date.now() - BOOT_AT < SPLASH_MIN) {
+    if (!splashTimer) splashTimer = setTimeout(() => { splashTimer = null; render(); }, SPLASH_MIN - (Date.now() - BOOT_AT) + 20);
     mountSplash(root, "Getting everyone here…"); return; }
   S._introOver = true;
   // Leaving the intro: lift the splash out of the page and fade it away over the app instead of cutting.
