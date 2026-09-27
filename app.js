@@ -22,11 +22,6 @@ const auth = getAuth(fb);
 let db; try { db = initializeFirestore(fb, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) }); } catch (e) { console.warn("device cache unavailable:", e.message); db = getFirestore(fb); }
 // On sign-out or account deletion, the device copy goes too.
 async function wipeLocalData() { try { await terminate(db); await clearIndexedDbPersistence(db); } catch {} location.reload(); }
-// Startup timing (ms since the page started), kept for the last 8 launches in localStorage "friendlyBootLog".
-const bootLog = { at: new Date().toISOString(), native: !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()), marks: {} };
-const bootMark = k => { if (bootLog.marks[k] != null) return; bootLog.marks[k] = Math.round(performance.now());
-  try { const all = JSON.parse(localStorage.getItem("friendlyBootLog") || "[]").filter(x => x.at !== bootLog.at); all.push(bootLog); localStorage.setItem("friendlyBootLog", JSON.stringify(all.slice(-8))); } catch {} };
-bootMark("appJsRunning");
 
 
 
@@ -625,7 +620,6 @@ window.go = path => { location.hash = path; };
 
 // ---------- auth ----------
 onAuthStateChanged(auth, async u => {
-  bootMark(u ? "authSignedIn" : "authSignedOut");
   S.subs.forEach(fn => fn()); S.subs = [];
   S.user = u;
   if (!u) {
@@ -637,7 +631,7 @@ onAuthStateChanged(auth, async u => {
   // Ensure a profile doc exists (created at sign-up; guard for older accounts).
   // Start listening right away (the device copy answers first); make sure a profile exists in the background.
   subscribeAll(u);
-  getDoc(uref).then(snap => { bootMark("profileGetDoc"); if (!snap.exists()) return setDoc(uref, { name: u.displayName || first(u.email), email: u.email, venmo: "", phone: "", createdAt: Date.now() }); }).catch(() => {});
+  getDoc(uref).then(snap => { if (!snap.exists()) return setDoc(uref, { name: u.displayName || first(u.email), email: u.email, venmo: "", phone: "", createdAt: Date.now() }); }).catch(() => {});
   // Open on Events. Only top-level tabs are redirected; a link to an event,
   // group, expense, or invite still goes where it points.
   let pendingJoin = ""; try { pendingJoin = localStorage.getItem("friendlyJoin") || ""; localStorage.removeItem("friendlyJoin"); } catch {}
@@ -659,7 +653,7 @@ function subscribeAll(u) {
   S.pendingInvitesPhone = new Map();
   let invitesPhoneUnsub = null, invitesPhoneKey = null;
   add(on("profile", doc(db, "users", u.uid), d => {
-    S.profile = d.data(); rebuildContacts(); S.ready = true; bootMark("profileSnapshot" + (d.metadata && d.metadata.fromCache ? "Cache" : ""));
+    S.profile = d.data(); rebuildContacts(); S.ready = true;
     // Backfill a missing phoneE164 from the sign-in identifier (once), so phone
     // invites and joins match for accounts whose profile phone was left blank.
     if (S.profile && !S.profile.phoneE164 && myPhoneE164() && !S._phoneHealed) { S._phoneHealed = true; updateDoc(doc(db, "users", u.uid), { phoneE164: myPhoneE164() }).catch(() => {}); }
@@ -780,7 +774,7 @@ function mountSplash(root, msg) {
   root.innerHTML = `<div class="splash">${splashInner(msg)}</div>`;
   if (splashStop) { splashStop(); splashStop = null; }
   const svg = root.querySelector(".splash-blip");
-  if (svg && window.Blip) { splashHold = true; splashStop = window.Blip.play(svg, { dur: 1.7, delay: 1.65, onDone: () => { bootMark("dotFormed"); splashHold = false; } }); }
+  if (svg && window.Blip) { splashHold = true; splashStop = window.Blip.play(svg, { dur: 1.7, delay: 1.65, onDone: () => { splashHold = false; } }); }
 }
 // The intro plays again whenever the app comes back to the foreground after being away a while, as an overlay on top of the live app.
 let hiddenAt = 0;
@@ -812,7 +806,7 @@ function renderNow() {
   S._introOver = true;
   // Leaving the intro: lift the splash out of the page and fade it away over the app instead of cutting.
   const leaving = root.querySelector(".splash");
-  if (leaving) { bootMark("appShown");
+  if (leaving) {
     const stop = splashStop; splashStop = null;
     document.body.appendChild(leaving); leaving.classList.add("splash-leave");
     void leaving.offsetWidth; leaving.classList.add("out");   // force a style flush so the fade runs from full opacity
