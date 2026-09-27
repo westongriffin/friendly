@@ -1598,10 +1598,20 @@ const cityKeyOf = c => String(c || "").toLowerCase().replace(/[^a-z0-9]+/g, "-")
 const pad2 = n => String(n).padStart(2, "0");
 const addDays = (ymd, n) => { const [y, m, d] = ymd.split("-").map(Number); const x = new Date(y, m - 1, d + n); return x.getFullYear() + "-" + pad2(x.getMonth() + 1) + "-" + pad2(x.getDate()); };
 function nowCtx() { const d = new Date(); return { today: todayStr(), weekday: d.toLocaleDateString("en-US", { weekday: "long" }), now: pad2(d.getHours()) + ":" + pad2(d.getMinutes()), tz: (Intl.DateTimeFormat().resolvedOptions().timeZone || "") }; }
-function registerCity(city) { const key = cityKeyOf(city); if (!key) return; setDoc(doc(db, "curateCities", key), { key, city, tz: nowCtx().tz, updatedAt: Date.now() }, { merge: true }).catch(() => {}); }
+// How far out Dot looks. 25 miles keeps the plain city key (the nights already cached); other distances get their own ("frisco-tx--10mi").
+const CURATE_MILES = [5, 10, 25, 50], DEFAULT_MILES = 25;
+const myMiles = () => { const m = Number(S.profile && S.profile.curateMiles); return CURATE_MILES.includes(m) ? m : DEFAULT_MILES; };
+const curatedKey = (city, miles) => { const k = cityKeyOf(city); return k && (miles === DEFAULT_MILES ? k : k + "--" + miles + "mi"); };
+function registerCity(city, miles = myMiles()) { const key = curatedKey(city, miles); if (!key) return; setDoc(doc(db, "curateCities", key), { key, city, miles, tz: nowCtx().tz, updatedAt: Date.now() }, { merge: true }).catch(() => {}); }
+const milesSelect = id => `<select id="${id}" class="btn small miles-sel" aria-label="How far to look">${CURATE_MILES.map(m => `<option value="${m}" ${m === myMiles() ? "selected" : ""}>Within ${m} mi</option>`).join("")}</select>`;
+async function saveMiles(v) {
+  const miles = CURATE_MILES.includes(Number(v)) ? Number(v) : DEFAULT_MILES; if (miles === myMiles()) return;
+  const city = (S.profile.city || "").trim();
+  try { await updateDoc(doc(db, "users", myUid()), { curateMiles: miles }); if (city) { registerCity(city, miles); toast(`Looking within ${miles} miles of ${city}…`, null, null, "thinking"); } } catch (e) { toast(e.message); }
+}
 // Subscribe to the city's cached nights; ask the server to build them if there are none for today yet.
 function ensureCurated() {
-  const city = (S.profile && S.profile.city || "").trim(), key = cityKeyOf(city); if (!key) return;
+  const city = (S.profile && S.profile.city || "").trim(), miles = myMiles(), key = curatedKey(city, miles); if (!key) return;
   if (curKey === key && curSub) return;
   if (curSub) curSub(); if (curCoverSub) curCoverSub(); curKey = key; S.curCovers = {}; S._curBuilding = false; S._curError = "";
   // Show the last nights this phone saw right away; the live copy replaces them when it arrives.
@@ -1614,7 +1624,7 @@ function ensureCurated() {
     if ((!d || (d.forDate || "") < addDays(todayStr(), -1) || (d.v || 1) < 4) && !S._curBuilding && !isDemo()) {   // v3 = four per filter, de-duplicated
       S._curBuilding = true;
       S._curPhase = "starting";
-      requestViaFirestore("planRequests", { mode: "curate-city", city, ...nowCtx() }, 280000, d => { if (d.phase && d.phase !== S._curPhase) { S._curPhase = d.phase; render(); } }).then(() => { S._curBuilding = false; }).catch(e => { S._curBuilding = false; S._curError = e.message; render(); });
+      requestViaFirestore("planRequests", { mode: "curate-city", city, miles, ...nowCtx() }, 280000, d => { if (d.phase && d.phase !== S._curPhase) { S._curPhase = d.phase; render(); } }).then(() => { S._curBuilding = false; }).catch(e => { S._curBuilding = false; S._curError = e.message; render(); });
     }
     render();
   }, err => { S._curError = err.message; render(); });
@@ -1661,9 +1671,10 @@ async function pollNights(nights) {
   dialog(`<h3>Which group?</h3><div class="stack">${groups.map(g => `<button type="button" class="btn" data-pg="${g.id}" style="text-align:left">${esc(g.emoji || "")} ${esc(g.name)}</button>`).join("")}</div>`, null, null);
   document.querySelectorAll("[data-pg]").forEach(b => b.onclick = () => make(b.dataset.pg));
 }
-async function saveCity(city) {
+async function saveCity(city, milesIn) {
   city = String(city || "").trim().slice(0, 60); if (city.length < 2) return toast("Tell me a city, like Frisco, TX.");
-  try { await updateDoc(doc(db, "users", myUid()), { city }); registerCity(city); toast("Looking around " + city + "…", null, null, "thinking"); } catch (e) { toast(e.message); }
+  const miles = CURATE_MILES.includes(Number(milesIn)) ? Number(milesIn) : myMiles();
+  try { await updateDoc(doc(db, "users", myUid()), miles === myMiles() ? { city } : { city, curateMiles: miles }); registerCity(city, miles); toast("Looking around " + city + "…", null, null, "thinking"); } catch (e) { toast(e.message); }
 }
 function openCityDialog() {
   dialog(`<h3>Where are you?</h3><label class="field"><span>City</span><input id="cityIn" value="${esc(S.profile.city || "")}" placeholder="Frisco, TX" maxlength="60"></label><p class="muted sm">Used only to find things nearby. No location tracking.</p>`, "Save", () => { const v = el("cityIn").value; closeDialog(); saveCity(v); });
@@ -1671,7 +1682,7 @@ function openCityDialog() {
 function curateBody() {
   const city = (S.profile.city || "").trim();
   if (!city) return `<div class="section-head"><h2>${CURATE_LABEL}</h2></div>
-    <div class="card empty">${dot("thinking", 72)}<b>Where are you?</b><p class="muted">Tell me your city and I'll find a few good nights out nearby, each with a place to eat and the timing worked out.</p><div class="btnrow" style="justify-content:center;gap:8px;flex-wrap:wrap"><input id="curCity" class="city-in" placeholder="Frisco, TX" maxlength="60"><button type="button" class="btn primary" id="curCitySave">Look around</button></div><p class="muted sm" style="margin-top:8px">No location tracking, just the city.</p></div>`;
+    <div class="card empty">${dot("thinking", 72)}<b>Where are you?</b><p class="muted">Tell me your city and I'll find a few good nights out nearby, each with a place to eat and the timing worked out.</p><div class="btnrow" style="justify-content:center;gap:8px;flex-wrap:wrap"><input id="curCity" class="city-in" placeholder="Frisco, TX" maxlength="60">${milesSelect("curMiles0")}<button type="button" class="btn primary" id="curCitySave">Look around</button></div><p class="muted sm" style="margin-top:8px">No location tracking, just the city.</p></div>`;
   ensureCurated();
   const d = S.curated, nights = (d && d.nights) || [];
   // Tonight and This weekend go by the actual date; the rest by what Dot tagged. Four per filter, the ones from that
@@ -1681,8 +1692,8 @@ function curateBody() {
   const filtered = nights.filter(fits).sort((a, b) => ((b.src === curFilter) - (a.src === curFilter)) || (a.date + (a.start || "")).localeCompare(b.date + (b.start || "")));
   const all = filtered.length ? filtered : nights, shown = S._curMore === curFilter ? all : all.slice(0, 4), extra = all.length - shown.length;
   const phaseText = { starting: "Warming up", searching: "Searching what's on and pairing places to eat", sorting: "Sorting the good ones" }[S._curPhase] || "Looking around";
-  const lead = !d && !S._curError ? `Give me a minute. ${phaseText} in ${city}…` : S._curError ? "I couldn't look around just now (" + S._curError + "). Try again in a bit." : shown.length ? (filtered.length ? CURATE_LEADS[curFilter] : "Nothing tagged for that yet, so here's everything I found.") : "Nothing yet. Build your own and I'll go looking.";
-  return `<div class="section-head"><h2>${CURATE_LABEL}</h2><span class="btnrow" style="gap:8px"><button type="button" class="btn small" id="curCityBtn">📍 ${esc(city)}</button><button type="button" class="btn primary small" id="curBuild">✨ Build me a night</button></span></div>
+  const lead = !d && !S._curError ? `Give me a minute. ${phaseText} within ${myMiles()} miles of ${city}…` : S._curError ? "I couldn't look around just now (" + S._curError + "). Try again in a bit." : shown.length ? (filtered.length ? CURATE_LEADS[curFilter] : "Nothing tagged for that yet, so here's everything I found.") : "Nothing yet. Build your own and I'll go looking.";
+  return `<div class="section-head"><h2>${CURATE_LABEL}</h2><span class="btnrow" style="gap:8px"><button type="button" class="btn small" id="curCityBtn">📍 ${esc(city)}</button>${milesSelect("curMiles")}<button type="button" class="btn primary small" id="curBuild">✨ Build me a night</button></span></div>
   <div class="dot-say" style="margin-top:4px">${dot(d ? "happy" : "thinking", 52)}<div class="say-bubble">${esc(lead)}</div></div>
   <div class="chiprow">${CURATE_FILTERS.map(([k, l]) => `<button type="button" class="fchip ${curFilter === k ? "on" : ""}" data-cf="${k}">${l}</button>`).join("")}</div>
   ${!d && !S._curError ? `<div class="card empty compact">${dot("thinking", 64)}<p class="muted" style="margin:6px 0 0">Searching what's on, pairing dinners, checking the times. About half a minute the first time.</p></div>` : ""}
@@ -1692,9 +1703,11 @@ function curateBody() {
   ${d ? `<p class="muted sm" style="margin:6px 4px 0">Found by Dot with web search and refreshed nightly. Double-check times before you go; things change.</p>` : ""}`;
 }
 function wireCurate() {
-  if (el("curCitySave")) el("curCitySave").onclick = () => saveCity(el("curCity").value);
-  if (el("curCity")) el("curCity").onkeydown = e => { if (e.key === "Enter") saveCity(el("curCity").value); };
+  const firstMiles = () => (el("curMiles0") || {}).value;
+  if (el("curCitySave")) el("curCitySave").onclick = () => saveCity(el("curCity").value, firstMiles());
+  if (el("curCity")) el("curCity").onkeydown = e => { if (e.key === "Enter") saveCity(el("curCity").value, firstMiles()); };
   if (el("curCityBtn")) el("curCityBtn").onclick = openCityDialog;
+  if (el("curMiles")) el("curMiles").onchange = e => { S._curMore = null; saveMiles(e.target.value); };
   if (el("curBuild")) el("curBuild").onclick = () => openNightBuilder();
   if (el("curRetry")) el("curRetry").onclick = () => { S._curError = ""; curKey = ""; if (curSub) { curSub(); curSub = null; } render(); };
   document.querySelectorAll("[data-cf]").forEach(b => b.onclick = () => { curFilter = b.dataset.cf; S._curMore = null; render(); });
@@ -1742,7 +1755,7 @@ function openNightBuilder() {
     const [from, to] = windowFor();
     box.innerHTML = `<div class="dot-say">${dot("thinking", 52)}<div class="say-bubble">On it. Searching what's on, pairing a place to eat, checking the times. Give me half a minute.</div></div><p class="muted sm">${esc(crumbs())}</p>`;
     try {
-      const res = await requestViaFirestore("planRequests", { mode: "night", city, vibe: B.vibe, who: B.who, budget: B.budget, free: B.free, from, to, ...nowCtx() }, 240000);
+      const res = await requestViaFirestore("planRequests", { mode: "night", city, miles: myMiles(), vibe: B.vibe, who: B.who, budget: B.budget, free: B.free, from, to, ...nowCtx() }, 240000);
       const nights = (res.data && res.data.nights) || []; if (!nights.length) throw new Error("nothing found");
       box.innerHTML = `<div class="dot-say">${dot("happy", 52)}<div class="say-bubble">Three ways to do it. Pick one and I'll set it up, or send all three to the group as a poll.</div></div>
         <div class="btnrow" style="gap:6px;margin:0 0 10px;flex-wrap:wrap"><button type="button" class="btn primary small" id="nbPollAll">Poll the group with all three</button><button type="button" class="btn small" id="nbAgain">Try another three</button></div>

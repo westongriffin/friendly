@@ -60,7 +60,7 @@ service cloud.firestore {
       allow create: if signedIn() && userId == uid() && !isDemoUser();
       allow update: if signedIn() && userId == uid()
         && (!isDemoUser() || request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['name', 'venmo', 'zelle', 'cashapp', 'payPref', 'city', 'photo', 'birthday', 'notifPrefs', 'activitySeenAt', 'hiddenIds', 'blockedUids', 'onboarded']));
+              .hasOnly(['name', 'venmo', 'zelle', 'cashapp', 'payPref', 'city', 'photo', 'birthday', 'curateMiles', 'notifPrefs', 'activitySeenAt', 'hiddenIds', 'blockedUids', 'onboarded']));
       allow delete: if signedIn() && userId == uid() && !isDemoUser();
     }
 
@@ -302,8 +302,9 @@ service cloud.firestore {
     }
     match /curateCities/{cityKey} {
       allow read: if signedIn();
-      allow create, update: if signedIn() && request.resource.data.keys().hasOnly(['key', 'city', 'tz', 'updatedAt'])
-        && request.resource.data.city is string && request.resource.data.city.size() <= 60;
+      allow create, update: if signedIn() && request.resource.data.keys().hasOnly(['key', 'city', 'tz', 'updatedAt', 'miles'])
+        && request.resource.data.city is string && request.resource.data.city.size() <= 60
+        && (!('miles' in request.resource.data) || request.resource.data.miles in [5, 10, 25, 50]);
     }
 
     // ---- Settlements ----

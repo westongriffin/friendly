@@ -409,9 +409,10 @@ async function curateCity(d, onPhase) {
   const end = new Date(today + "T12:00:00Z"); end.setUTCDate(end.getUTCDate() + 9); const endStr = end.toISOString().slice(0, 10);
   const dow = new Date(today + "T12:00:00Z").getUTCDay(); const toFri = dow <= 5 ? 5 - dow : 6;
   const fri = new Date(today + "T12:00:00Z"); if (dow !== 6 && dow !== 0) fri.setUTCDate(fri.getUTCDate() + toFri); const weekendFrom = fri.toISOString().slice(0, 10);
+  const area = nearArea(city, d.miles);
   let started = false;
   const one = async kind => {
-    const prompt = `You are Dot, the helper in Friendly, an app friends use to plan nights out. Using search, find real, specific things happening in or near ${city} (today is ${today}, ${sv(d.weekday, 10)}; nothing after ${endStr}). Build exactly 4 different nights ${CURATE_KINDS[kind](weekendFrom, today)}. Each pairs one thing to do with one real place to eat or drink within a short walk or drive, with times that work in sequence. Make the 4 genuinely different (different neighborhoods or kinds of thing). Only things friends would actually want to go out for: skip civic and informational events (safety fairs, seminars, council meetings, workshops, expos for businesses). Include "${kind}" in every night's tags, plus any other tags that apply. Keep strings short; at most 3 stops per night; no markdown. ${nightShape}`;
+    const prompt = `You are Dot, the helper in Friendly, an app friends use to plan nights out. Using search, find real, specific things happening ${area} (today is ${today}, ${sv(d.weekday, 10)}; nothing after ${endStr}). Build exactly 4 different nights ${CURATE_KINDS[kind](weekendFrom, today)}. Each pairs one thing to do with one real place to eat or drink within a short walk or drive, with times that work in sequence. Make the 4 genuinely different (different neighborhoods or kinds of thing). Only things friends would actually want to go out for: skip civic and informational events (safety fairs, seminars, council meetings, workshops, expos for businesses). Include "${kind}" in every night's tags, plus any other tags that apply. Keep strings short; at most 3 stops per night; no markdown. ${nightShape}`;
     const raw = await askGrounded(prompt, 2600, started ? null : (started = true, onPhase));
     return raw.map(cleanNight).map(n => ({ ...n, src: kind, tags: [...new Set([kind, ...n.tags])] }));
   };
@@ -439,16 +440,21 @@ async function curateCity(d, onPhase) {
   return nights;
 }
 const cityKeyOf = c => String(c || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
-async function buildAndCacheCity(city, tz, today, weekday, onPhase) {
-  const nights = await curateCity({ city, tz, today, weekday }, onPhase);
-  await db.doc("curated/" + cityKeyOf(city)).set({ city, nights, updatedAt: Date.now(), forDate: today, v: 4 });
+// How far out to look. 25 miles is the default and keeps the plain city key; the others get their own cache ("frisco-tx--10mi").
+const CURATE_MILES = [5, 10, 25, 50], DEFAULT_MILES = 25;
+const milesOf = m => CURATE_MILES.includes(Number(m)) ? Number(m) : DEFAULT_MILES;
+const curatedKey = (city, miles) => cityKeyOf(city) + (milesOf(miles) === DEFAULT_MILES ? "" : "--" + milesOf(miles) + "mi");
+const nearArea = (city, miles) => { const m = milesOf(miles); return m <= 5 ? `in ${city} itself, within about 5 miles of it (nothing farther)` : `in or around ${city}, within about ${m} miles of it (nothing farther)`; };
+async function buildAndCacheCity(city, tz, today, weekday, onPhase, miles) {
+  const nights = await curateCity({ city, tz, today, weekday, miles }, onPhase);
+  await db.doc("curated/" + curatedKey(city, miles)).set({ city, miles: milesOf(miles), nights, updatedAt: Date.now(), forDate: today, v: 4 });
   return nights;
 }
 async function buildNight(d) {
   const city = sv(d.city, 60); if (city.length < 2) throw new Error("no city");
   const today = /^\d{4}-\d{2}-\d{2}$/.test(d.today || "") ? d.today : new Date().toISOString().slice(0, 10);
   const from = /^\d{4}-\d{2}-\d{2}$/.test(d.from || "") ? d.from : today, to = /^\d{4}-\d{2}-\d{2}$/.test(d.to || "") ? d.to : from;
-  const prompt = `You are Dot, the helper in Friendly, an app friends use to plan nights out. Build 3 different nights out in or near ${city} for ${from === to ? from : from + " to " + to} (today is ${today}, ${sv(d.weekday, 10)}), using search to find real, specific events, venues, restaurants and bars.
+  const prompt = `You are Dot, the helper in Friendly, an app friends use to plan nights out. Build 3 different nights out ${nearArea(city, d.miles)} for ${from === to ? from : from + " to " + to} (today is ${today}, ${sv(d.weekday, 10)}), using search to find real, specific events, venues, restaurants and bars.
 The ask: vibe "${sv(d.vibe, 30) || "surprise me"}", for ${sv(d.who, 30) || "a few friends"}, budget ${sv(d.budget, 30) || "flexible"} per person all in.${d.free ? " Also: " + sv(d.free, 300) + "." : ""}
 Make the three genuinely different from each other (different neighborhoods or kinds of thing). Each pairs one thing to do with one real place to eat or drink nearby, with times that work in sequence. Respect the budget and the group size (bar tables and counter service for big groups, a reservation for a date). ${nightShape}`;
   const raw = await askGrounded(prompt, 3000, d.onPhase);
@@ -495,7 +501,7 @@ exports.curateNightly = onSchedule({ schedule: "30 3 * * *", timeZone: "America/
       const tz = c.tz || "America/Chicago";
       const now = new Date(); const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" });
       const today = fmt.format(now); const weekday = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" }).format(now);
-      await buildAndCacheCity(c.city, tz, today, weekday);
+      await buildAndCacheCity(c.city, tz, today, weekday, null, c.miles);
     } catch (err) { logger.warn("curate failed for " + c.city + ": " + err.message); }
   }
 });
@@ -506,7 +512,7 @@ exports.onPlanRequest = onDocumentCreated({ document: "planRequests/{id}", regio
   const ref = e.data.ref;
   try {
     const data = d.mode === "expense" ? await draftExpense(d) : d.mode === "edit" ? await draftEdit(d) : d.mode === "ask" ? await answerQuestion(d)
-      : d.mode === "curate-city" ? { nights: await buildAndCacheCity(sv(d.city, 60), sv(d.tz, 40), d.today, d.weekday, phase => ref.update({ phase }).catch(() => {})) }
+      : d.mode === "curate-city" ? { nights: await buildAndCacheCity(sv(d.city, 60), sv(d.tz, 40), d.today, d.weekday, phase => ref.update({ phase }).catch(() => {}), d.miles) }
       : d.mode === "night" ? { nights: await buildNight({ ...d, onPhase: phase => ref.update({ phase }).catch(() => {}) }) }
       : await draftPlan(d);
     await ref.update({ status: "done", data });
