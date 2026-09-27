@@ -2453,7 +2453,7 @@ function bringState(c) {
 function claimerName(c, u) {
   const n = nameOf(u); if (n !== "Someone") return n;
   const saved = ((c.reactions || {}).claimNames || {})[u]; if (saved) return saved;
-  const posted = S.comments.find(x => x.authorId === u && x.authorName); return posted ? posted.authorName : "A guest";
+  const posted = S.comments.find(x => x.authorId === u && x.authorName); return posted ? posted.authorName : "";
 }
 function dayInner(ev) {
   const me = myUid(); const du = daysUntil(ev); const soon = du >= 0 && du <= 1;
@@ -2471,7 +2471,7 @@ function dayInner(ev) {
     <div class="glass-sub">Bring list <button type="button" class="btn-th ghost small" id="addBring">＋ Add</button></div>
     ${items.length ? items.map(c => {
       const st = bringState(c), iAmIn = st.who.includes(me), myQty = st.qtyOf(me);
-      const names = st.who.map(u => esc(first(claimerName(c, u))));
+      const names = st.who.map(u => { const n = claimerName(c, u); return esc(n ? first(n) : "A guest"); });
       const whoLine = !st.who.length ? "" : st.hasTarget ? st.who.map((u, i) => names[i] + " is bringing " + st.qtyOf(u)).join(", ")
         : (names.length === 1 ? names[0] + " is bringing it" : names.slice(0, -1).join(", ") + " and " + names[names.length - 1] + " are bringing it");
       return `<div class="day-row"><span style="flex:1;min-width:0"><b>${esc(c.item)}</b>${c.qty ? ` <span class="muted-th sm">× ${esc(c.qty)}</span>` : ""}
@@ -2502,7 +2502,7 @@ function wireDay(ev) {
   });
   document.querySelectorAll("[data-claim]").forEach(b => b.onclick = async () => {
     const c = S.comments.find(x => x.id === b.dataset.claim); const has = c && ((c.reactions || {}).claim || []).includes(me);
-    if (!has && c && bringState(c).covered) return toast(`${first(claimerName(c, bringState(c).who[0]))} already has that one.`);
+    if (!has && c && bringState(c).covered) return toast(`${first(claimerName(c, bringState(c).who[0]) || "Someone else")} already has that one.`);
     const patch = { "reactions.claim": has ? arrayRemove(me) : arrayUnion(me), [`reactions.claimNames.${me}`]: has ? deleteField() : (S.profile.name || "Friend") };
     if (has) patch[`reactions.claimQty.${me}`] = deleteField();
     try { await updateDoc(doc(subCol(ev, "comments"), b.dataset.claim), patch); } catch (e) { toast(e.message); }
