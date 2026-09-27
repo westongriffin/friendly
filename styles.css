@@ -665,3 +665,4 @@ html{background:var(--bg)}
 .city-wrap{position:relative;flex:1 1 200px;max-width:320px}
 .city-wrap .city-in{width:100%}
 .city-wrap .places-list{position:absolute;left:0;right:0;top:100%;z-index:30;text-align:left}
+.city-err{color:#C2412D;font-size:13px;font-weight:600;margin:6px 0 0;flex-basis:100%}

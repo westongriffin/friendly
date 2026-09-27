@@ -1692,9 +1692,13 @@ async function pollNights(nights) {
 }
 // Resolve the city box and say so when it isn't a real place. allowEmpty: the profile may clear it.
 async function pickedCity(input, allowEmpty) {
+  // Say it right under the box: a toast would sit behind the keyboard.
+  const say = msg => { if (!input) return toast(msg); const host = input.closest(".field, .city-wrap") || input; let p = host.parentElement.querySelector(".city-err");
+    if (!p) { p = document.createElement("p"); p.className = "city-err"; host.insertAdjacentElement("afterend", p); } p.textContent = msg; input.focus();
+    input.addEventListener("input", () => p.remove(), { once: true }); };
   const city = await resolveCity(input);
-  if (city === "" && !allowEmpty) { toast("Tell me a city, like Frisco, TX."); return null; }
-  if (city === null) { toast("I couldn't find that city. Start typing and pick it from the list.", null, null, "thinking"); if (input) input.focus(); return null; }
+  if (city === "" && !allowEmpty) { say("Tell me a city, like Frisco, TX."); return null; }
+  if (city === null) { say("I couldn't find that city. Start typing and pick it from the list."); return null; }
   if (input && city && input.value.trim() !== city) input.value = city;   // show what it matched to
   return city;
 }
