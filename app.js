@@ -1693,7 +1693,8 @@ function curateBody() {
   const all = filtered.length ? filtered : nights, shown = S._curMore === curFilter ? all : all.slice(0, 4), extra = all.length - shown.length;
   const phaseText = { starting: "Warming up", searching: "Searching what's on and pairing places to eat", sorting: "Sorting the good ones" }[S._curPhase] || "Looking around";
   const lead = !d && !S._curError ? `Give me a minute. ${phaseText} within ${myMiles()} miles of ${city}…` : S._curError ? "I couldn't look around just now (" + S._curError + "). Try again in a bit." : shown.length ? (filtered.length ? CURATE_LEADS[curFilter] : "Nothing tagged for that yet, so here's everything I found.") : "Nothing yet. Build your own and I'll go looking.";
-  return `<div class="section-head"><h2>${CURATE_LABEL}</h2><span class="btnrow" style="gap:8px"><button type="button" class="btn small" id="curCityBtn">📍 ${esc(city)}</button>${milesSelect("curMiles")}<button type="button" class="btn primary small" id="curBuild">✨ Build me a night</button></span></div>
+  return `<div class="section-head"><h2>${CURATE_LABEL}</h2><button type="button" class="btn primary small" id="curBuild">✨ Build me a night</button></div>
+  <div class="cur-where"><button type="button" class="btn small" id="curCityBtn">📍 ${esc(city)}</button>${milesSelect("curMiles")}</div>
   <div class="dot-say" style="margin-top:4px">${dot(d ? "happy" : "thinking", 52)}<div class="say-bubble">${esc(lead)}</div></div>
   <div class="chiprow">${CURATE_FILTERS.map(([k, l]) => `<button type="button" class="fchip ${curFilter === k ? "on" : ""}" data-cf="${k}">${l}</button>`).join("")}</div>
   ${!d && !S._curError ? `<div class="card empty compact">${dot("thinking", 64)}<p class="muted" style="margin:6px 0 0">Searching what's on, pairing dinners, checking the times. About half a minute the first time.</p></div>` : ""}
