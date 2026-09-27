@@ -9,7 +9,7 @@ import {
   verifyPasswordResetCode, confirmPasswordReset
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
-  getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection,
+  getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, terminate, clearIndexedDbPersistence, doc, getDoc, setDoc, updateDoc, deleteDoc, collection,
   query, where, onSnapshot, addDoc, arrayUnion, arrayRemove, deleteField, orderBy, limit, getDocs
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import { firebaseConfig, mapsKey, adminUids, vapidPublicKey, giphyKey } from "./firebase-config.js";
@@ -17,7 +17,11 @@ import { THEMES, themeOf, applyTheme, startParticles, DEFAULT_THEME, CUSTOM_FONT
 
 const fb = initializeApp(firebaseConfig);
 const auth = getAuth(fb);
-const db = getFirestore(fb);
+// Keep a copy of the account's data on the device, so the app opens from it instantly and
+// freshens up in the background, instead of waiting on the network every launch.
+let db; try { db = initializeFirestore(fb, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) }); } catch (e) { console.warn("device cache unavailable:", e.message); db = getFirestore(fb); }
+// On sign-out or account deletion, the device copy goes too.
+async function wipeLocalData() { try { await terminate(db); await clearIndexedDbPersistence(db); } catch {} location.reload(); }
 // Startup timing (ms since the page started), kept for the last 8 launches in localStorage "friendlyBootLog".
 const bootLog = { at: new Date().toISOString(), native: !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()), marks: {} };
 const bootMark = k => { if (bootLog.marks[k] != null) return; bootLog.marks[k] = Math.round(performance.now());
@@ -630,9 +634,9 @@ onAuthStateChanged(auth, async u => {
   }
   const uref = doc(db, "users", u.uid);
   // Ensure a profile doc exists (created at sign-up; guard for older accounts).
-  const snap = await getDoc(uref); bootMark("profileGetDoc");
-  if (!snap.exists()) await setDoc(uref, { name: u.displayName || first(u.email), email: u.email, venmo: "", phone: "", createdAt: Date.now() });
+  // Start listening right away (the device copy answers first); make sure a profile exists in the background.
   subscribeAll(u);
+  getDoc(uref).then(snap => { bootMark("profileGetDoc"); if (!snap.exists()) return setDoc(uref, { name: u.displayName || first(u.email), email: u.email, venmo: "", phone: "", createdAt: Date.now() }); }).catch(() => {});
   // Open on Events. Only top-level tabs are redirected; a link to an event,
   // group, expense, or invite still goes where it points.
   let pendingJoin = ""; try { pendingJoin = localStorage.getItem("friendlyJoin") || ""; localStorage.removeItem("friendlyJoin"); } catch {}
@@ -789,14 +793,22 @@ function replaySplash() {
   const svg = o.querySelector(".splash-blip"); if (!svg) { o.remove(); return; }
   const stop = window.Blip.play(svg, { dur: 1.7, delay: 1.65, onDone: () => setTimeout(() => { o.classList.add("out"); setTimeout(() => { stop(); o.remove(); }, 450); }, 1600) });
 }
+// What shows while the account is still loading: the real header and tabs, with soft placeholder cards.
+function loadingShell() {
+  return `<header class="topbar"><div class="brand has-dot"><span>Friend<span class="tilt">l</span>y</span><span class="brand-dot" aria-hidden="true"></span></div><div class="topbar-right"><span class="skel skel-chip"></span></div></header>
+  <nav class="tabs"><button class="tab on" type="button">Events</button><button class="tab" type="button">Groups</button><button class="tab" type="button">Money</button><button class="tab" type="button"><span class="curate-lbl">${CURATE_LABEL}<i class="spark">✦</i></span></button></nav>
+  <main class="wrap boot-skel" aria-busy="true" aria-label="Loading"><div class="skel skel-banner"></div><div class="skel skel-line"></div><div class="skel-grid"><div class="skel skel-tile"></div><div class="skel skel-tile"></div><div class="skel skel-tile"></div><div class="skel skel-tile"></div></div></main>`;
+}
 function renderNow() {
   if (BLOCKED_MOBILE_WEB) return;
   const root = el("app");
-  // The loading screen stays up for at least two seconds so it never flashes.
+  // The intro runs its own course (logo, Dot forms, a beat of rest) and then always gets out of the way.
+  // It never waits on data: if the account hasn't loaded yet, the app appears with placeholders instead.
   const holdSplash = splashHold && Date.now() - BOOT_AT < SPLASH_MAX;   // let Dot finish forming, then settle for a beat
-  if (!S.ready || Date.now() - BOOT_AT < SPLASH_MIN || holdSplash) {
-    if (S.ready && !splashTimer) splashTimer = setTimeout(() => { splashTimer = null; render(); }, Math.max(SPLASH_MIN - (Date.now() - BOOT_AT), holdSplash ? 400 : 0) + 20);
+  if (!S._introOver && (Date.now() - BOOT_AT < SPLASH_MIN || holdSplash)) {
+    if (!splashTimer) splashTimer = setTimeout(() => { splashTimer = null; render(); }, Math.max(SPLASH_MIN - (Date.now() - BOOT_AT), holdSplash ? 400 : 0) + 20);
     mountSplash(root, "Getting everyone here…"); return; }
+  S._introOver = true;
   // Leaving the intro: lift the splash out of the page and fade it away over the app instead of cutting.
   const leaving = root.querySelector(".splash");
   if (leaving) { bootMark("appShown");
@@ -806,8 +818,9 @@ function renderNow() {
     setTimeout(() => { leaving.remove(); if (stop) stop(); }, 700);
   } else if (splashStop) { splashStop(); splashStop = null; }
   if (RESET_OOB) { renderResetPassword(root); return; }
+  if (!S.ready) { if (!root.querySelector(".boot-skel")) root.innerHTML = loadingShell(); return; }
   if (!S.user) { if (S.route.name === "event") { renderPreview(root, S.route.id); return; } if (S.route.name === "join") { try { localStorage.setItem("friendlyJoin", S.route.id); } catch {} } renderAuth(root); return; }
-  if (!S.profile) { mountSplash(root, "Setting up your profile…"); return; }
+  if (!S.profile) { if (!root.querySelector(".boot-skel")) root.innerHTML = loadingShell(); return; }
   if (S.profile.onboarded === false) { root.innerHTML = onboardingBody(); wireOnboarding(); return; }
   const r = S.route;
   if (r.name === "event") return renderEventPage(root, r.id);
@@ -3306,7 +3319,7 @@ function wireProfile() {
       toast("Profile saved");
     } catch (e) { toast(e.message); }
   };
-  el("signOut").onclick = () => { stopListening(); signOut(auth); };
+  el("signOut").onclick = async () => { stopListening(); await signOut(auth).catch(() => {}); wipeLocalData(); };
   const pt = el("pushToggle"); if (pt) pt.onclick = () => pushState() === "on" ? disableWebPush() : enableWebPush();
   const nr = el("notifRow"); if (nr) nr.onclick = () => { location.href = "app-settings:"; };
   document.querySelectorAll("[data-notifpref]").forEach(cb => cb.onchange = () => updateDoc(doc(db, "users", myUid()), { [`notifPrefs.${cb.dataset.notifpref}`]: cb.checked }).catch(e => toast(e.message)));
@@ -3357,7 +3370,7 @@ async function deleteAccount() {
     await deleteDoc(doc(db, "users", u.uid));
     stopListening();
     await deleteUser(u);
-    closeDialog(); toast("Your account has been deleted.");
+    closeDialog(); toast("Your account has been deleted."); setTimeout(wipeLocalData, 1500);
   } catch (e) { toast(e.code === "auth/invalid-credential" || e.code === "auth/wrong-password" ? "That password didn't match." : e.message); }
 }
 
