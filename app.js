@@ -531,7 +531,7 @@ function birthdayCard() {
 function smsLink(numbers, body) { const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?"; return "sms:" + numbers.map(n => n.replace(/[^+\d]/g, "")).join(",") + sep + "body=" + encodeURIComponent(body); }
 // Address autocomplete via Google Places (New). Active only once `mapsKey` is
 // set in firebase-config.js; without it the field stays a plain text box.
-function attachPlaces(input) {
+function attachPlaces(input, opts = {}) {
   if (!mapsKey || !input || input._places) return; input._places = true;
   const list = document.createElement("div"); list.className = "places-list"; list.hidden = true;
   input.insertAdjacentElement("afterend", list);
@@ -543,22 +543,41 @@ function attachPlaces(input) {
     timer = setTimeout(async () => {
       const my = ++seq;
       try {
-        const r = await fetch("https://places.googleapis.com/v1/places:autocomplete", { method: "POST", headers: { "Content-Type": "application/json", "X-Goog-Api-Key": mapsKey }, body: JSON.stringify({ input: q, includedRegionCodes: ["us"], languageCode: "en" }) });
-        const j = await r.json(); if (my !== seq) return;
-        const hits = (j.suggestions || []).map(s => s.placePrediction).filter(Boolean).slice(0, 5);
+        const hits = await placeSuggestions(q, opts.cities); if (my !== seq) return;
         if (!hits.length) return hide();
-        list.innerHTML = hits.map(p => { const f = p.structuredFormat || {}; return `<button type="button" data-place="${esc(p.text.text)}"><b>${esc((f.mainText || {}).text || p.text.text)}</b><span>${esc((f.secondaryText || {}).text || "")}</span></button>`; }).join("");
+        list.innerHTML = hits.map(p => { const f = p.structuredFormat || {}; return `<button type="button" data-place="${esc(opts.cities ? cityLabel(f) : p.text.text)}"><b>${esc((f.mainText || {}).text || p.text.text)}</b><span>${esc((f.secondaryText || {}).text || "")}</span></button>`; }).join("");
         list.hidden = false;
       } catch { hide(); }
     }, 250);
   });
   list.addEventListener("mousedown", e => {
     const b = e.target.closest("[data-place]"); if (!b) return; e.preventDefault();
-    input._picked = true; input.value = b.dataset.place; input.dispatchEvent(new Event("input", { bubbles: true })); hide();
+    input._picked = true; input.value = b.dataset.place; input.dataset.picked = b.dataset.place; input.dispatchEvent(new Event("input", { bubbles: true })); hide();
   });
   input.addEventListener("blur", () => setTimeout(hide, 150));
 }
 
+async function placeSuggestions(q, cities) {
+  const body = { input: q, includedRegionCodes: ["us"], languageCode: "en" }; if (cities) body.includedPrimaryTypes = ["(cities)"];
+  const r = await fetch("https://places.googleapis.com/v1/places:autocomplete", { method: "POST", headers: { "Content-Type": "application/json", "X-Goog-Api-Key": mapsKey }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error("places " + r.status);
+  const j = await r.json(); return (j.suggestions || []).map(s => s.placePrediction).filter(Boolean).slice(0, 5);
+}
+// Cities are saved the same way every time ("Frisco, TX"), so every spelling of a place shares one set of nights.
+const US_STATES = { alabama: "AL", alaska: "AK", arizona: "AZ", arkansas: "AR", california: "CA", colorado: "CO", connecticut: "CT", delaware: "DE", "district of columbia": "DC", florida: "FL", georgia: "GA", hawaii: "HI", idaho: "ID", illinois: "IL", indiana: "IN", iowa: "IA", kansas: "KS", kentucky: "KY", louisiana: "LA", maine: "ME", maryland: "MD", massachusetts: "MA", michigan: "MI", minnesota: "MN", mississippi: "MS", missouri: "MO", montana: "MT", nebraska: "NE", nevada: "NV", "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY", "north carolina": "NC", "north dakota": "ND", ohio: "OH", oklahoma: "OK", oregon: "OR", pennsylvania: "PA", "rhode island": "RI", "south carolina": "SC", "south dakota": "SD", tennessee: "TN", texas: "TX", utah: "UT", vermont: "VT", virginia: "VA", washington: "WA", "west virginia": "WV", wisconsin: "WI", wyoming: "WY", "puerto rico": "PR" };
+function cityLabel(f) {
+  const main = (f.mainText || {}).text || "", parts = ((f.secondaryText || {}).text || "").split(",").map(x => x.trim()).filter(Boolean);
+  const region = (parts.length && parts[parts.length - 1] === "USA" ? parts.slice(0, -1) : parts).map(x => US_STATES[x.toLowerCase()] || x).join(", ");
+  return (region ? main + ", " + region : main).slice(0, 60);
+}
+// Whatever was typed becomes a real city: the one picked from the list, otherwise the closest match.
+// null = no such city. If the lookup itself fails (offline, no key), keep what they typed rather than block them.
+async function resolveCity(input) {
+  const typed = String((input && input.value) || "").trim(); if (!typed) return "";
+  if (input.dataset.picked === typed || typed === (S.profile.city || "")) return typed;
+  if (!mapsKey) return typed;
+  try { const hits = await placeSuggestions(typed, true); return hits.length ? cityLabel(hits[0].structuredFormat || {}) : null; } catch { return typed; }
+}
 // ---------- state ----------
 const BOOT_AT = Date.now(), SPLASH_MIN = 5100, SPLASH_MAX = 7500; let splashTimer = null, splashHold = false;
 const S = {
@@ -1671,18 +1690,27 @@ async function pollNights(nights) {
   dialog(`<h3>Which group?</h3><div class="stack">${groups.map(g => `<button type="button" class="btn" data-pg="${g.id}" style="text-align:left">${esc(g.emoji || "")} ${esc(g.name)}</button>`).join("")}</div>`, null, null);
   document.querySelectorAll("[data-pg]").forEach(b => b.onclick = () => make(b.dataset.pg));
 }
+// Resolve the city box and say so when it isn't a real place. allowEmpty: the profile may clear it.
+async function pickedCity(input, allowEmpty) {
+  const city = await resolveCity(input);
+  if (city === "" && !allowEmpty) { toast("Tell me a city, like Frisco, TX."); return null; }
+  if (city === null) { toast("I couldn't find that city. Start typing and pick it from the list.", null, null, "thinking"); if (input) input.focus(); return null; }
+  if (input && city && input.value.trim() !== city) input.value = city;   // show what it matched to
+  return city;
+}
 async function saveCity(city, milesIn) {
   city = String(city || "").trim().slice(0, 60); if (city.length < 2) return toast("Tell me a city, like Frisco, TX.");
   const miles = CURATE_MILES.includes(Number(milesIn)) ? Number(milesIn) : myMiles();
   try { await updateDoc(doc(db, "users", myUid()), miles === myMiles() ? { city } : { city, curateMiles: miles }); registerCity(city, miles); toast("Looking around " + city + "…", null, null, "thinking"); } catch (e) { toast(e.message); }
 }
 function openCityDialog() {
-  dialog(`<h3>Where are you?</h3><label class="field"><span>City</span><input id="cityIn" value="${esc(S.profile.city || "")}" placeholder="Frisco, TX" maxlength="60"></label><p class="muted sm">Used only to find things nearby. No location tracking.</p>`, "Save", () => { const v = el("cityIn").value; closeDialog(); saveCity(v); });
+  dialog(`<h3>Where are you?</h3><label class="field"><span>City</span><input id="cityIn" value="${esc(S.profile.city || "")}" placeholder="Start typing a city" maxlength="60" autocomplete="off"></label><p class="muted sm">Pick your city from the list. Used only to find things nearby. No location tracking.</p>`, "Save", async () => { const city = await pickedCity(el("cityIn")); if (city) { closeDialog(); saveCity(city); } });
+  attachPlaces(el("cityIn"), { cities: true });
 }
 function curateBody() {
   const city = (S.profile.city || "").trim();
   if (!city) return `<div class="section-head"><h2>${CURATE_LABEL}</h2></div>
-    <div class="card empty">${dot("thinking", 72)}<b>Where are you?</b><p class="muted">Tell me your city and I'll find a few good nights out nearby, each with a place to eat and the timing worked out.</p><div class="btnrow" style="justify-content:center;gap:8px;flex-wrap:wrap"><input id="curCity" class="city-in" placeholder="Frisco, TX" maxlength="60">${milesSelect("curMiles0")}<button type="button" class="btn primary" id="curCitySave">Look around</button></div><p class="muted sm" style="margin-top:8px">No location tracking, just the city.</p></div>`;
+    <div class="card empty">${dot("thinking", 72)}<b>Where are you?</b><p class="muted">Tell me your city and I'll find a few good nights out nearby, each with a place to eat and the timing worked out.</p><div class="btnrow" style="justify-content:center;gap:8px;flex-wrap:wrap"><div class="city-wrap"><input id="curCity" class="city-in" placeholder="Start typing a city" maxlength="60" autocomplete="off"></div>${milesSelect("curMiles0")}<button type="button" class="btn primary" id="curCitySave">Look around</button></div><p class="muted sm" style="margin-top:8px">No location tracking, just the city.</p></div>`;
   ensureCurated();
   const d = S.curated, nights = (d && d.nights) || [];
   // Tonight and This weekend go by the actual date; the rest by what Dot tagged. Four per filter, the ones from that
@@ -1705,8 +1733,9 @@ function curateBody() {
 }
 function wireCurate() {
   const firstMiles = () => (el("curMiles0") || {}).value;
-  if (el("curCitySave")) el("curCitySave").onclick = () => saveCity(el("curCity").value, firstMiles());
-  if (el("curCity")) el("curCity").onkeydown = e => { if (e.key === "Enter") saveCity(el("curCity").value, firstMiles()); };
+  const firstSave = async () => { const city = await pickedCity(el("curCity")); if (city) saveCity(city, firstMiles()); };
+  if (el("curCitySave")) el("curCitySave").onclick = firstSave;
+  if (el("curCity")) { attachPlaces(el("curCity"), { cities: true }); el("curCity").onkeydown = e => { if (e.key === "Enter") firstSave(); }; }
   if (el("curCityBtn")) el("curCityBtn").onclick = openCityDialog;
   if (el("curMiles")) el("curMiles").onchange = e => { S._curMore = null; saveMiles(e.target.value); };
   if (el("curBuild")) el("curBuild").onclick = () => openNightBuilder();
@@ -3197,7 +3226,7 @@ function profileBody() {
     <label class="field"><span>Cash App</span><input id="pCashapp" value="${esc(p.cashapp || "")}" placeholder="$samrivera"></label></div>
     <label class="field"><span>Preferred way to get paid back</span><select id="pPayPref">${payPrefOptions(p.payPref || "")}</select></label>
     <label class="field"><span>Birthday <span class="muted">(so your groups can plan something)</span></span><input id="pBday" type="date" value="${esc(p.birthday || "")}"></label>
-    <label class="field"><span>Home city <span class="muted">(for nights out nearby)</span></span><input id="pCity" value="${esc(p.city || "")}" placeholder="Frisco, TX" maxlength="60" autocomplete="address-level2"></label>
+    <label class="field"><span>Home city <span class="muted">(for nights out nearby)</span></span><input id="pCity" value="${esc(p.city || "")}" placeholder="Start typing a city" maxlength="60" autocomplete="off"></label>
     <p class="muted sm">Your payment handles are shared only with people in your groups, so they can pay you back.</p>
     <button class="btn primary" id="saveProfile">Save profile</button>
   </div>
@@ -3242,6 +3271,7 @@ function wireReports() {
 }
 function wireProfile() {
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
+  attachPlaces(el("pCity"), { cities: true });
   if (el("saveProfile")) el("saveProfile").onclick = async () => {
     const name = el("pName").value.trim(); if (!name) return toast("Name can't be empty.");
     const venmo = el("pVenmo").value.trim(), phone = el("pPhone").value.trim(), zelle = ((el("pZelle") || {}).value || "").trim(), cashapp = ((el("pCashapp") || {}).value || "").trim(), payPref = (el("pPayPref") || {}).value || "";
@@ -3250,7 +3280,7 @@ function wireProfile() {
     try {
       const birthday = (el("pBday") || {}).value || "";
       const email = (el("pEmail") || {}).value || ""; if (email && !email.includes("@")) return toast("That email doesn't look right.");
-      const city = ((el("pCity") || {}).value || "").trim();
+      const city = el("pCity") ? await pickedCity(el("pCity"), true) : (S.profile.city || ""); if (city === null) return;
       await updateDoc(doc(db, "users", myUid()), { name, venmo, phone, zelle, cashapp, payPref, city, phoneE164: toE164(phone) || myPhoneE164(), birthday, email: email.trim().toLowerCase() });
       if (city) registerCity(city);
       // propagate name/contact into each group's denormalized members map

@@ -661,3 +661,7 @@ html{background:var(--bg)}
 .cur-where .cur-city{justify-content:flex-start;min-width:0;gap:4px}
 .cur-where .cur-city span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .btn.miles-sel{width:auto;padding:0 28px 0 12px;display:block;text-align:left}
+/* City box on the first Curate screen: suggestions float under it instead of pushing the row apart */
+.city-wrap{position:relative;flex:1 1 200px;max-width:320px}
+.city-wrap .city-in{width:100%}
+.city-wrap .places-list{position:absolute;left:0;right:0;top:100%;z-index:30;text-align:left}
