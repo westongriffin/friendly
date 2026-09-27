@@ -1380,21 +1380,25 @@ function openGroupDialog() {
 // number only, to be added to a pending-invite list and texted a join link).
 // Phone number is the one thing every contact reliably has, and the one thing
 // the join/auto-add mechanisms actually match on.
-function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), submitLabel = "Add & send", onSubmit }) {
+function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pendingPhones = new Map(), submitLabel = "Add & send", onSubmit }) {
   const me = myUid(); const picked = [];   // { name, phone, e164, uid|null }
   const nativeContacts = plugin("Contacts");
   const webPicker = !nativeContacts && ("contacts" in navigator && "ContactsManager" in window);
   const known = [...S.contacts.entries()].filter(([u]) => u !== me && !exclude.has(u));
   const byPhone = e164 => e164 && known.find(([, i]) => toE164(i.phone) === e164);
-  const addPicked = async (name, phone) => {
-    const e164 = toE164(phone); if (!e164) return toast(`Couldn't read a phone number for ${name || "that contact"}.`);
+  // skipped: when several contacts come back at once, collect the reasons and say them in one message.
+  const addPicked = async (name, phone, skipped) => {
+    const say = msg => skipped ? skipped.push(msg) : toast(msg);
+    const e164 = toE164(phone); if (!e164) return say(`Couldn't read a phone number for ${name || "that contact"}.`);
     if (picked.some(p => p.e164 === e164)) return;
+    // Already invited by text (by any host) and hasn't joined Friendly yet: don't text them a second invite.
+    if (pendingPhones.has(e164)) return say(`${first(pendingPhones.get(e164) || name || "") || "They"} already has an invite and hasn't joined yet.`);
     // Already on this event/group (the picker hides them, but a typed or address-book
     // number wouldn't otherwise be recognized and would text them a second invite).
     const dup = [...S.contacts.entries()].find(([u, i]) => exclude.has(u) && toE164(i.phone) === e164);
-    if (dup) return toast(`${first(dup[1].name || "") || "They"} ${dup[0] === me ? "-- that's you" : "is already on the list"}.`);
+    if (dup) return say(`${first(dup[1].name || "") || "They"} ${dup[0] === me ? "-- that's you" : "is already on the list"}.`);
     // People the host doesn't share a group with (they joined by link) are known only by phone key.
-    if (excludeKeys.size) { const k = await phoneKey(e164); if (excludeKeys.has(k)) return toast(`${first(excludeKeys.get(k) || "") || "They"} is already on the list.`); }
+    if (excludeKeys.size) { const k = await phoneKey(e164); if (excludeKeys.has(k)) return say(`${first(excludeKeys.get(k) || "") || "They"} is already on the list.`); }
     const hit = byPhone(e164); picked.push({ name: name || (hit ? hit[1].name : "") || "", phone, e164, uid: hit ? hit[0] : null }); renderPicked();
   };
   const renderPicked = () => { const box = el("invChosen"); if (box) box.innerHTML = picked.map((p, i) => `<div class="inv-hit"><div style="flex:1;min-width:0"><b>${esc(p.name || p.e164)}</b><div class="muted sm">${p.uid ? "On Friendly · added right away" : "Gets a text with the join link"}${p.e164 ? " · " + esc(p.e164) : ""}</div></div><button type="button" class="btn ghost small" data-unpick="${i}">✕</button></div>`).join("") || `<p class="muted sm">Nobody picked yet.</p>`; box.querySelectorAll("[data-unpick]").forEach(b => b.onclick = () => { picked.splice(+b.dataset.unpick, 1); renderPicked(); }); };
@@ -1429,14 +1433,16 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), subm
           if (!c) return toast("No contact came back from the picker.");
           list = [c];
         }
+        const skipped = [];
         for (const c of list) {
           const nm = c.name ? (c.name.display || [c.name.given, c.name.family].filter(Boolean).join(" ")) : (c.displayName || "");
           const rawPhones = (c.phones || c.phoneNumbers || []).map(p => (p && p.number) || (typeof p === "string" ? p : "")).filter(Boolean);
           const phone = rawPhones.find(p => toE164(p)) || rawPhones[0] || "";
-          await addPicked(nm, phone);
+          await addPicked(nm, phone, skipped);
         }
+        if (skipped.length) toast(skipped.length === 1 ? skipped[0] : `Skipped ${skipped.length}: ` + skipped.map(m => m.replace(/\.$/, "")).join("; ") + ".", null, null, "thinking");
       }
-      else { const rows = await navigator.contacts.select(["name", "tel"], { multiple: true }); rows.forEach(r => addPicked((r.name || [])[0] || "", (r.tel || [])[0] || "")); }
+      else { const rows = await navigator.contacts.select(["name", "tel"], { multiple: true }); const skipped = []; for (const r of rows) await addPicked((r.name || [])[0] || "", (r.tel || [])[0] || "", skipped); if (skipped.length) toast(skipped.length === 1 ? skipped[0] : `Skipped ${skipped.length}: ` + skipped.map(m => m.replace(/\.$/, "")).join("; ") + ".", null, null, "thinking"); }
     } catch (e) { const m = String((e && e.message) || e || ""); toast(/cancel/i.test(m) || !m ? "Contact picking was cancelled." : "Couldn't read that contact: " + m); }
   };
   if (el("invSearch")) {
@@ -1450,6 +1456,7 @@ function openInviteDialog(g) {
     title: `Add people to ${esc(g.name)}`,
     blurb: "Pick them from your contacts. Friends already on Friendly are added on the spot; everyone else gets a text from you with a join link.",
     exclude: new Set(g.memberUids || []),
+    pendingPhones: new Map((g.invitedPhones || []).map(p => [p, (g.invitedPhoneNames || {})[p] || ""])),
     onSubmit: async (direct, texted) => {
       const updates = {};
       if (direct.length) { updates.memberUids = [...new Set([...(g.memberUids || []), ...direct.map(p => p.uid)])]; for (const p of direct) { const info = S.contacts.get(p.uid) || {}; updates[`members.${p.uid}`] = { name: info.name || p.name || "Friend", venmo: info.venmo || "", phone: info.phone || "", photo: info.photo || "", birthday: info.birthday || "" }; } }
@@ -2893,6 +2900,7 @@ function openEventInviteDialog(ev) {
     blurb: "Pick them from your contacts. Friends already on Friendly are added on the spot; everyone else gets a text from you with a join link.",
     exclude: new Set(ev.invitedUids || []),
     excludeKeys: new Map(Object.entries(ev.phoneKeys || {}).filter(([u]) => (ev.invitedUids || []).includes(u)).map(([u, k]) => [k, (ev.names || {})[u] || nameOf(u)])),
+    pendingPhones: new Map((ev.invitedPhones || []).map(p => [p, (ev.invitedPhoneNames || {})[p] || ""])),
     onSubmit: async (direct, texted) => {
       const updates = {};
       if (direct.length) {
