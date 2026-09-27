@@ -1603,7 +1603,7 @@ const CURATE_MILES = [5, 10, 25, 50], DEFAULT_MILES = 25;
 const myMiles = () => { const m = Number(S.profile && S.profile.curateMiles); return CURATE_MILES.includes(m) ? m : DEFAULT_MILES; };
 const curatedKey = (city, miles) => { const k = cityKeyOf(city); return k && (miles === DEFAULT_MILES ? k : k + "--" + miles + "mi"); };
 function registerCity(city, miles = myMiles()) { const key = curatedKey(city, miles); if (!key) return; setDoc(doc(db, "curateCities", key), { key, city, miles, tz: nowCtx().tz, updatedAt: Date.now() }, { merge: true }).catch(() => {}); }
-const milesSelect = id => `<select id="${id}" class="btn small miles-sel" aria-label="How far to look">${CURATE_MILES.map(m => `<option value="${m}" ${m === myMiles() ? "selected" : ""}>Within ${m} mi</option>`).join("")}</select>`;
+const milesSelect = id => `<select id="${id}" class="btn small miles-sel" aria-label="How far to look" title="How far Dot looks from your city">${CURATE_MILES.map(m => `<option value="${m}" ${m === myMiles() ? "selected" : ""}>${m} mi</option>`).join("")}</select>`;
 async function saveMiles(v) {
   const miles = CURATE_MILES.includes(Number(v)) ? Number(v) : DEFAULT_MILES; if (miles === myMiles()) return;
   const city = (S.profile.city || "").trim();
@@ -1693,8 +1693,8 @@ function curateBody() {
   const all = filtered.length ? filtered : nights, shown = S._curMore === curFilter ? all : all.slice(0, 4), extra = all.length - shown.length;
   const phaseText = { starting: "Warming up", searching: "Searching what's on and pairing places to eat", sorting: "Sorting the good ones" }[S._curPhase] || "Looking around";
   const lead = !d && !S._curError ? `Give me a minute. ${phaseText} within ${myMiles()} miles of ${city}…` : S._curError ? "I couldn't look around just now (" + S._curError + "). Try again in a bit." : shown.length ? (filtered.length ? CURATE_LEADS[curFilter] : "Nothing tagged for that yet, so here's everything I found.") : "Nothing yet. Build your own and I'll go looking.";
-  return `<div class="section-head"><h2>${CURATE_LABEL}</h2><button type="button" class="btn primary small" id="curBuild">✨ Build me a night</button></div>
-  <div class="cur-where"><button type="button" class="btn small" id="curCityBtn">📍 ${esc(city)}</button>${milesSelect("curMiles")}</div>
+  return `<div class="section-head"><h2>${CURATE_LABEL}</h2></div>
+  <div class="cur-where"><button type="button" class="btn small cur-city" id="curCityBtn">📍 <span>${esc(city)}</span></button>${milesSelect("curMiles")}<button type="button" class="btn primary small" id="curBuild">✨ Build me a night</button></div>
   <div class="dot-say" style="margin-top:4px">${dot(d ? "happy" : "thinking", 52)}<div class="say-bubble">${esc(lead)}</div></div>
   <div class="chiprow">${CURATE_FILTERS.map(([k, l]) => `<button type="button" class="fchip ${curFilter === k ? "on" : ""}" data-cf="${k}">${l}</button>`).join("")}</div>
   ${!d && !S._curError ? `<div class="card empty compact">${dot("thinking", 64)}<p class="muted" style="margin:6px 0 0">Searching what's on, pairing dinners, checking the times. About half a minute the first time.</p></div>` : ""}
