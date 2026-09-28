@@ -2119,7 +2119,12 @@ function wireStops() {
     const i = +row.dataset.si;
     row.querySelectorAll("[data-sf]").forEach(inp => {
       inp.oninput = () => { H.stops[i][inp.dataset.sf] = inp.value; mirrorFirstStop(); C.save(); };
-      if (inp.dataset.sf === "time") inp.onchange = () => { H.stops[i].time = inp.value; H.stops = sortStops(H.stops); mirrorFirstStop(); C.save(); refreshStops(); };
+      // iOS reports a change every time the time wheel settles, so only store it then; re-sort (which redraws
+      // the list and would close the picker) once the picker is dismissed with the check.
+      if (inp.dataset.sf === "time") {
+        inp.onchange = () => { H.stops[i].time = inp.value; mirrorFirstStop(); C.save(); };
+        inp.onblur = () => { H.stops[i].time = inp.value; const sorted = sortStops(H.stops); if (sorted.some((x, k) => x !== H.stops[k])) { H.stops = sorted; mirrorFirstStop(); C.save(); refreshStops(); } };
+      }
     });
     attachPlaces(row.querySelector(".st-place"));
   });
