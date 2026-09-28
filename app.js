@@ -1888,7 +1888,7 @@ function applyPlan(p, said) {
   if (/^\d{2}:\d{2}$/.test(p.endTime || "")) compose.end = p.endTime;
   compose.where = String(p.location || "").slice(0, 200); compose.food = String(p.food || "").slice(0, 120); compose.notes = String(p.notes || "").slice(0, 1000);
   if (p.capacity > 0) compose.cap = String(Math.min(500, p.capacity));
-  { const st = sortStops(cleanStops(p.stops)); if (st.length >= 2 && compose.kind !== "meeting") { compose.stops = st; compose.time = (st.find(x => x.time) || {}).time || compose.time; compose.where = st[0].place || compose.where; compose.food = ""; defaultWrapUp(); } }
+  { const st = sortStops(cleanStops(p.stops)); if (st.length >= 2) { compose.stops = st; compose.time = (st.find(x => x.time) || {}).time || compose.time; compose.where = st[0].place || compose.where; compose.food = ""; defaultWrapUp(); } }
   compose.questions = (p.questions || []).slice(0, 5).map(q => ({ id: newId().slice(0, 6), q: String(q).slice(0, 120) }));
   const gname = String(p.group || "").trim().toLowerCase();
   const g = gname && [...S.groups.values()].find(x => (x.name || "").trim().toLowerCase() === gname);
@@ -1956,10 +1956,48 @@ function planCard() {
   const ideas = (p.ideas || []).length ? `<div class="idea-row"><span class="muted sm">Want me to…</span>${p.ideas.map((x, i) => `<button type="button" class="idea-chip" data-idea="${i}">＋ ${esc(x.label)}</button>`).join("")}</div>` : (p.applied ? `<div class="muted sm" style="margin-top:6px">That's everything I'd add. Looks good.</div>` : "");
   return `<div class="dot-say plan-card">${dot(miss.length ? "thinking" : "happy", 56)}<div class="say-bubble"><b>${esc(p.summary)}</b>${bits.length ? `<div class="muted sm" style="margin-top:4px">${bits.map(esc).join(" ")}</div>` : ""}${ideas}<div style="margin-top:6px"><a id="planRedo" style="color:var(--accent);font-weight:600">Say it again</a></div></div></div>`;
 }
+// ---- Repeats: Never / week / 2 weeks / month / Custom ("every 3 days", "every 2 months"), with an optional last date.
+const REPEAT_UNITS = [["day", "days"], ["week", "weeks"], ["month", "months"]];
+function repeatLabel(ev) {
+  const r = ev || {}; if (!r.repeat) return "";
+  let s = { weekly: "every week", biweekly: "every 2 weeks", monthly: "every month" }[r.repeat];
+  if (r.repeat === "custom") { const n = Math.max(1, Math.min(30, parseInt(r.repeatEvery, 10) || 1)), u = REPEAT_UNITS.find(x => x[0] === r.repeatUnit) || REPEAT_UNITS[1]; s = n === 1 ? "every " + u[0] : `every ${n} ${u[1]}`; }
+  if (!s) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(r.repeatUntil || "")) { const d = evDate({ date: r.repeatUntil }); s += ` until ${MONTHS[d.getMonth()]} ${d.getDate()}`; }
+  return s;
+}
+function repeatFields(p, r) {
+  r = r || {}; const v = r.repeat || "", custom = v === "custom", n = parseInt(r.repeatEvery, 10) || 1;
+  return `<label class="field"><span>Repeats</span><select id="${p}Repeat">
+      <option value="" ${!v ? "selected" : ""}>Never</option><option value="weekly" ${v === "weekly" ? "selected" : ""}>Every week</option>
+      <option value="biweekly" ${v === "biweekly" ? "selected" : ""}>Every 2 weeks</option><option value="monthly" ${v === "monthly" ? "selected" : ""}>Every month</option>
+      <option value="custom" ${custom ? "selected" : ""}>Custom…</option></select></label>
+    <div class="repeat-custom ${custom ? "" : "hidden"}" id="${p}RepCustom"><span>Every</span><input id="${p}RepEvery" type="number" inputmode="numeric" min="1" max="30" value="${n}" aria-label="How many">
+      <select id="${p}RepUnit" aria-label="Days, weeks or months">${REPEAT_UNITS.map(([u, pl]) => `<option value="${u}" ${(r.repeatUnit || "week") === u ? "selected" : ""}>${n === 1 ? u : pl}</option>`).join("")}</select></div>
+    <label class="field repeat-until ${v ? "" : "hidden"}" id="${p}RepUntilWrap"><span>Last date <span class="muted">(optional)</span></span><input id="${p}RepUntil" type="date" value="${esc(r.repeatUntil || "")}"></label>`;
+}
+function readRepeat(p) {
+  const v = (el(p + "Repeat") || {}).value || "";
+  if (!v) return { repeat: "", repeatEvery: 0, repeatUnit: "", repeatUntil: "" };
+  const until = (el(p + "RepUntil") || {}).value || "";
+  if (v !== "custom") return { repeat: v, repeatEvery: 0, repeatUnit: "", repeatUntil: until };
+  return { repeat: "custom", repeatEvery: Math.max(1, Math.min(30, parseInt((el(p + "RepEvery") || {}).value, 10) || 1)), repeatUnit: (el(p + "RepUnit") || {}).value || "week", repeatUntil: until };
+}
+function wireRepeat(p, onChange) {
+  const sel = el(p + "Repeat"); if (!sel) return;
+  const sync = () => { el(p + "RepCustom").classList.toggle("hidden", sel.value !== "custom"); el(p + "RepUntilWrap").classList.toggle("hidden", !sel.value); if (onChange) onChange(); };
+  sel.onchange = sync;
+  const every = el(p + "RepEvery"), unit = el(p + "RepUnit");
+  // "1 week" / "2 weeks": keep the unit names in step with the number
+  const plural = () => { const n = parseInt(every.value, 10) || 1; [...unit.options].forEach((o, i) => o.textContent = n === 1 ? REPEAT_UNITS[i][0] : REPEAT_UNITS[i][1]); if (onChange) onChange(); };
+  every.oninput = plural; unit.onchange = () => onChange && onChange(); el(p + "RepUntil").onchange = () => onChange && onChange();
+}
 // ---- The plan: one event, several stops (dinner, then bowling, then dessert) ----
 // An event with 2+ stops carries ev.stops = [{ time "HH:MM", emoji, name, place }], kept in time order;
 // ev.time and ev.location mirror the first stop so calendars, weather and the tiles keep working.
 const STOP_CHIPS = [["🍽️", "Dinner"], ["🍸", "Drinks"], ["🎟️", "Show"], ["🎳", "Activity"], ["🍦", "Dessert"]];
+const MEETING_CHIPS = [["📋", "Session"], ["🗣️", "Discussion"], ["☕", "Break"], ["🍽️", "Lunch"], ["🤝", "Wrap-up"]];
+const isMeetingCtx = ctx => (ctx.h.kind || "") === "meeting";
 const STOP_EMOJIS = ["🍽️", "🍔", "🌮", "🍕", "🍣", "🍸", "🍻", "🍷", "☕", "🎟️", "🎬", "🎤", "🎳", "⚾", "🏈", "🎮", "🛍️", "🌳", "🏖️", "🍦", "🎂", "🎉", "🚗", "📍"];
 const stopMins = t => { if (!/^\d{2}:\d{2}$/.test(t || "")) return 99999; const [h, m] = t.split(":").map(Number); return (h < 5 ? h + 24 : h) * 60 + m; };   // 12:30 AM sorts after 10 PM
 // Timed stops sort among themselves; a stop with no time yet stays where it is.
@@ -1979,20 +2017,20 @@ const composeStopCtx = { get h() { return compose; }, card: "stopsCard", head: "
 let stopCtx = composeStopCtx;
 function stopsEditor(ctx = stopCtx) {
   const st = ctx.h.stops || [];
-  const chips = `<div class="chips stop-chips">${STOP_CHIPS.map(([e, n]) => `<button type="button" class="chip" data-addstop="${e}|${n}">${e} ${n}</button>`).join("")}</div>`;
-  if (st.length < 2) return `<p class="muted sm" style="margin:0 0 10px">Doing more than one thing? Add the next stop and it becomes a timeline.</p>${chips}`;
+  const chips = `<div class="chips stop-chips">${(isMeetingCtx(ctx) ? MEETING_CHIPS : STOP_CHIPS).map(([e, n]) => `<button type="button" class="chip" data-addstop="${e}|${n}">${e} ${n}</button>`).join("")}</div>`;
+  if (st.length < 2) return `<p class="muted sm" style="margin:0 0 10px">${isMeetingCtx(ctx) ? "More than one part? Add the next item and it becomes an agenda." : "Doing more than one thing? Add the next stop and it becomes a timeline."}</p>${chips}`;
   return `<div class="tl tl-edit">${st.map((x, i) => `<div class="stop stop-edit" data-si="${i}">
       <div class="stop-top"><button type="button" class="st-emoji" data-semo="${i}" aria-label="Change emoji">${esc(x.emoji || "📍")}</button>
-      <input class="st-name" data-sf="name" maxlength="60" value="${esc(x.name)}" placeholder="${i === 0 ? "First stop, like Dinner" : "Then what?"}" aria-label="What">
+      <input class="st-name" data-sf="name" maxlength="60" value="${esc(x.name)}" placeholder="${i === 0 ? (isMeetingCtx(ctx) ? "First item, like Welcome" : "First stop, like Dinner") : "Then what?"}" aria-label="What">
       <button type="button" class="st-del" data-sdel="${i}" aria-label="Remove stop">✕</button></div>
-      <div class="stop-bot"><input type="time" class="st-time" data-sf="time" value="${esc(x.time)}" aria-label="Time">
-      <div class="st-place-wrap"><input class="st-place" data-sf="place" maxlength="120" value="${esc(x.place)}" placeholder="Where" aria-label="Where" autocomplete="off"></div></div>
+      <div class="stop-bot"><label class="st-f st-f-time"><span>🕒 Time</span><input type="time" class="st-time" data-sf="time" value="${esc(x.time)}"></label>
+      <label class="st-f st-f-place"><span>📍 Where</span><span class="st-place-wrap"><input class="st-place" data-sf="place" maxlength="120" value="${esc(x.place)}" placeholder="Venue or address" autocomplete="off"></span></label></div>
       ${x.note != null && x.note !== "" ? `<input class="st-note" data-sf="note" maxlength="160" value="${esc(x.note)}" placeholder="A tip for this stop" aria-label="Tip">` : ""}
       <div class="st-emo-pick hidden" data-epick="${i}">${STOP_EMOJIS.map(e => `<button type="button" data-pe="${e}">${e}</button>`).join("")}</div>
     </div>`).join("")}</div>
-    <div class="stop-add"><span class="field-label" style="margin:12px 0 6px">Add a stop</span>${chips}</div>`;
+    <div class="stop-add"><span class="field-label" style="margin:12px 0 6px">${isMeetingCtx(ctx) ? "Add an item" : "Add a stop"}</span>${chips}</div>`;
 }
-function stopsHead(ctx = stopCtx) { const n = (ctx.h.stops || []).length; return n >= 2 ? `${n} stops · in time order` : "One stop, or several"; }
+function stopsHead(ctx = stopCtx) { const n = (ctx.h.stops || []).length, m = isMeetingCtx(ctx); return n >= 2 ? `${n} ${m ? "items" : "stops"} · in time order` : m ? "One part, or several" : "One stop, or several"; }
 function refreshStops() { const c = el(stopCtx.card); if (!c) return; c.innerHTML = stopsEditor(); const h = el(stopCtx.head); if (h) h.textContent = stopsHead(); document.querySelectorAll("." + stopCtx.hide).forEach(n => n.classList.toggle("hidden", (stopCtx.h.stops || []).length >= 2)); if (stopCtx.endLbl && el(stopCtx.endLbl)) el(stopCtx.endLbl).textContent = (stopCtx.h.stops || []).length >= 2 ? "Wraps up" : "End"; wireStops(); }
 // The first stop mirrors Start and Where, so the preview, weather and calendar stay right.
 const lastStopTime = st => st.filter(x => stopMins(x.time) < 99999).reduce((m, x) => !m || stopMins(x.time) > stopMins(m) ? x.time : m, "");
@@ -2100,12 +2138,12 @@ function composeBody() {
       <label class="field stops-hide ${(compose.stops || []).length >= 2 ? "hidden" : ""}"><span>Where</span><input id="cWhere" maxlength="90" value="${esc(compose.where)}" placeholder="Address or vibe"></label>
       ${compose.kind === "meeting" ? "" : `<label class="field stops-hide ${(compose.stops || []).length >= 2 ? "hidden" : ""}"><span>Food &amp; drinks <span class="muted">(optional)</span></span><input id="cFood" maxlength="120" value="${esc(compose.food || "")}" placeholder="Tacos and margs · BYOB · we'll order pizza"></label>`}
       <label class="field"><span>The details</span><textarea id="cNotes" maxlength="600" placeholder="Dress code, what to bring, parking…">${esc(compose.notes)}</textarea></label>
-      <label class="field"><span>Repeats</span><select id="cRepeat"><option value="" ${!compose.repeat ? "selected" : ""}>Never</option><option value="weekly" ${compose.repeat === "weekly" ? "selected" : ""}>Every week</option><option value="biweekly" ${compose.repeat === "biweekly" ? "selected" : ""}>Every 2 weeks</option><option value="monthly" ${compose.repeat === "monthly" ? "selected" : ""}>Every month</option></select></label>
+      ${repeatFields("c", compose)}
       <p class="muted sm" style="margin:-4px 0 0">Guests get a calendar invite at their email on file.</p>
     </div>
 
-    ${compose.kind === "meeting" ? "" : `<div class="section-head"><h2>The plan</h2><span class="muted sm" id="stopsHead">${stopsHead()}</span></div>
-    <div class="form-card card stops-card" id="stopsCard">${stopsEditor()}</div>`}
+    <div class="section-head"><h2>${compose.kind === "meeting" ? "Agenda" : "The plan"}</h2><span class="muted sm" id="stopsHead">${stopsHead()}</span></div>
+    <div class="form-card card stops-card" id="stopsCard">${stopsEditor()}</div>
     <div class="section-head"><h2>Who's invited</h2></div>
     <div class="form-card card">
       ${groups.length ? `<label class="field"><span>Invite a whole group</span>
@@ -2215,7 +2253,7 @@ function syncCompose() {
   compose.title = el("cTitle").value; compose.date = el("cDate").value; compose.time = el("cTime").value;
   compose.end = el("cEnd").value; compose.where = el("cWhere").value; compose.notes = el("cNotes").value; if (el("cFood")) compose.food = el("cFood").value;
   compose.cap = el("cCap").value; if (el("cApproval")) compose.approval = el("cApproval").checked;
-  if (el("cRepeat")) compose.repeat = el("cRepeat").value;
+  if (el("cRepeat")) Object.assign(compose, readRepeat("c"));
   // Co-host ticks live only in the DOM otherwise, so any re-render (picking a
   // theme, adding people) used to quietly clear them.
   if (document.querySelector("input[name=coh]")) compose.cohosts = new Set([...document.querySelectorAll("input[name=coh]:checked")].map(i => i.value));
@@ -2233,7 +2271,8 @@ function wireCompose() {
     el("cPvDate").textContent = dv ? evDate({ date: dv }).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }) + (tv ? " · " + fmtTime(tv) : "") : "Pick a date";
   };
   ["cTitle", "cDate", "cTime", "cEnd", "cWhere", "cNotes", "cCap"].forEach(id => el(id).oninput = () => { if (id === "cEnd") compose._endAuto = false; syncCompose(); upd(); }); upd();
-  document.querySelectorAll("input[name=coh], #cApproval, #cRepeat").forEach(i => i.onchange = syncCompose);
+  document.querySelectorAll("input[name=coh], #cApproval").forEach(i => i.onchange = syncCompose);
+  wireRepeat("c", syncCompose);
   attachPlaces(el("cWhere"));
   wireStops();
   wireCover();
@@ -2293,7 +2332,7 @@ async function createEvent() {
   const phoneInviteesSnapshot = [...compose.phoneInvitees];
   const cohostUids = [...document.querySelectorAll('input[name=coh]:checked')].map(i => i.value).filter(u => u !== myUid());
   const questions = compose.questions.filter(q => q.q.trim());
-  const stopsOut = compose.kind === "meeting" ? [] : (() => { const st = sortStops(cleanStops(compose.stops)); return st.length >= 2 ? st : []; })();
+  const stopsOut = (() => { const st = sortStops(cleanStops(compose.stops)); return st.length >= 2 ? st : []; })();
   if (stopsOut.length) { const last = lastStopTime(stopsOut), end = el("cEnd").value; if (last && end && stopMins(end) < stopMins(last)) return toast("“Wraps up” is before the last stop. Pick a later time.", null, null, "thinking"); }
   const id = newId();
   const ev = {
@@ -2308,7 +2347,7 @@ async function createEvent() {
     // The event's own unguessable id is the access token behind the "add people" flow
     // (anyone with the link can open + join), so it's always on now.
     openLink: true,
-    kind: compose.kind === "meeting" ? "meeting" : "event", repeat: el("cRepeat") ? el("cRepeat").value : "",
+    kind: compose.kind === "meeting" ? "meeting" : "event", ...readRepeat("c"),
     invitedPhones, invitedPhoneNames, guestEmails: [], sequence: 0,
     createdAt: Date.now()
   };
@@ -2337,11 +2376,12 @@ let eventBgStop = () => {};
 function cleanupEvent() { S.evSubs.forEach(fn => fn()); S.evSubs = []; eventBgStop(); eventBgStop = () => {}; }
 // The plan on the event page: a timeline of stops. On the day itself, the stop underway is marked Now,
 // earlier ones fade, and the next one is marked Up next; every stop with a place opens directions.
-function planCardHtml(ev) {
+function planCardHtml(ev, plain) {
   const st = evStops(ev); if (!st.length) return "";
+  const meeting = ev.kind === "meeting";
   const today = ev.date === todayStr(), d = new Date(), nowM = (d.getHours() < 5 ? d.getHours() + 24 : d.getHours()) * 60 + d.getMinutes();
   let cur = -1; if (today) st.forEach((x, i) => { if (stopMins(x.time) <= nowM) cur = i; });
-  return `<div class="ev-card-glass plan-card" id="planCard"><div class="glass-head">The plan <span>${st.length} stops</span></div>
+  return `<div class="${plain ? "card th-plain" : "ev-card-glass"} plan-card" id="planCard"><div class="glass-head">${meeting ? "Agenda" : "The plan"} <span>${st.length} ${meeting ? "items" : "stops"}</span></div>
     <div class="tl tl-ev">${st.map((x, i) => { const state = !today ? "" : i < cur ? "done" : i === cur ? "cur" : i === cur + 1 ? "next" : "";
       return `<div class="stop ${state}"><span class="t">${x.time ? esc(fmtTime(x.time)) : ""}</span><span class="e">${esc(x.emoji || "📍")}</span>
         <span class="stop-txt"><b>${esc(x.name || x.place)}${state === "cur" ? ` <span class="stop-pill now">Now</span>` : state === "next" ? ` <span class="stop-pill">Up next</span>` : ""}</b>${x.name && x.place ? `<small>${esc(placeLine(x))}</small>` : ""}${x.note ? `<small class="stop-note">${esc(x.note)}</small>` : ""}</span>
@@ -3078,7 +3118,7 @@ function downloadIcs(ev) {
 }
 async function delEvent(ev) { if (isDemo() && DEMO_EVENTS.includes(ev.id)) return toast("Deleting this demo event is off -- it resets nightly instead."); if (!confirm(`Delete “${ev.title}”?`)) return; try { await deleteDoc(doc(db, "events", ev.id)); go("#/"); toast("Event deleted"); } catch (e) { toast(e.message); } }
 function editEvent(ev) {
-  const E = { stops: evStops(ev).map(x => ({ ...x })), time: ev.time || "", where: ev.location || "", emoji: ev.emoji || "📍" };
+  const E = { stops: evStops(ev).map(x => ({ ...x })), time: ev.time || "", where: ev.location || "", emoji: ev.emoji || "📍", kind: ev.kind || "event" };
   const ectx = { h: E, card: "eStopsCard", head: "eStopsHead", time: "eTime", where: "eWhere", hide: "estops-hide", save: () => {}, before: null };
   const many = E.stops.length >= 2;
   dialog(`<h3>Edit event</h3>
@@ -3086,17 +3126,17 @@ function editEvent(ev) {
     <div class="two"><label class="field"><span>Date</span><input id="eDate" type="date" value="${ev.date}"></label>
     <label class="field estops-hide ${many ? "hidden" : ""}"><span>Start</span><input id="eTime" type="time" value="${ev.time || ""}"></label></div>
     <label class="field estops-hide ${many ? "hidden" : ""}"><span>Where</span><input id="eWhere" value="${esc(ev.location || "")}"></label>
-    ${ev.kind === "meeting" ? "" : `<span class="field-label" style="display:flex;justify-content:space-between;margin-top:6px">The plan <small class="muted" id="eStopsHead">${stopsHead(ectx)}</small></span><div class="stops-card in-dialog" id="eStopsCard">${stopsEditor(ectx)}</div>`}
+    <span class="field-label" style="display:flex;justify-content:space-between;margin-top:6px">${ev.kind === "meeting" ? "Agenda" : "The plan"} <small class="muted" id="eStopsHead">${stopsHead(ectx)}</small></span><div class="stops-card in-dialog" id="eStopsCard">${stopsEditor(ectx)}</div>
     ${ev.kind === "meeting" ? "" : `<label class="field estops-hide ${many ? "hidden" : ""}"><span>Food &amp; drinks</span><input id="eFood" maxlength="120" value="${esc(ev.food || "")}" placeholder="Tacos and margs · BYOB"></label>`}
-    <label class="field"><span>Repeats</span><select id="eRepeat"><option value="" ${!ev.repeat ? "selected" : ""}>Never</option><option value="weekly" ${ev.repeat === "weekly" ? "selected" : ""}>Every week</option><option value="biweekly" ${ev.repeat === "biweekly" ? "selected" : ""}>Every 2 weeks</option><option value="monthly" ${ev.repeat === "monthly" ? "selected" : ""}>Every month</option></select></label>
+    ${repeatFields("e", ev)}
     <label class="field"><span>Details</span><textarea id="eNotes">${esc(ev.notes || "")}</textarea></label>
     <span class="field-label" style="margin-top:10px">Co-hosts (can edit &amp; manage)</span><div class="check-grid">${contactChecks("ecoh", new Set(ev.cohostUids || []))}</div>`,
     "Save", async () => {
       const cohostUids = [...document.querySelectorAll("input[name=ecoh]:checked")].map(i => i.value).filter(u => u !== ev.hostId);
-      try { await updateDoc(doc(db, "events", ev.id), { cohostUids, ...(cohostUids.length ? { invitedUids: arrayUnion(...cohostUids) } : {}), title: el("eTitle").value.trim(), date: el("eDate").value, ...(() => { const st = sortStops(cleanStops(E.stops)); return st.length >= 2 ? { stops: st, time: (st.find(x => x.time) || {}).time || el("eTime").value, location: st[0].place || el("eWhere").value.trim(), food: "" } : { stops: [], time: el("eTime").value, location: el("eWhere").value.trim() }; })(), ...(el("eFood") && cleanStops(E.stops).length < 2 ? { food: el("eFood").value.trim() } : {}), notes: el("eNotes").value.trim(), repeat: el("eRepeat").value }); closeDialog(); toast("Saved"); } catch (e) { toast(e.message); }
+      try { await updateDoc(doc(db, "events", ev.id), { cohostUids, ...(cohostUids.length ? { invitedUids: arrayUnion(...cohostUids) } : {}), title: el("eTitle").value.trim(), date: el("eDate").value, ...(() => { const st = sortStops(cleanStops(E.stops)); return st.length >= 2 ? { stops: st, time: (st.find(x => x.time) || {}).time || el("eTime").value, location: st[0].place || el("eWhere").value.trim(), food: "" } : { stops: [], time: el("eTime").value, location: el("eWhere").value.trim() }; })(), ...(el("eFood") && cleanStops(E.stops).length < 2 ? { food: el("eFood").value.trim() } : {}), notes: el("eNotes").value.trim(), ...readRepeat("e") }); closeDialog(); toast("Saved"); } catch (e) { toast(e.message); }
     });
   attachPlaces(el("eWhere"));
-  stopCtx = ectx; wireStops();
+  stopCtx = ectx; wireStops(); wireRepeat("e");
 }
 
 // ---------- MONEY ----------
@@ -3525,12 +3565,13 @@ function meetingBody(ev) {
   return `
   <button class="link-back" data-go="#/">‹ Back</button>
   <div class="group-hero"><span class="li" style="width:52px;height:52px;font-size:24px">📅</span>
-    <div><h1>${esc(ev.title)}</h1><div class="muted">${esc(fmtWhen(ev))} · ${countdown(ev)}${ev.repeat ? " · repeats " + { weekly: "weekly", biweekly: "every 2 weeks", monthly: "monthly" }[ev.repeat] : ""}</div></div></div>
+    <div><h1>${esc(ev.title)}</h1><div class="muted">${esc(fmtWhen(ev))} · ${countdown(ev)}${repeatLabel(ev) ? " · repeats " + esc(repeatLabel(ev)) : ""}</div></div></div>
   <div class="card" style="padding:14px 16px">
-    ${ev.location ? `<p style="margin:0 0 8px">📍 <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">${esc(ev.location)}</a></p>` : ""}
+    ${ev.location && !evStops(ev).length ? `<p style="margin:0 0 8px">📍 <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">${esc(ev.location)}</a></p>` : ""}
     <p class="muted" style="margin:0 0 8px">Organized by ${esc(nameOf(ev.hostId) === "Someone" ? (ev.hostName || "the organizer") : nameOf(ev.hostId))}</p>
     ${ev.notes ? `<p style="margin:0;white-space:pre-wrap">${esc(ev.notes)}</p>` : ""}
   </div>
+  ${planCardHtml(ev, true)}
   ${invited ? `<div class="btnrow" style="margin-top:14px">
     <button class="btn ${myR === "going" ? "primary" : ""}" data-rsvp="going">${myR === "going" ? "✓ Accepted" : "Accept"}</button>
     <button class="btn ${myR === "maybe" ? "primary" : ""}" data-rsvp="maybe">${myR === "maybe" ? "✓ Maybe" : "Maybe"}</button>
@@ -3593,7 +3634,7 @@ function meetingCard(ev) {
       <div class="ev-card-text">
         <div class="ev-card-title">${esc(ev.title)}</div>
         <div class="ev-card-date">${MONTHS[d.getMonth()]} ${d.getDate()}${ev.time ? " · " + fmtTime(ev.time) : ""}${evStops(ev).length ? ` · <span class="ev-route">${evStops(ev).slice(0, 4).map(x => esc(x.emoji || "📍")).join("<i>›</i>")}</span>` : ""}</div>
-        ${ev.location ? `<div class="ev-card-loc">📍 ${esc(ev.location)}</div>` : ""}
+        ${evStops(ev).length ? `<div class="ev-card-loc">📋 ${evStops(ev).length} items</div>` : ev.location ? `<div class="ev-card-loc">📍 ${esc(ev.location)}</div>` : ""}
         <div class="ev-card-foot">
           <span class="mini-guests">${guests.map(u => avatar(u, "xs")).join("")}${(ev.invitedUids || []).length > 3 ? `<span class="more">+${ev.invitedUids.length - 3}</span>` : ""}</span>
           <span class="count">${going} accepted</span>

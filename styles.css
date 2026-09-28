@@ -687,9 +687,13 @@ html{background:var(--bg)}
 .tl-edit .stop-edit{flex-direction:column;align-items:stretch;gap:6px;background:var(--bg);border:1px solid var(--line)}
 .stop-top{display:flex;gap:6px;align-items:center}
 .stop-edit input{border:1px solid var(--line);border-radius:10px;padding:7px 9px;background:var(--surface);min-width:0}
-.stop-bot{display:flex;gap:6px;align-items:center}
-.stop-edit .st-time{flex:0 0 auto;width:auto;max-width:44%;font-variant-numeric:tabular-nums}
-.st-place-wrap{flex:1;min-width:0;position:relative}
+.stop-bot{display:flex;gap:8px;align-items:flex-end}
+.st-f{display:flex;flex-direction:column;gap:3px;min-width:0}
+.st-f>span:first-child{font:600 11px/1 var(--body);color:var(--muted);letter-spacing:.02em;padding-left:2px}
+.st-f-time{flex:0 0 auto;max-width:46%}
+.st-f-place{flex:1}
+.stop-edit .st-time{width:100%;min-width:118px;font-variant-numeric:tabular-nums}
+.st-place-wrap{display:block;min-width:0;position:relative}
 .st-place-wrap .places-list{position:absolute;left:0;right:0;top:100%;z-index:30}
 .stop-edit .st-name{flex:1;font-weight:600}
 .stop-edit .st-place{width:100%}
@@ -723,3 +727,8 @@ html{background:var(--bg)}
 .ev-route i{font-style:normal;opacity:.7;margin:0 1px;font-size:.9em}
 .tl-ev .stop-txt small.stop-note{white-space:normal;opacity:.85;font-style:italic;margin-top:2px}
 .stop-edit .st-note{width:100%;font-size:13px;color:var(--muted)}
+
+/* Repeats: Custom ("Every 3 weeks") and an optional last date */
+.repeat-custom{display:flex;align-items:center;gap:8px;margin:-4px 0 12px;font-weight:600}
+.repeat-custom input{width:64px;text-align:center;border:1px solid var(--line);border-radius:10px;padding:8px;background:var(--bg)}
+.repeat-custom select{width:auto;flex:1;max-width:160px}

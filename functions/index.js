@@ -634,11 +634,15 @@ async function writePreview(id, ev) {
 }
 
 // ---- Recurring events: the next occurrence is created the day after one passes ----
-function addPeriod(date, repeat) {
+// ev.repeat: weekly | biweekly | monthly | custom (repeatEvery 1-30 × repeatUnit day|week|month); ev.repeatUntil ends the series.
+function addPeriod(date, ev) {
+  const r = typeof ev === "string" ? { repeat: ev } : (ev || {});
+  let unit = "week", n = 1;
+  if (r.repeat === "biweekly") n = 2;
+  else if (r.repeat === "monthly") unit = "month";
+  else if (r.repeat === "custom") { unit = ["day", "week", "month"].includes(r.repeatUnit) ? r.repeatUnit : "week"; n = Math.max(1, Math.min(30, parseInt(r.repeatEvery, 10) || 1)); }
   const [y, m, d] = date.split("-").map(Number);
-  let x;
-  if (repeat === "monthly") { x = new Date(Date.UTC(y, m, Math.min(d, 28))); }
-  else x = new Date(Date.UTC(y, m - 1, d + (repeat === "biweekly" ? 14 : 7)));
+  const x = unit === "month" ? new Date(Date.UTC(y, m - 1 + n, Math.min(d, 28))) : new Date(Date.UTC(y, m - 1, d + (unit === "day" ? n : 7 * n)));
   return x.toISOString().slice(0, 10);
 }
 
@@ -1189,10 +1193,12 @@ exports.dailyReminders = onSchedule({ schedule: "0 9 * * *", timeZone: "America/
 
   // Repeating events: once an occurrence has passed, create the next one
   // (copies everything, resets RSVPs) and retire the old one from the series.
-  const rep = await db.collection("events").where("repeat", "in", ["weekly", "biweekly", "monthly"]).where("date", "<", today).get();
+  const rep = await db.collection("events").where("repeat", "in", ["weekly", "biweekly", "monthly", "custom"]).where("date", "<", today).get();
   for (const doc of rep.docs) {
     const ev = doc.data(); let next = ev.date; let guard = 0;
-    while (next < today && guard++ < 400) next = addPeriod(next, ev.repeat);
+    while (next < today && guard++ < 400) next = addPeriod(next, ev);
+    // Past the series' last date: the series simply ends.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(ev.repeatUntil || "") && next > ev.repeatUntil) { await doc.ref.update({ repeat: "" }); continue; }
     const copy = { ...ev, date: next, rsvps: { [ev.hostId]: "going" }, plusOnes: {}, hypes: {}, answers: {}, createdAt: Date.now(), sequence: 0, seriesId: ev.seriesId || doc.id, prevId: doc.id };
     delete copy.nextId;
     const ref = await db.collection("events").add(copy);
