@@ -687,9 +687,13 @@ html{background:var(--bg)}
 .tl-edit .stop-edit{flex-direction:column;align-items:stretch;gap:6px;background:var(--bg);border:1px solid var(--line)}
 .stop-top{display:flex;gap:6px;align-items:center}
 .stop-edit input{border:1px solid var(--line);border-radius:10px;padding:7px 9px;background:var(--surface);min-width:0}
-.stop-edit .st-time{width:132px;flex:none;font-variant-numeric:tabular-nums}
+.stop-bot{display:flex;gap:6px;align-items:center}
+.stop-edit .st-time{flex:0 0 auto;width:auto;max-width:44%;font-variant-numeric:tabular-nums}
+.st-place-wrap{flex:1;min-width:0;position:relative}
+.st-place-wrap .places-list{position:absolute;left:0;right:0;top:100%;z-index:30}
 .stop-edit .st-name{flex:1;font-weight:600}
 .stop-edit .st-place{width:100%}
+.stop-edit .st-name{font-size:15px}
 .st-emoji{font-size:20px;width:38px;height:36px;border-radius:10px;background:var(--surface2);flex:none}
 .st-del{width:30px;height:30px;border-radius:50%;color:var(--muted);flex:none}
 .st-emo-pick{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;padding-top:4px}

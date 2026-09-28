@@ -1979,11 +1979,11 @@ function stopsEditor(ctx = stopCtx) {
   const chips = `<div class="chips stop-chips">${STOP_CHIPS.map(([e, n]) => `<button type="button" class="chip" data-addstop="${e}|${n}">${e} ${n}</button>`).join("")}</div>`;
   if (st.length < 2) return `<p class="muted sm" style="margin:0 0 10px">Doing more than one thing? Add the next stop and it becomes a timeline.</p>${chips}`;
   return `<div class="tl tl-edit">${st.map((x, i) => `<div class="stop stop-edit" data-si="${i}">
-      <div class="stop-top"><input type="time" class="st-time" data-sf="time" value="${esc(x.time)}" aria-label="Time">
-      <button type="button" class="st-emoji" data-semo="${i}" aria-label="Change emoji">${esc(x.emoji || "📍")}</button>
+      <div class="stop-top"><button type="button" class="st-emoji" data-semo="${i}" aria-label="Change emoji">${esc(x.emoji || "📍")}</button>
       <input class="st-name" data-sf="name" maxlength="60" value="${esc(x.name)}" placeholder="${i === 0 ? "First stop, like Dinner" : "Then what?"}" aria-label="What">
       <button type="button" class="st-del" data-sdel="${i}" aria-label="Remove stop">✕</button></div>
-      <input class="st-place" data-sf="place" maxlength="120" value="${esc(x.place)}" placeholder="Where" aria-label="Where" autocomplete="off">
+      <div class="stop-bot"><input type="time" class="st-time" data-sf="time" value="${esc(x.time)}" aria-label="Time">
+      <div class="st-place-wrap"><input class="st-place" data-sf="place" maxlength="120" value="${esc(x.place)}" placeholder="Where" aria-label="Where" autocomplete="off"></div></div>
       <div class="st-emo-pick hidden" data-epick="${i}">${STOP_EMOJIS.map(e => `<button type="button" data-pe="${e}">${e}</button>`).join("")}</div>
     </div>`).join("")}</div>
     <div class="stop-add"><span class="field-label" style="margin:12px 0 6px">Add a stop</span>${chips}</div>`;
