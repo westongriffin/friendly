@@ -1898,7 +1898,7 @@ function openNightBuilder() {
     const [from, to] = windowFor();
     box.innerHTML = `<div class="dot-say">${dot("thinking", 52)}<div class="say-bubble">On it. Searching what's on, pairing a place to eat, checking the times. Give me half a minute.</div></div><p class="muted sm">${esc(crumbs())}</p>`;
     try {
-      const res = await requestViaFirestore("planRequests", { mode: "night", city, miles: myMiles(), vibe: B.vibe, who: B.who, budget: B.budget, free: B.free, from, to, ...nowCtx() }, 240000);
+      const res = await requestViaFirestore("planRequests", { mode: "night", city, miles: myMiles(), vibe: B.vibe, who: B.who, budget: B.budget, free: B.free, from, to, ...nowCtx() }, 290000);
       const nights = (res.data && res.data.nights) || []; if (!nights.length) throw new Error("nothing found");
       box.innerHTML = `<div class="dot-say">${dot("happy", 52)}<div class="say-bubble">Three ways to do it. Pick one and I'll set it up, or send all three to the group as a poll.</div></div>
         <div class="btnrow" style="gap:6px;margin:0 0 10px;flex-wrap:wrap"><button type="button" class="btn primary small" id="nbPollAll">Poll the group with all three</button><button type="button" class="btn small" id="nbAgain">Try another three</button></div>

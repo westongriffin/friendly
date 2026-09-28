@@ -375,11 +375,22 @@ ${q}`;
 //      with a place to eat and the logistics, and the app turns a pick into a plan, a poll, tickets or a table.
 //      curated/{cityKey} is rebuilt nightly for every city someone has set; "night" mode builds three on demand.
 const TAGS = ["weekend", "tonight", "date", "group", "cheap", "family"];
-async function askGrounded(prompt, maxTokens = 6000, onPhase, thinking = 0) {
+// The search tool sometimes loops on a broken call (empty answer) or apologizes instead of searching.
+// Try fast first, then with a little thinking, then once more with a bit more variety; each try has its own time limit.
+async function askGroundedReliably(prompt, maxTokens, onPhase, label) {
+  const tries = [{ thinking: 0, timeoutMs: 60000 }, { thinking: 1024, timeoutMs: 95000 }, { thinking: 1024, timeoutMs: 95000, temperature: 0.9 }];
+  let last;
+  for (let i = 0; i < tries.length; i++) {
+    try { return await askGrounded(prompt, maxTokens, i ? null : onPhase, tries[i].thinking, tries[i]); }
+    catch (err) { last = err; logger.warn(`${label} try ${i + 1} failed: ${err.message.slice(0, 100)}`); }
+  }
+  throw last;
+}
+async function askGrounded(prompt, maxTokens = 6000, onPhase, thinking = 0, opts = {}) {
   const token = (await (await gauth.getClient()).getAccessToken()).token;
   const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${LOCATION}/publishers/google/models/${PLAN_MODEL}:generateContent`;
-  const body = { contents: [{ role: "user", parts: [{ text: prompt }] }], tools: [{ googleSearch: {} }], generationConfig: { temperature: 0.4, maxOutputTokens: maxTokens + (thinking ? 3000 : 0), thinkingConfig: { thinkingBudget: thinking } } };
-  const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 200000);
+  const body = { contents: [{ role: "user", parts: [{ text: prompt }] }], tools: [{ googleSearch: {} }], generationConfig: { temperature: opts.temperature || 0.4, maxOutputTokens: maxTokens + (thinking ? 3000 : 0), thinkingConfig: { thinkingBudget: thinking } } };
+  const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), opts.timeoutMs || 200000);
   const t0 = Date.now(); if (onPhase) await onPhase("searching");
   let r; try { r = await fetch(url, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body), signal: ctl.signal }); }
   catch (e) { throw new Error(e.name === "AbortError" ? "the search took too long" : e.message); } finally { clearTimeout(timer); }
@@ -437,7 +448,7 @@ async function curateCity(d, onPhase) {
   const one = async kind => {
     const prompt = `You are Dot, the helper in Friendly, an app friends use to plan nights out. Using search, find real, specific things happening ${area} (today is ${today}, ${sv(d.weekday, 10)}; nothing after ${endStr}). Build exactly 4 different nights ${CURATE_KINDS[kind](weekendFrom, today)}. Each pairs one thing to do with one real place to eat or drink within a short walk or drive, with times that work in sequence. Make the 4 genuinely different (different neighborhoods or kinds of thing). Only things friends would actually want to go out for: skip civic and informational events (safety fairs, seminars, council meetings, workshops, expos for businesses). Include "${kind}" in every night's tags, plus any other tags that apply. Keep strings short; at most 3 stops per night; no markdown. ${nightShape}`;
     // Fast first; if the search tool answers with an apology, try again letting the model think (slower, far more reliable).
-    let raw; try { raw = await askGrounded(prompt, 2600, started ? null : (started = true, onPhase)); } catch (err) { logger.warn("curate " + kind + " retry: " + err.message.slice(0, 100)); raw = await askGrounded(prompt, 2600, null, 1024); }
+    const raw = await askGroundedReliably(prompt, 2600, started ? null : (started = true, onPhase), "curate " + kind);
     return raw.map(cleanNight).map(n => ({ ...n, src: kind, tags: [...new Set([kind, ...n.tags])] }));
   };
   const results = await Promise.allSettled(Object.keys(CURATE_KINDS).map(one));
@@ -482,7 +493,7 @@ async function buildNight(d) {
 The ask: vibe "${sv(d.vibe, 30) || "surprise me"}", for ${sv(d.who, 30) || "a few friends"}, budget ${sv(d.budget, 30) || "flexible"} per person all in.${d.free ? " Also: " + sv(d.free, 300) + "." : ""}
 Make the three genuinely different from each other (different neighborhoods or kinds of thing). Each pairs one thing to do with one real place to eat or drink nearby, with times that work in sequence. Respect the budget and the group size (bar tables and counter service for big groups, a reservation for a date). ${nightShape}`;
   // The search tool now and then answers with an apology instead of results; one retry usually gets them.
-  let raw; try { raw = await askGrounded(prompt, 3000, d.onPhase); } catch (err) { logger.warn("night build retry: " + err.message.slice(0, 120)); raw = await askGrounded(prompt, 3000, null, 1024); }
+  const raw = await askGroundedReliably(prompt, 3000, d.onPhase, "night build");
   const nights = raw.map(cleanNight).filter(n => n.title && n.date && n.stops.length).slice(0, 3);
   if (!nights.length) throw new Error("nothing found");
   return nights;
