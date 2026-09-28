@@ -63,8 +63,11 @@ if (/^[a-f0-9]{8,64}$/i.test(RESET_PARAMS.get("p") || "")) history.replaceState(
 // since the app shell also loads this same origin) belongs in the App Store,
 // not the mobile web build. Full-screen block, no way to continue in browser.
 const APP_STORE_URL = "https://apps.apple.com/app/id6810875052";
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
+// Flip PLAY_LIVE to true once the Google Play listing is published; until then Android phones use the website.
+const PLAY_LIVE = false, PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.officialfriendly.app";
 // The public demo (?demo=1 from wes-griffin.com) stays on the web on phones too.
-const BLOCKED_MOBILE_WEB = !NATIVE && !RESET_OOB && !RESET_PARAMS.get("demo") && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+const BLOCKED_MOBILE_WEB = !NATIVE && !RESET_OOB && !RESET_PARAMS.get("demo") && (/iPhone|iPad|iPod/i.test(navigator.userAgent) || (IS_ANDROID && PLAY_LIVE));
 // iOS slides the page up behind a dialog to make room for the keyboard and leaves it there afterwards.
 // Remember where the page was when a dialog field takes focus and put it back once the keyboard is gone.
 let kbSavedY = null;
@@ -82,11 +85,11 @@ if (BLOCKED_MOBILE_WEB) {
     <div class="auth-bg"></div>
     <div class="auth-card card">
       <div class="brand xl">Friend<span class="tilt">l</span>y</div>
-      <p class="auth-lede">Friendly is best on the app. Taking you to the App Store…</p>
-      <a class="btn primary lg" href="${APP_STORE_URL}">Get the Friendly app</a>
+      <p class="auth-lede">Friendly is best on the app. Taking you to ${IS_ANDROID ? "Google Play" : "the App Store"}…</p>
+      <a class="btn primary lg" href="${IS_ANDROID ? PLAY_STORE_URL : APP_STORE_URL}">Get the Friendly app</a>
     </div>
   </div>`;
-  location.href = APP_STORE_URL;
+  location.href = IS_ANDROID ? PLAY_STORE_URL : APP_STORE_URL;
 }
 // Native plugins: the shell loads this site remotely, so no bundled JS registers the
 // plugins. Capacitor.Plugins is empty until registerPlugin() is called for a plugin
@@ -110,6 +113,13 @@ function wireAppLinks() {
   });
 }
 if (NATIVE) wireAppLinks();
+// Android's back button/gesture: close an open dialog or tour first, then go back a page, and only leave the app from Events.
+if (NATIVE && IS_ANDROID) { const AppPlugin = plugin("App"); if (AppPlugin && AppPlugin.addListener) AppPlugin.addListener("backButton", () => {
+  if (typeof tourStep !== "undefined" && tourStep >= 0) return endTour();
+  if (document.querySelector("#appDialog[open], dialog[open]")) return closeDialog();
+  if (location.hash && location.hash !== "#/" && location.hash !== "#") return history.length > 1 ? history.back() : go("#/");
+  if (AppPlugin.exitApp) AppPlugin.exitApp();
+}); }
 // ---------- "We've updated the app" banner (native only) ----------
 // Each launch compares the installed version with what the App Store lists
 // (Apple's public lookup API, CORS-enabled). A phone with no App plugin is on
@@ -117,7 +127,7 @@ if (NATIVE) wireAppLinks();
 let updateAvail = null, updateDismissed = false;
 const verCmp = (a, b) => { const A = String(a).split(".").map(Number), B = String(b).split(".").map(Number); for (let i = 0; i < Math.max(A.length, B.length); i++) { const d = (A[i] || 0) - (B[i] || 0); if (d) return d; } return 0; };
 async function checkForUpdate() {
-  if (!NATIVE) return;
+  if (!NATIVE || IS_ANDROID) return;   // Google Play updates apps on its own
   try {
     const AppPlugin = plugin("App"); let installed = "";
     if (AppPlugin && AppPlugin.getInfo) { try { installed = (await AppPlugin.getInfo()).version || ""; } catch {} }

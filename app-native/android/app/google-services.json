@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "346490178887",
+    "project_id": "friendly-6992a",
+    "storage_bucket": "friendly-6992a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:346490178887:android:b3d9b0dc66cffabec39062",
+        "android_client_info": {
+          "package_name": "com.officialfriendly.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "346490178887-qs9ajevr12bgq0k5li9gsmt703ngfu46.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD74hnsBGH8mKYql6Ybl63R9JaAVemT9gM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "346490178887-qs9ajevr12bgq0k5li9gsmt703ngfu46.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "346490178887-tjeakejibmj7fehr01lfdqq3qavvti0a.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.officialfriendly.app"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
