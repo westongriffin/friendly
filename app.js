@@ -1214,7 +1214,7 @@ function homeBody() {
   </div>` : "";
 
   const todayEvs = upcoming.filter(e => e.date === todayStr()).slice(0, 2);
-  const todayCards = todayEvs.map(e => `<div class="card notif-card today-card" data-ev="${e.id}" role="button">${dotHat(56)}<div style="flex:1;min-width:0"><div class="eyebrow-sm">Today</div><b>${esc(e.title)}${e.time ? " · " + fmtTime(e.time) : ""}</b><div class="muted sm">${e.kind === "meeting" ? (e.invitedUids || []).filter(u => (e.rsvps || {})[u] === "going").length + " accepted" : goingCount(e) + " going"}${e.location ? " · " + esc(e.location) : ""}</div></div><span class="chev">›</span></div>`).join("");
+  const todayCards = todayEvs.map(e => `<div class="card notif-card today-card" data-ev="${e.id}" role="button">${dotHat(56)}<div style="flex:1;min-width:0"><div class="eyebrow-sm">Today</div><b>${esc(e.title)}${e.time ? " · " + fmtTime(e.time) : ""}</b><div class="muted sm">${e.kind === "meeting" ? (e.invitedUids || []).filter(u => (e.rsvps || {})[u] === "going").length + " accepted" : goingCount(e) + " going"}${evStops(e).length ? " · " + evStops(e).length + " stops" : e.location ? " · " + esc(e.location) : ""}</div></div><span class="chev">›</span></div>`).join("");
   if ((S.profile.city || "").trim()) ensureCurated();
   return `
   ${notifCard()}
@@ -2405,7 +2405,7 @@ function eventInner(ev) {
     <h1 class="ev-title">${esc(ev.title)}</h1>
     <div class="ev-when">${esc(fmtWhen(ev))}</div>
     <div class="ev-count">${countdown(ev)}</div>
-    ${evStops(ev).length ? `<div class="ev-where"><button type="button" class="ev-where-btn" data-jump="planCard">🗺️ ${evStops(ev).length} stops · starts at ${esc(evStops(ev)[0].name || evStops(ev)[0].place)}</button></div>` : ev.location ? `<div class="ev-where"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}" target="_blank" rel="noopener" title="Open in Google Maps">📍 ${esc(ev.location)}</a></div>${/zoom|meet\.google|teams|http|online|call/i.test(ev.location) ? "" : `<details class="map-wrap"><summary>Show map</summary><iframe class="map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="https://maps.google.com/maps?q=${encodeURIComponent(ev.location)}&output=embed" title="Map"></iframe></details>`}` : ""}
+    ${evStops(ev).length ? `<div class="ev-where"><button type="button" class="ev-where-btn" data-jump="planCard">🗺️ ${evStops(ev).length} stops, starting with ${esc(evStops(ev)[0].name || evStops(ev)[0].place)}${evStops(ev)[0].time ? " at " + esc(fmtTime(evStops(ev)[0].time)) : ""}</button></div>` : ev.location ? `<div class="ev-where"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}" target="_blank" rel="noopener" title="Open in Google Maps">📍 ${esc(ev.location)}</a></div>${/zoom|meet\.google|teams|http|online|call/i.test(ev.location) ? "" : `<details class="map-wrap"><summary>Show map</summary><iframe class="map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="https://maps.google.com/maps?q=${encodeURIComponent(ev.location)}&output=embed" title="Map"></iframe></details>`}` : ""}
     ${ev.food ? `<div class="ev-food">🍽️ ${esc(ev.food)}</div>` : ""}
     <div class="ev-hosts">Hosted by ${hosts.map(u => esc(first(nameOf(u)))).join(" & ")}${grp ? ` · <span class="grp-tag">${esc(grp.emoji || "")} ${esc(grp.name)}</span>` : ""}</div>
     ${ev.capacity > 0 ? `<div class="ev-cap ${full ? "full" : ""}">${going} / ${ev.capacity} spots${full ? " · full" : ""}</div>` : ""}
