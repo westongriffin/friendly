@@ -2046,7 +2046,7 @@ function wireRepeat(p, onChange) {
 // ---- The plan: one event, several stops (dinner, then bowling, then dessert) ----
 // An event with 2+ stops carries ev.stops = [{ time "HH:MM", emoji, name, place }], kept in time order;
 // ev.time and ev.location mirror the first stop so calendars, weather and the tiles keep working.
-const STOP_CHIPS = [["🍽️", "Dinner"], ["🍸", "Drinks"], ["🎟️", "Show"], ["🎳", "Activity"], ["🍦", "Dessert"]];
+const STOP_CHIPS = [["🍽️", "Dinner"], ["🍸", "Drinks"], ["🎟️", "Show"], ["🎳", "Activity"], ["🍦", "Dessert"], ["✏️", ""]];   // "" = Custom
 const MEETING_CHIPS = [["📋", "Session"], ["🗣️", "Discussion"], ["☕", "Break"], ["🍽️", "Lunch"], ["🤝", "Wrap-up"], ["✏️", ""]];   // "" = Custom: a blank item to name yourself
 const isMeetingCtx = ctx => (ctx.h.kind || "") === "meeting";
 const STOP_EMOJIS = ["🍽️", "🍔", "🌮", "🍕", "🍣", "🍸", "🍻", "🍷", "☕", "🎟️", "🎬", "🎤", "🎳", "⚾", "🏈", "🎮", "🛍️", "🌳", "🏖️", "🍦", "🎂", "🎉", "🚗", "📍"];
