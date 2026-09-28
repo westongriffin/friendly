@@ -689,7 +689,7 @@ html{background:var(--bg)}
 .stop-edit input{border:1px solid var(--line);border-radius:10px;padding:7px 9px;background:var(--surface);min-width:0}
 .stop-bot{display:flex;gap:8px;align-items:flex-end}
 .st-f{display:flex;flex-direction:column;gap:3px;min-width:0}
-.st-f>span:first-child{font:600 11px/1 var(--body);color:var(--muted);letter-spacing:.02em;padding-left:2px}
+.st-f>span:first-child{font:600 11px/1 var(--body);color:var(--muted);letter-spacing:.02em;padding-left:2px;height:16px;display:flex;align-items:center;gap:3px;white-space:nowrap}
 .st-f-time{flex:0 0 auto;max-width:46%}
 .st-f-place{flex:1}
 .stop-edit .st-time{width:100%;min-width:118px;font-variant-numeric:tabular-nums}
