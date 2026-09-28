@@ -1698,8 +1698,8 @@ function nightToPlan(n) {
   // Curate's stops become the event's timeline ("5:30 PM" → "17:30"); their tips go in the details.
   const to24 = t => { const m = /^(\d{1,2})(?::(\d{2}))?\s*([AP]M)$/i.exec(String(t || "").trim()); if (!m) return ""; let h = +m[1] % 12; if (/p/i.test(m[3])) h += 12; return String(h).padStart(2, "0") + ":" + (m[2] || "00"); };
   const kindEmoji = { eat: "🍽️", do: "🎟️", go: "🚶" }, city = (S.profile.city || "").trim();
-  const st = sortStops(cleanStops(n.stops.map(x => ({ time: to24(x.time), emoji: kindEmoji[x.kind] || "📍", name: x.name, place: x.name + (city ? ", " + city : ""), note: x.note || "" }))));
-  if (st.length >= 2) { compose.stops = st; compose.time = st[0].time || compose.time; compose.where = st[0].place; compose.food = ""; }
+  const st = sortStops(cleanStops(n.stops.map(x => ({ time: to24(x.time), emoji: kindEmoji[x.kind] || "📍", name: x.name, place: city, note: x.note || "" }))));
+  if (st.length >= 2) { compose.stops = st; compose.time = st[0].time || compose.time; compose.where = st[0].name + (city ? ", " + city : ""); compose.food = ""; defaultWrapUp(); }
   compose.notes = [st.length >= 2 ? "" : n.stops.map(x => `${x.time} · ${x.name}${x.note ? " (" + x.note + ")" : ""}`).join("\n"), n.parking ? "Parking: " + n.parking : "", n.cost ? "Cost: " + n.cost : "", n.ticketUrl ? "Tickets: " + n.ticketUrl : ""].filter(Boolean).join("\n").slice(0, 1000);
   compose._plan = { summary: "Here's the night, set up: " + n.title + ". Add who's coming and it's ready.", missing: ["guests"], unmatched: [], bring: [], ideas: [] };
   openComposer();
@@ -1888,7 +1888,7 @@ function applyPlan(p, said) {
   if (/^\d{2}:\d{2}$/.test(p.endTime || "")) compose.end = p.endTime;
   compose.where = String(p.location || "").slice(0, 200); compose.food = String(p.food || "").slice(0, 120); compose.notes = String(p.notes || "").slice(0, 1000);
   if (p.capacity > 0) compose.cap = String(Math.min(500, p.capacity));
-  { const st = sortStops(cleanStops(p.stops)); if (st.length >= 2 && compose.kind !== "meeting") { compose.stops = st; compose.time = (st.find(x => x.time) || {}).time || compose.time; compose.where = st[0].place || compose.where; compose.food = ""; } }
+  { const st = sortStops(cleanStops(p.stops)); if (st.length >= 2 && compose.kind !== "meeting") { compose.stops = st; compose.time = (st.find(x => x.time) || {}).time || compose.time; compose.where = st[0].place || compose.where; compose.food = ""; defaultWrapUp(); } }
   compose.questions = (p.questions || []).slice(0, 5).map(q => ({ id: newId().slice(0, 6), q: String(q).slice(0, 120) }));
   const gname = String(p.group || "").trim().toLowerCase();
   const g = gname && [...S.groups.values()].find(x => (x.name || "").trim().toLowerCase() === gname);
@@ -1969,7 +1969,9 @@ const evStops = ev => { const st = cleanStops(ev && ev.stops); return st.length 
 const stopsText = ev => evStops(ev).map(x => `${x.time ? fmtTime(x.time) + " " : ""}${x.name || x.place}${x.name && x.place ? " at " + placeLine(x) : ""}`).join("\n");
 // "Three Empires Brewing, Frisco, TX" under "Three Empires Brewing" reads as just "Frisco, TX".
 const placeLine = x => x.name && x.place && x.place.startsWith(x.name + ", ") ? x.place.slice(x.name.length + 2) : x.place;
-const stopMapUrl = x => "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent([x.place || x.name].filter(Boolean).join(", "));
+const cityOnly = p => /^[^,\d]+,\s*[A-Z]{2}$/.test(String(p || "").trim());
+function defaultWrapUp() { const last = lastStopTime(compose.stops || []); if (last && !compose.end) { compose.end = plusHour(last); compose._endAuto = true; } }
+const stopMapUrl = x => "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(x.place && x.name && cityOnly(x.place) ? x.name + ", " + x.place : (x.place || x.name));
 // One stops editor serves the composer and the Edit event dialog; stopCtx says which one is on screen.
 // h: the object holding { stops, time, where, emoji }; card/head: element ids; time/where: the plain Start/Where
 // inputs the first stop mirrors; hide: class on the Start/Where fields that step aside once there are 2+ stops.
