@@ -767,3 +767,4 @@ html{background:var(--bg)}
 .tour-btn{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px}
 .tour-btn>*{flex:none}
 .tour-btn svg{display:block}
+.stop-chips .chip.chip-custom{border-style:dashed;color:var(--muted)}

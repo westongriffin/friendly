@@ -2047,7 +2047,7 @@ function wireRepeat(p, onChange) {
 // An event with 2+ stops carries ev.stops = [{ time "HH:MM", emoji, name, place }], kept in time order;
 // ev.time and ev.location mirror the first stop so calendars, weather and the tiles keep working.
 const STOP_CHIPS = [["🍽️", "Dinner"], ["🍸", "Drinks"], ["🎟️", "Show"], ["🎳", "Activity"], ["🍦", "Dessert"]];
-const MEETING_CHIPS = [["📋", "Session"], ["🗣️", "Discussion"], ["☕", "Break"], ["🍽️", "Lunch"], ["🤝", "Wrap-up"]];
+const MEETING_CHIPS = [["📋", "Session"], ["🗣️", "Discussion"], ["☕", "Break"], ["🍽️", "Lunch"], ["🤝", "Wrap-up"], ["✏️", ""]];   // "" = Custom: a blank item to name yourself
 const isMeetingCtx = ctx => (ctx.h.kind || "") === "meeting";
 const STOP_EMOJIS = ["🍽️", "🍔", "🌮", "🍕", "🍣", "🍸", "🍻", "🍷", "☕", "🎟️", "🎬", "🎤", "🎳", "⚾", "🏈", "🎮", "🛍️", "🌳", "🏖️", "🍦", "🎂", "🎉", "🚗", "📍"];
 const stopMins = t => { if (!/^\d{2}:\d{2}$/.test(t || "")) return 99999; const [h, m] = t.split(":").map(Number); return (h < 5 ? h + 24 : h) * 60 + m; };   // 12:30 AM sorts after 10 PM
@@ -2068,11 +2068,11 @@ const composeStopCtx = { get h() { return compose; }, card: "stopsCard", head: "
 let stopCtx = composeStopCtx;
 function stopsEditor(ctx = stopCtx) {
   const st = ctx.h.stops || [];
-  const chips = `<div class="chips stop-chips">${(isMeetingCtx(ctx) ? MEETING_CHIPS : STOP_CHIPS).map(([e, n]) => `<button type="button" class="chip" data-addstop="${e}|${n}">${e} ${n}</button>`).join("")}</div>`;
+  const chips = `<div class="chips stop-chips">${(isMeetingCtx(ctx) ? MEETING_CHIPS : STOP_CHIPS).map(([e, n]) => `<button type="button" class="chip ${n ? "" : "chip-custom"}" data-addstop="${n ? e : "📌"}|${n}">${e} ${n || "Custom"}</button>`).join("")}</div>`;
   if (st.length < 2) return `<p class="muted sm" style="margin:0 0 10px">${isMeetingCtx(ctx) ? "More than one part? Add the next item and it becomes an agenda." : "Doing more than one thing? Add the next stop and it becomes a timeline."}</p>${chips}`;
   return `<div class="tl tl-edit">${st.map((x, i) => `<div class="stop stop-edit" data-si="${i}">
       <div class="stop-top"><button type="button" class="st-emoji" data-semo="${i}" aria-label="Change emoji">${esc(x.emoji || "📍")}</button>
-      <input class="st-name" data-sf="name" maxlength="60" value="${esc(x.name)}" placeholder="${i === 0 ? (isMeetingCtx(ctx) ? "First item, like Welcome" : "First stop, like Dinner") : "Then what?"}" aria-label="What">
+      <input class="st-name" data-sf="name" maxlength="60" value="${esc(x.name)}" placeholder="${i === 0 ? (isMeetingCtx(ctx) ? "First item, like Welcome" : "First stop, like Dinner") : isMeetingCtx(ctx) ? "Name this item" : "Then what?"}" aria-label="What">
       <button type="button" class="st-del" data-sdel="${i}" aria-label="Remove stop">✕</button></div>
       <div class="stop-bot"><label class="st-f st-f-time"><span>🕒 Time</span><input type="time" class="st-time" data-sf="time" value="${esc(x.time)}"></label>
       <label class="st-f st-f-place"><span>📍 Where</span><span class="st-place-wrap"><input class="st-place" data-sf="place" maxlength="120" value="${esc(x.place)}" placeholder="Venue or address" autocomplete="off"></span></label></div>
@@ -2113,6 +2113,7 @@ function wireStops() {
     if ((H.stops || []).length < 2) H.stops = [{ time: (el(C.time) || {}).value || H.time || "", emoji: isMeetingCtx(C) ? "📅" : (H.emoji || "📍"), name: "", place: (el(C.where) || {}).value || H.where || "" }];
     if (H.stops.length >= 8) return toast("Eight stops is the most one event can hold.");
     H.stops.push({ time: "", emoji, name, place: "" }); C.save(); refreshStops();
+    if (!name) { const rows = el(C.card).querySelectorAll(".stop-edit"), last = rows[rows.length - 1]; if (last) last.querySelector(".st-name").focus(); }   // Custom: straight to naming it
   });
   root.querySelectorAll(".stop-edit").forEach(row => {
     const i = +row.dataset.si;
