@@ -2059,7 +2059,7 @@ function wireStops() {
   const C = stopCtx, H = C.h, root = el(C.card); if (!root) return;
   root.querySelectorAll("[data-addstop]").forEach(b => b.onclick = () => {
     if (C.before) C.before(); const [emoji, name] = b.dataset.addstop.split("|");
-    if ((H.stops || []).length < 2) H.stops = [{ time: (el(C.time) || {}).value || H.time || "", emoji: H.emoji || "📍", name: "", place: (el(C.where) || {}).value || H.where || "" }];
+    if ((H.stops || []).length < 2) H.stops = [{ time: (el(C.time) || {}).value || H.time || "", emoji: isMeetingCtx(C) ? "📅" : (H.emoji || "📍"), name: "", place: (el(C.where) || {}).value || H.where || "" }];
     if (H.stops.length >= 8) return toast("Eight stops is the most one event can hold.");
     H.stops.push({ time: "", emoji, name, place: "" }); C.save(); refreshStops();
   });
