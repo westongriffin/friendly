@@ -1702,7 +1702,7 @@ function nightToPlan(n) {
   if (st.length >= 2) { compose.stops = st; compose.time = st[0].time || compose.time; compose.where = st[0].place; }
   compose.notes = [st.length >= 2 ? n.stops.filter(x => x.note).map(x => `${x.name}: ${x.note}`).join("\n") : n.stops.map(x => `${x.time} · ${x.name}${x.note ? " (" + x.note + ")" : ""}`).join("\n"), n.parking ? "Parking: " + n.parking : "", n.cost ? "Cost: " + n.cost : "", n.ticketUrl ? "Tickets: " + n.ticketUrl : ""].filter(Boolean).join("\n").slice(0, 1000);
   compose._plan = { summary: "Here's the night, set up: " + n.title + ". Add who's coming and it's ready.", missing: ["guests"], unmatched: [], bring: [], ideas: [] };
-  go("#/new");
+  openComposer();
 }
 async function pollNights(nights) {
   const groups = [...S.groups.values()]; if (!groups.length) return toast("Create a group first, then I can poll them.");
@@ -1875,6 +1875,8 @@ function openAskDialog(prefill) {
     rec.onerror = () => { on = false; mic.textContent = "🎤 Talk instead"; };
   }
 }
+// Show the composer with what was just filled in. Going to #/new from #/new changes nothing, so redraw instead.
+function openComposer() { if (location.hash === "#/new") { window.scrollTo(0, 0); render(); } else go("#/new"); }
 function applyPlan(p, said) {
   resetCompose(); compose._restored = true;
   compose.kind = p.kind === "meeting" ? "meeting" : "event";
@@ -1900,7 +1902,7 @@ function applyPlan(p, said) {
     bring: (p.bring || []).slice(0, 12).map(b => ({ item: String(b.item || "").slice(0, 60), qty: String(b.qty || "").slice(0, 20) })).filter(b => b.item),
     ideas: (p.ideas || []).slice(0, 4).map(x => ({ label: String(x.label || "").slice(0, 60), kind: String(x.kind || ""), value: String(x.value || "").slice(0, 200) })).filter(x => x.label && x.value)
   };
-  go("#/new");
+  openComposer();
 }
 // One of Dot's ideas, applied to the draft with a tap.
 function applyIdea(idx) {
