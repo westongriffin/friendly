@@ -721,3 +721,5 @@ html{background:var(--bg)}
 /* tiles: a little route of emojis */
 .ev-route{white-space:nowrap}
 .ev-route i{font-style:normal;opacity:.7;margin:0 1px;font-size:.9em}
+.tl-ev .stop-txt small.stop-note{white-space:normal;opacity:.85;font-style:italic;margin-top:2px}
+.stop-edit .st-note{width:100%;font-size:13px;color:var(--muted)}
