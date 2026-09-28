@@ -208,9 +208,9 @@ const LOGO_TIPS = {
     "Tap Calendar to see the month; tap a day to see what's on it.",
     "The Today card shows up on the morning of anything you're going to.",
     "Past events keep their photos and their wall. Scroll down to revisit them.",
-    "Search finds events, places, notes, groups and expenses in one box.",
-    "The bell shows what's new: RSVPs, comments, invites and reminders.",
-    "Tap me at the bottom corner to start an event, a meeting or an expense.",
+    "Search finds events, places, notes, groups, and expenses in one box.",
+    "The bell shows what's new: RSVPs, comments, invites, and reminders.",
+    "Tap me at the bottom corner to start an event, a meeting, or an expense.",
     "Meetings are the plain tiles: title, time, place, calendar invite. No theme needed.",
     "Copy an old event to plan the next one: open it and tap Duplicate.",
     "Add a friend's birthday and I'll bring it up a month out, with a Plan it button.",
@@ -332,7 +332,7 @@ function dotSuggestions() {
       }
     }
     if ([...S.expenses.values()].some(x => x.paidBy === me) && !(S.profile.venmo || S.profile.zelle || S.profile.cashapp || "").trim())
-      push("venmo", "me", "Add a way to get paid back (Venmo, Zelle or Cash App) so friends can settle in one tap.", "Add it", () => go("#/profile"));
+      push("venmo", "me", "Add a way to get paid back (Venmo, Zelle, or Cash App) so friends can settle in one tap.", "Add it", () => go("#/profile"));
     if (S.expenses.size) for (const p of pairwise()) { if (p.to === me && (S.contacts.get(p.from) || {}).venmo && p.amount >= 500) { push("request", p.from, `${first(nameOf(p.from))} owes you ${fmt$(p.amount)}. One tap to request it.`, "Request", () => payVenmo(p.from, p.amount, "charge")); break; } }
     const hosted = [...S.events.values()].filter(e => e.hostId === me);
     if (hosted.length >= 2 && !S.profile.calToken)
@@ -356,10 +356,58 @@ function dotWatch() {
     setTimeout(() => { if (dotCurrent && dotCurrent.id === sug.id) showLogoTip(null, sug); }, 1500);
   }
 }
+// ---- First-run tour: Dot walks a new person through the app, one spotlight at a time.
+// Shown once to accounts under two weeks old on their first home view; "Take the tour" on the profile replays it.
+const TOUR = [
+  { target: null, title: "Hi, I'm Dot!", text: "I'm the little helper in Friendly. Want a 30-second tour?", ok: "Show me", skip: "Maybe later" },
+  { target: '[data-go="#/new"]', title: "Make a plan", text: "Tap here to plan something. Pick a date, invite people, and the invites go out for you.", tab: "#/" },
+  { target: "#edgeDot", title: "I'm always right here", text: "Tap me on any page and just tell me the plan, like “tacos Friday at 7 with the crew.” I'll fill it all in.", tab: "#/" },
+  { target: '.tabs [data-go="#/curate"]', title: "Need an idea?", text: "Curate finds real things to do near you, paired with a place to eat.", tab: "#/" },
+  { target: '.tabs [data-go="#/groups"]', title: "Your crews", text: "Groups keep your regulars together, with chat, polls, and photos.", tab: "#/" },
+  { target: '.tabs [data-go="#/money"]', title: "Settle up", text: "Split a bill here. I'll keep track of who owes who, and you can pay by Venmo, Zelle, or Cash App.", tab: "#/" },
+  { target: "#brandDot", title: "One more thing", text: "Tap my little dot up here anytime for a tip.", ok: "Let's go", tab: "#/" }
+];
+let tourStep = -1;
+function tourDone() { try { if (localStorage.getItem("friendlyTourDone")) return true; } catch {} return !!(S.profile && S.profile.tourDone); }
+function wantsTour() { const c = (S.profile && S.profile.createdAt) || 0; return !tourDone() && c && Date.now() - c < 14 * 864e5; }
+function endTour() {
+  tourStep = -1; const o = el("tourLayer"); if (o) o.remove(); window.removeEventListener("resize", placeTour); document.querySelectorAll(".tour-peek").forEach(n => n.classList.remove("tour-peek"));
+  try { localStorage.setItem("friendlyTourDone", "1"); localStorage.setItem("friendlyDotHello", "1"); } catch {}
+  if (S.profile && !S.profile.tourDone) updateDoc(doc(db, "users", myUid()), { tourDone: true }).catch(() => {});
+}
+function startTour() { if (!window.Blip) return; if (location.hash !== "#/" && location.hash !== "") go("#/"); tourStep = 0; setTimeout(showTourStep, 350); }
+function showTourStep() {
+  const st = TOUR[tourStep]; if (!st) return endTour();
+  let o = el("tourLayer");
+  if (!o) { o = document.createElement("div"); o.id = "tourLayer"; o.innerHTML = `<div class="tour-hole" id="tourHole"></div><div class="tour-card" id="tourCard" role="dialog" aria-live="polite"></div>`; document.body.appendChild(o); window.addEventListener("resize", placeTour); }
+  const last = tourStep === TOUR.length - 1, first = tourStep === 0;
+  el("tourCard").innerHTML = `<div class="tour-top">${window.Blip.svg({ mood: first || last ? "happy" : "idle", size: 56, wave: first || last })}<div><b>${esc(st.title)}</b><p>${esc(st.text)}</p></div></div>
+    <div class="tour-foot"><span class="tour-dots">${TOUR.slice(1).map((_, i) => `<i class="${i + 1 === tourStep ? "on" : ""}"></i>`).join("")}</span>
+    <span class="btnrow" style="gap:6px">${last ? "" : `<button type="button" class="btn ghost small" id="tourSkip">${st.skip || "Skip"}</button>`}<button type="button" class="btn primary small" id="tourNext">${st.ok || "Next"}</button></span></div>`;
+  el("tourNext").onclick = () => { tourStep++; if (tourStep >= TOUR.length) endTour(); else showTourStep(); };
+  if (el("tourSkip")) el("tourSkip").onclick = endTour;
+  placeTour();
+}
+function placeTour() {
+  const st = TOUR[tourStep], hole = el("tourHole"), card = el("tourCard"); if (!st || !hole || !card) return;
+  const t = st.target && document.querySelector(st.target);
+  card.classList.remove("in"); void card.offsetWidth; card.classList.add("in");
+  if (!t) { hole.className = "tour-hole none"; card.style.cssText = "left:50%;top:50%;transform:translate(-50%,-50%)"; return; }
+  if (st.target === "#edgeDot") t.classList.add("tour-peek");
+  document.querySelectorAll(".tour-peek").forEach(n => { if (n !== t) n.classList.remove("tour-peek"); });
+  const r = t.getBoundingClientRect(), pad = 8, vw = innerWidth, vh = innerHeight;
+  hole.className = "tour-hole";
+  Object.assign(hole.style, { left: r.left - pad + "px", top: r.top - pad + "px", width: r.width + pad * 2 + "px", height: r.height + pad * 2 + "px" });
+  const cw = Math.min(340, vw - 32), below = r.bottom + pad + 14, fitsBelow = below + 190 < vh;
+  const left = Math.max(16, Math.min(vw - cw - 16, r.left + r.width / 2 - cw / 2));
+  card.style.cssText = `left:${left}px;width:${cw}px;` + (fitsBelow ? `top:${below}px` : `bottom:${vh - r.top + pad + 14}px`);
+}
 // So people learn the dot is Dot: one hello per device the first time home renders, and a
 // small silent hop once per session if the dot hasn't been tapped yet. Never an unprompted tip after that.
 function dotIntro() {
   if (!window.Blip || !el("brandDot")) return;
+  if (tourStep >= 0) return;
+  if (wantsTour()) { dotHopped = true; tourStep = 0; setTimeout(() => { if (S.route.name === "home" && tourStep === 0) showTourStep(); }, 900); return; }
   let seen = false; try { seen = !!localStorage.getItem("friendlyDotHello"); } catch {}
   if (!seen) {
     try { localStorage.setItem("friendlyDotHello", "1"); } catch {}
@@ -767,7 +815,7 @@ function withInputKept(fn) {
 function render() { withInputKept(renderNow); }
 // The loading screen: the wordmark flows into Blip (blip.js), then Blip idles until the app is ready.
 let splashStop = null;
-function splashInner(msg) { return window.Blip ? `<svg class="splash-blip"></svg>` : `<div class="brand splash-brand">Friend<span class="tilt">l</span>y</div>`; }
+function splashInner(msg) { return window.Blip ? `<svg class="splash-blip"></svg><div class="splash-say" aria-hidden="true"><b>Hi, I'm Dot!</b> Let's get everyone together.</div>` : `<div class="brand splash-brand">Friend<span class="tilt">l</span>y</div>`; }
 function mountSplash(root, msg) {
   const cur = root.querySelector(".splash");
   if (cur && cur.querySelector(".splash-blip")) return;
@@ -888,7 +936,7 @@ function renderAuth(root) {
       <div class="brand xl">Friend<span class="tilt">l</span>y</div>
       <div class="auth-dot">${window.Blip ? window.Blip.svg({ mood: "happy", size: 64, wave: true }) : ""}<div class="say-bubble">${authMode === "in"
         ? `<b>Hi, I'm Dot!</b> Welcome back. Sign in and I'll catch you up on what your friends are planning.`
-        : `<b>Hi, I'm Dot!</b> I help your crew plan nights out, send invites and settle up. Make an account and I'll show you around.`}</div></div>
+        : `<b>Hi, I'm Dot!</b> I help your crew plan nights out, send invites, and settle up. Make an account and I'll show you around.`}</div></div>
       <p class="auth-lede">Your friend group's home base for plans, invites, photos, and settling up.</p>
       <div class="seg">
         <button id="segIn" class="${authMode === "in" ? "on" : ""}">Sign in</button>
@@ -1587,7 +1635,7 @@ function planContext(text, mode, ctx) {
 }
 const PLAN_COPY = {
   event: { lead: "Tell me the plan like you'd text a friend: what, when, where, who, what to bring. I'll fill everything in, and you check it before anything sends.", label: "The plan", ph: "Taco night at my place next Friday at 7. Invite the Fruit Basket crew, everyone brings a side, cap it at 12.", ok: "Take it from here" },
-  expense: { lead: "Tell me what it was, how much, who paid and who's splitting it. I'll set it up and you check it.", label: "The expense", ph: "Dinner was 120, I paid, split with Sam and Alex.", ok: "Set it up" },
+  expense: { lead: "Tell me what it was, how much, who paid, and who's splitting it. I'll set it up and you check it.", label: "The expense", ph: "Dinner was 120, I paid, split with Sam and Alex.", ok: "Set it up" },
   edit: { lead: "Tell me what to change and I'll line it up. You still tap Save.", label: "The change", ph: "Move it to 8, and add that parking is on the street.", ok: "Line it up" }
 };
 function openPlanDialog(mode = "event", ctx = {}) {
@@ -1976,7 +2024,7 @@ function repeatFields(p, r) {
       <option value="biweekly" ${v === "biweekly" ? "selected" : ""}>Every 2 weeks</option><option value="monthly" ${v === "monthly" ? "selected" : ""}>Every month</option>
       <option value="custom" ${custom ? "selected" : ""}>Custom…</option></select></label>
     <div class="repeat-custom ${custom ? "" : "hidden"}" id="${p}RepCustom"><span>Every</span><input id="${p}RepEvery" type="number" inputmode="numeric" min="1" max="30" value="${n}" aria-label="How many">
-      <select id="${p}RepUnit" aria-label="Days, weeks or months">${REPEAT_UNITS.map(([u, pl]) => `<option value="${u}" ${(r.repeatUnit || "week") === u ? "selected" : ""}>${n === 1 ? u : pl}</option>`).join("")}</select></div>
+      <select id="${p}RepUnit" aria-label="Days, weeks, or months">${REPEAT_UNITS.map(([u, pl]) => `<option value="${u}" ${(r.repeatUnit || "week") === u ? "selected" : ""}>${n === 1 ? u : pl}</option>`).join("")}</select></div>
     <label class="field repeat-until ${v ? "" : "hidden"}" id="${p}RepUntilWrap"><span>Last date <span class="muted">(optional)</span></span><input id="${p}RepUntil" type="date" value="${esc(r.repeatUntil || "")}"></label>`;
 }
 function readRepeat(p) {
@@ -3428,6 +3476,7 @@ function profileBody() {
     <div class="btnrow"><button class="btn primary small" id="calSubscribe">Add to iPhone / Apple Calendar</button><button class="btn small" id="calCopy">Copy link for Google Calendar</button></div>
     <p class="muted sm" style="margin:8px 0 0">Google Calendar: Other calendars → ＋ → From URL → paste the link. Calendars refresh on their own schedule (usually within a few hours).</p></div>
   <div class="section-head" style="margin-top:22px"><h2>Account</h2></div>
+  <button class="btn" id="takeTour" style="width:100%;justify-content:center;margin-bottom:10px">${dot("happy", 26)} Take the tour with Dot</button>
   <button class="btn danger-ghost" id="signOut" style="width:100%;justify-content:center;font-weight:700;border:1.5px solid var(--bad)">Sign out</button>
   <div class="section-head" style="margin-top:22px"><h2>Blocked people</h2></div>
   <div class="card">${(p.blockedUids || []).length ? p.blockedUids.map(u => `<div class="member-row">${avatar(u, "lg")}<div style="flex:1;min-width:0"><b>${esc(nameOf(u))}</b><div class="muted sm">You don't see anything they post.</div></div><button class="btn small" data-unblock="${u}">Unblock</button></div>`).join("") : `<p class="muted sm" style="padding:14px 16px;margin:0">Nobody blocked. Use ⋯ on a message or photo to report it or block the person.</p>`}</div>
@@ -3474,6 +3523,7 @@ function wireProfile() {
       toast("Profile saved");
     } catch (e) { toast(e.message); }
   };
+  if (el("takeTour")) el("takeTour").onclick = () => { go("#/"); setTimeout(() => { tourStep = 0; showTourStep(); }, 500); };
   el("signOut").onclick = async () => { stopListening(); await signOut(auth).catch(() => {}); wipeLocalData(); };
   const pt = el("pushToggle"); if (pt) pt.onclick = () => pushState() === "on" ? disableWebPush() : enableWebPush();
   const nr = el("notifRow"); if (nr) nr.onclick = () => { location.href = "app-settings:"; };
