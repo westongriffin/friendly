@@ -777,3 +777,6 @@ html{background:var(--bg)}
 .uj-cta{font:700 13px/1 var(--body);background:#fff;color:var(--accent-strong);padding:8px 14px;border-radius:999px;box-shadow:0 4px 12px rgba(120,30,20,.2)}
 .ev-card.unjoined .ev-card-title,.ev-card.unjoined .ev-card-date,.ev-card.unjoined .count,.ev-card.unjoined .ev-card-loc{color:#fff!important;text-shadow:0 1px 3px rgba(0,0,0,.25)}
 .meet-tile.unjoined .meet-tag{position:relative;z-index:2}
+/* Sign-up terms: a big, easy box; the whole row toggles it */
+.cbox.terms-box{display:flex;align-items:flex-start;gap:12px;margin:14px 0 0;padding:12px 14px;border-radius:14px;font-weight:500;color:var(--ink);line-height:1.4}
+.cbox.terms-box input{width:26px;height:26px;flex:none;margin:0;cursor:pointer}

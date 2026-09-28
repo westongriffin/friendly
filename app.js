@@ -678,6 +678,7 @@ window.go = path => { location.hash = path; };
 
 // ---------- auth ----------
 onAuthStateChanged(auth, async u => {
+  if (u) { try { localStorage.setItem("friendlyKnown", "1"); } catch {} }
   S.subs.forEach(fn => fn()); S.subs = [];
   S.user = u;
   if (!u) {
@@ -943,7 +944,8 @@ function wireOnboarding() {
 }
 
 // ---------- auth screen ----------
-let authMode = "in";
+// First time on this device: open on Create account. Anyone who has signed in here before gets Sign in.
+let authMode = (() => { try { return localStorage.getItem("friendlyKnown") ? "in" : "up"; } catch { return "in"; } })();
 function renderAuth(root) {
   root.innerHTML = `
   <div class="auth-wrap">
@@ -967,7 +969,7 @@ function renderAuth(root) {
         <label class="field"><span>Password</span>
           <input id="aPass" name="password" type="password" required minlength="6" placeholder="At least 6 characters" autocomplete="${authMode === "in" ? "current-password" : "new-password"}"></label>
         <button class="btn primary lg" type="submit">${authMode === "in" ? "Sign in" : "Create account"}</button>
-        ${authMode === "up" ? `<label class="cbox" style="margin:12px 0 0;align-items:flex-start"><input type="checkbox" id="aTerms" style="margin-top:3px"><span class="sm">I agree to the <a href="./terms.html" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">Terms of Use</a> and <a href="./privacy.html" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">Privacy Policy</a>. No harassment or objectionable content; accounts that post it are removed.</span></label>` : ""}
+        ${authMode === "up" ? `<label class="cbox terms-box" for="aTerms"><input type="checkbox" id="aTerms"><span class="sm">I agree to the <a href="./terms.html" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">Terms of Use</a> and <a href="./privacy.html" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">Privacy Policy</a>. No harassment or objectionable content; accounts that post it are removed.</span></label>` : ""}
       </form>
       ${authMode === "in" ? `<p class="auth-foot" style="margin-top:8px"><a id="forgotPass">Forgot password?</a></p>` : ""}
       <p class="auth-foot">${authMode === "in" ? "New here?" : "Already have an account?"}
@@ -1302,7 +1304,7 @@ function eventCard(ev) {
   const th = themeOf(ev.theme, ev.customTheme);
   const d = evDate(ev);
   const going = goingCount(ev);
-  const guests = (ev.invitedUids || []).slice(0, 3);
+  const guests = canSeeGuests(ev) ? (ev.invitedUids || []).slice(0, 3) : [];   // faces stay private until you've answered
   const myR = (ev.rsvps || {})[myUid()];
   const rsvpDot = myR ? `<span class="you-pill ${myR}">${{ going: "You're going", maybe: "Maybe", no: "Can't go", waitlist: "Waitlisted", pending: "Pending" }[myR] || ""}</span>` : "";
   const pills = `${isNewEvent(ev) ? `<span class="new-pill">New</span>` : ""}${rsvpDot}`;
@@ -1316,7 +1318,7 @@ function eventCard(ev) {
         <div class="ev-card-title" style="font-family:${esc(th.font)},system-ui">${esc(ev.title)}</div>
         <div class="ev-card-date">${MONTHS[d.getMonth()]} ${d.getDate()}${ev.time ? " · " + fmtTime(ev.time) : ""}${evStops(ev).length ? ` · <span class="ev-route">${evStops(ev).slice(0, 4).map(x => esc(x.emoji || "📍")).join("<i>›</i>")}</span>` : ""}</div>
         <div class="ev-card-foot">
-          <span class="mini-guests">${guests.map(u => avatar(u, "xs")).join("")}${(ev.invitedUids || []).length > 3 ? `<span class="more">+${ev.invitedUids.length - 3}</span>` : ""}</span>
+          <span class="mini-guests">${guests.map(u => avatar(u, "xs")).join("")}${guests.length && (ev.invitedUids || []).length > 3 ? `<span class="more">+${ev.invitedUids.length - 3}</span>` : ""}</span>
           <span class="count">${going} going${ev.capacity > 0 ? " / " + ev.capacity : ""}</span>
         </div>
       </div>
@@ -2485,6 +2487,10 @@ function renderEventPage(root, id) {
   sub("polls", rows => { S.polls = rows.sort((a, b) => a.createdAt - b.createdAt); const b = el("pollsCard"); if (b) { b.innerHTML = pollsInner(ev); wirePolls(ev); } });
   sub("songs", rows => { S.songs = rows.sort((a, b) => (Object.keys(b.votes || {}).length - Object.keys(a.votes || {}).length) || a.createdAt - b.createdAt); const b = el("playlistCard"); if (b) { b.innerHTML = playlistInner(ev); wirePlaylist(ev); } });
 }
+// Guest lists stay private until you've answered: hosts always see them; guests once they've RSVP'd.
+const RSVPD = ["going", "maybe", "no", "waitlist"];
+const canSeeGuests = ev => canManage(ev) || RSVPD.includes((ev.rsvps || {})[myUid()]);
+const collapsedOpen = (key, dflt) => { try { const v = localStorage.getItem(key); return v === null ? dflt : v === "1"; } catch { return dflt; } };
 function statusGroups(ev) {
   const g = { going: [], maybe: [], no: [], waitlist: [], pending: [], none: [] };
   (ev.invitedUids || []).forEach(u => g[(ev.rsvps || {})[u] || "none"].push(u));
@@ -2571,16 +2577,18 @@ function eventInner(ev) {
 
   <div class="ev-card-glass" id="rsvpCard">${rsvpBtns}</div>
 
-  <div class="ev-card-glass" id="guestCard">
-    <div class="glass-head">Guest list <span>${(ev.invitedUids || []).length} invited</span></div>
+  ${!canSeeGuests(ev) ? `<div class="ev-card-glass" id="guestCard"><div class="glass-head">Guest list <span>${going} going</span></div><p class="muted-th sm" style="margin:0">🔒 RSVP above to see who's coming.</p></div>` : (() => { const gOpen = collapsedOpen("friendlyGuestOpen:" + ev.id, true); return `<div class="ev-card-glass inv-card ${gOpen ? "open" : ""}" id="guestCard">
+    <button type="button" class="glass-head inv-toggle" id="guestToggle" aria-expanded="${gOpen}"><span>Guest list <span class="muted-th sm">· ${(ev.invitedUids || []).length} invited</span></span><span class="inv-chev">›</span></button>
+    <div class="inv-body">
     ${guestList || `<p class="muted-th">No guests yet.</p>`}
     ${manage ? `<button class="btn-th ghost small" id="addPeopleBtn">＋ Add people</button>` : ""}
     ${manage && (ev.questions || []).length ? `<button class="btn-th ghost small" id="viewAnswers">View RSVP answers</button>` : ""}
     ${manage && (ev.invitedUids || []).length > 1 && !(ev.invitedUids || []).filter(u => u !== me && !(ev.rsvps || {})[u]).length ? `<div class="dot-note">${dot("party", 44)}<span>Everyone has answered.</span></div>` : ""}
     ${manage && (ev.invitedUids || []).filter(u => u !== me && !(ev.rsvps || {})[u]).length ? `<button class="btn-th ghost small" id="nudgeBtn">Nudge ${(ev.invitedUids || []).filter(u => u !== me && !(ev.rsvps || {})[u]).length} who haven't answered</button>` : ""}
-  </div>
+    </div>
+  </div>`; })()}
 
-  ${(ev.invitedPhones || []).length ? (() => { let open = true; try { open = localStorage.getItem("friendlyInvOpen:" + ev.id) !== "0"; } catch {} return `<div class="ev-card-glass inv-card ${open ? "open" : ""}" id="invCard">
+  ${(ev.invitedPhones || []).length && canSeeGuests(ev) ? (() => { const open = collapsedOpen("friendlyInvOpen:" + ev.id, false); return `<div class="ev-card-glass inv-card ${open ? "open" : ""}" id="invCard">
     <button type="button" class="glass-head inv-toggle" id="invToggle" aria-expanded="${open}"><span>Not on Friendly yet <span class="muted-th sm">· ${ev.invitedPhones.length} invited by text</span></span><span class="inv-chev">›</span></button>
     <div class="inv-body">
       <p class="muted-th sm" style="margin:0 0 8px">They got a text with the link. Once they sign up, they'll move into the guest list above.</p>
@@ -2900,6 +2908,7 @@ function wireEventPage(ev) {
   if (el("addPeopleBtn")) el("addPeopleBtn").onclick = () => openEventInviteDialog(ev);
   document.querySelectorAll("[data-textinvite]").forEach(b => b.onclick = () => { location.href = smsLink([b.dataset.textinvite], eventInviteText({ ...ev, openLink: true })); });
   if (el("invToggle")) el("invToggle").onclick = () => { const c = el("invCard"); const open = !c.classList.contains("open"); c.classList.toggle("open", open); el("invToggle").setAttribute("aria-expanded", open); try { localStorage.setItem("friendlyInvOpen:" + ev.id, open ? "1" : "0"); } catch {} };
+  if (el("guestToggle")) el("guestToggle").onclick = () => { const c = el("guestCard"); const open = !c.classList.contains("open"); c.classList.toggle("open", open); el("guestToggle").setAttribute("aria-expanded", open); try { localStorage.setItem("friendlyGuestOpen:" + ev.id, open ? "1" : "0"); } catch {} };
   document.querySelectorAll("[data-uninvitephone]").forEach(b => b.onclick = () => uninviteEventPhone(ev, b.dataset.uninvitephone));
   const join = $("[data-join]"); if (join) join.onclick = () => joinViaLink(ev, join);
   const cal = $("[data-cal]"); if (cal) cal.onclick = () => downloadIcs(ev);
@@ -3659,10 +3668,12 @@ function meetingBody(ev) {
     <button class="btn small" data-cal>Add to calendar</button>
     ${manage ? `<button class="btn small" id="addPeopleBtn">＋ Add people</button><button class="btn small" data-nudge>Nudge non-responders</button><button class="btn small" data-edit>Edit</button><button class="btn small" data-dup>Duplicate</button><button class="btn small danger-ghost" data-del>Delete</button>` : ""}
   </div>
-  <div class="section-head" style="margin-top:22px"><h2>Who's coming</h2></div>
-  <div class="card" style="padding:8px 16px">${row("Accepted", g.going) + row("Maybe", g.maybe) + row("Declined", g.no) + row("No answer yet", g.none) || `<p class="muted">Nobody invited yet.</p>`}</div>
-  ${(ev.invitedPhones || []).length ? `<div class="section-head" style="margin-top:18px"><h2>Invited</h2></div>
-  <div class="card">${ev.invitedPhones.map(p => { const nm = (ev.invitedPhoneNames || {})[p]; return `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">💬</span><div style="flex:1;min-width:0"><b>${esc(nm || p)}</b><div class="muted sm">${nm ? esc(p) + " · " : ""}Hasn't joined yet</div></div>${manage ? `<span class="btnrow" style="gap:6px"><button class="btn ghost small" data-textinvite="${esc(p)}">Text</button><button class="btn ghost small" data-uninvitephone="${esc(p)}">✕</button></span>` : ""}</div>`; }).join("")}</div>` : ""}
+  ${!canSeeGuests(ev) ? `<div class="card" style="padding:14px 16px;margin-top:22px"><b>Who's coming</b><p class="muted sm" style="margin:4px 0 0">🔒 Accept, maybe, or decline to see who's coming. ${g.going.length} accepted so far.</p></div>` : `<div class="card inv-card ${collapsedOpen("friendlyGuestOpen:" + ev.id, true) ? "open" : ""}" id="guestCard" style="padding:12px 16px;margin-top:22px">
+    <button type="button" class="inv-toggle" id="guestToggle"><b>Who's coming <span class="muted sm">· ${(ev.invitedUids || []).length} invited</span></b><span class="inv-chev">›</span></button>
+    <div class="inv-body">${row("Accepted", g.going) + row("Maybe", g.maybe) + row("Declined", g.no) + row("No answer yet", g.none) || `<p class="muted">Nobody invited yet.</p>`}</div></div>`}
+  ${(ev.invitedPhones || []).length && canSeeGuests(ev) ? `<div class="card inv-card ${collapsedOpen("friendlyInvOpen:" + ev.id, false) ? "open" : ""}" id="invCard" style="padding:12px 16px">
+    <button type="button" class="inv-toggle" id="invToggle"><b>Not on Friendly yet <span class="muted sm">· ${ev.invitedPhones.length} invited by text</span></b><span class="inv-chev">›</span></button>
+  <div class="inv-body">${ev.invitedPhones.map(p => { const nm = (ev.invitedPhoneNames || {})[p]; return `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">💬</span><div style="flex:1;min-width:0"><b>${esc(nm || p)}</b><div class="muted sm">${nm ? esc(p) + " · " : ""}Hasn't joined yet</div></div>${manage ? `<span class="btnrow" style="gap:6px"><button class="btn ghost small" data-textinvite="${esc(p)}">Text</button><button class="btn ghost small" data-uninvitephone="${esc(p)}">✕</button></span>` : ""}</div>`; }).join("")}</div></div>` : ""}
   <div class="card th-plain" id="wall" style="margin-top:22px"><p class="muted">Loading…</p></div>`;
 }
 function wireMeeting(ev) {
@@ -3680,6 +3691,7 @@ function wireMeeting(ev) {
   if (el("addPeopleBtn")) el("addPeopleBtn").onclick = () => openEventInviteDialog(ev);
   document.querySelectorAll("[data-textinvite]").forEach(b => b.onclick = () => { location.href = smsLink([b.dataset.textinvite], eventInviteText({ ...ev, openLink: true })); });
   if (el("invToggle")) el("invToggle").onclick = () => { const c = el("invCard"); const open = !c.classList.contains("open"); c.classList.toggle("open", open); el("invToggle").setAttribute("aria-expanded", open); try { localStorage.setItem("friendlyInvOpen:" + ev.id, open ? "1" : "0"); } catch {} };
+  if (el("guestToggle")) el("guestToggle").onclick = () => { const c = el("guestCard"); const open = !c.classList.contains("open"); c.classList.toggle("open", open); el("guestToggle").setAttribute("aria-expanded", open); try { localStorage.setItem("friendlyGuestOpen:" + ev.id, open ? "1" : "0"); } catch {} };
   document.querySelectorAll("[data-uninvitephone]").forEach(b => b.onclick = () => uninviteEventPhone(ev, b.dataset.uninvitephone));
   const nd = $("[data-nudge]"); if (nd) nd.onclick = () => nudge(ev, nd);
   const ed = $("[data-edit]"); if (ed) ed.onclick = () => editEvent(ev);
@@ -3703,7 +3715,7 @@ function meetingCard(ev) {
   // "Meeting" tag are what set it apart.
   const d = evDate(ev); const myR = (ev.rsvps || {})[myUid()];
   const going = (ev.invitedUids || []).filter(u => (ev.rsvps || {})[u] === "going").length;
-  const guests = (ev.invitedUids || []).slice(0, 3);
+  const guests = canSeeGuests(ev) ? (ev.invitedUids || []).slice(0, 3) : [];   // faces stay private until you've answered
   const pills = `${isNewEvent(ev) ? `<span class="new-pill">New</span>` : ""}${myR ? `<span class="you-pill ${myR}">${{ going: "Accepted", maybe: "Maybe", no: "Declined" }[myR] || ""}</span>` : ""}`;
   return `<a class="ev-card meet-tile ${ev._unjoined ? "unjoined" : ""}" data-ev="${ev.id}">
     <div class="ev-card-body">
@@ -3714,7 +3726,7 @@ function meetingCard(ev) {
         <div class="ev-card-date">${MONTHS[d.getMonth()]} ${d.getDate()}${ev.time ? " · " + fmtTime(ev.time) : ""}${evStops(ev).length ? ` · <span class="ev-route">${evStops(ev).slice(0, 4).map(x => esc(x.emoji || "📍")).join("<i>›</i>")}</span>` : ""}</div>
         ${evStops(ev).length ? `<div class="ev-card-loc">📋 ${evStops(ev).length} items</div>` : ev.location ? `<div class="ev-card-loc">📍 ${esc(ev.location)}</div>` : ""}
         <div class="ev-card-foot">
-          <span class="mini-guests">${guests.map(u => avatar(u, "xs")).join("")}${(ev.invitedUids || []).length > 3 ? `<span class="more">+${ev.invitedUids.length - 3}</span>` : ""}</span>
+          <span class="mini-guests">${guests.map(u => avatar(u, "xs")).join("")}${guests.length && (ev.invitedUids || []).length > 3 ? `<span class="more">+${ev.invitedUids.length - 3}</span>` : ""}</span>
           <span class="count">${going} accepted</span>
         </div>
       </div>
