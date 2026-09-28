@@ -732,3 +732,11 @@ html{background:var(--bg)}
 .repeat-custom{display:flex;align-items:center;gap:8px;margin:-4px 0 12px;font-weight:600}
 .repeat-custom input{width:64px;text-align:center;border:1px solid var(--line);border-radius:10px;padding:8px;background:var(--bg)}
 .repeat-custom select{width:auto;flex:1;max-width:160px}
+/* Sign-in: Dot says hello */
+.auth-dot{display:flex;gap:10px;align-items:flex-end;margin:10px 0 4px;text-align:left}
+.auth-dot>svg{flex:none;animation:auth-dot-in .6s cubic-bezier(.34,1.56,.64,1) .2s both}
+.auth-dot .say-bubble{font-size:14px;border-radius:16px 16px 16px 4px;animation:auth-say-in .45s ease-out .55s both}
+.auth-dot .say-bubble b{font-family:var(--display);font-size:15px;display:block;margin-bottom:2px}
+@keyframes auth-dot-in{from{opacity:0;transform:translateY(10px) scale(.7)}to{opacity:1;transform:none}}
+@keyframes auth-say-in{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.auth-dot>svg,.auth-dot .say-bubble{animation:none}}

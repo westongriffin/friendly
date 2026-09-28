@@ -886,6 +886,9 @@ function renderAuth(root) {
     <canvas id="authbg" class="auth-bg"></canvas>
     <div class="auth-card card">
       <div class="brand xl">Friend<span class="tilt">l</span>y</div>
+      <div class="auth-dot">${window.Blip ? window.Blip.svg({ mood: "happy", size: 64, wave: true }) : ""}<div class="say-bubble">${authMode === "in"
+        ? `<b>Hi, I'm Dot!</b> Welcome back. Sign in and I'll catch you up on what your friends are planning.`
+        : `<b>Hi, I'm Dot!</b> I help your crew plan nights out, send invites and settle up. Make an account and I'll show you around.`}</div></div>
       <p class="auth-lede">Your friend group's home base for plans, invites, photos, and settling up.</p>
       <div class="seg">
         <button id="segIn" class="${authMode === "in" ? "on" : ""}">Sign in</button>
