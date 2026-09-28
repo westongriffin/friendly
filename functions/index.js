@@ -205,8 +205,10 @@ exports.onReceiptRequest = onDocumentCreated({ document: "receiptRequests/{id}",
 const PLAN_MODEL = "gemini-2.5-flash";
 const THEME_IDS = ["confetti", "citrus", "bubblegum", "sunset", "golden", "blossom", "garden", "aurora", "midnight", "cosmic", "rave", "disco", "y2k", "retro"];
 const str = { type: "STRING" };
-const clean = (arr, n, len) => (Array.isArray(arr) ? arr : []).slice(0, n).map(x => String(x || "").replace(/[\r\n;]+/g, " ").slice(0, len)).filter(Boolean);
-const sv = (v, n) => String(v || "").trim().slice(0, n);
+// Cutting text by length can split an emoji in half, and Firestore rejects the leftover half ("INVALID_ARGUMENT").
+const noLone = t => String(t).replace(/[\uD800-\uDBFF]$/, "").replace(/^[\uDC00-\uDFFF]/, "");
+const clean = (arr, n, len) => (Array.isArray(arr) ? arr : []).slice(0, n).map(x => noLone(String(x || "").replace(/[\r\n;]+/g, " ").slice(0, len))).filter(Boolean);
+const sv = (v, n) => noLone(String(v || "").trim().slice(0, n));
 async function askGemini(prompt, schema, temperature = 0.2) {
   const token = (await (await gauth.getClient()).getAccessToken()).token;
   const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${LOCATION}/publishers/google/models/${PLAN_MODEL}:generateContent`;
@@ -268,7 +270,7 @@ ${text}`;
   const data = {
     kind: out.kind === "meeting" ? "meeting" : "event",
     title: sv(out.title, 80) || "New plan",
-    emoji: sv(out.emoji, 8).replace(/[A-Za-z0-9\s]/g, "").slice(0, 4),
+    emoji: noLone(sv(out.emoji, 8).replace(/[A-Za-z0-9\s]/g, "").slice(0, 4)),
     theme: THEME_IDS.includes(out.theme) ? out.theme : "",
     date: /^\d{4}-\d{2}-\d{2}$/.test(out.date || "") ? out.date : "",
     time: /^\d{2}:\d{2}$/.test(out.time || "") ? out.time : "",
@@ -278,7 +280,7 @@ ${text}`;
     guests: clean(out.guests, 30, 60), group: sv(out.group, 60),
     bring: (Array.isArray(out.bring) ? out.bring : []).slice(0, 12).map(b => ({ item: sv(b && b.item, 60), qty: sv(b && b.qty, 20) })).filter(b => b.item),
     questions: clean(out.questions, 5, 120),
-    stops: (Array.isArray(out.stops) ? out.stops : []).slice(0, 8).map(x => ({ time: /^\d{2}:\d{2}$/.test((x && x.time) || "") ? x.time : "", name: sv(x && x.name, 60), place: sv(x && x.place, 120), emoji: sv(x && x.emoji, 8).replace(/[A-Za-z0-9\s]/g, "").slice(0, 4) || "📍" })).filter(x => x.name || x.place),
+    stops: (Array.isArray(out.stops) ? out.stops : []).slice(0, 8).map(x => ({ time: /^\d{2}:\d{2}$/.test((x && x.time) || "") ? x.time : "", name: sv(x && x.name, 60), place: sv(x && x.place, 120), emoji: noLone(sv(x && x.emoji, 8).replace(/[A-Za-z0-9\s]/g, "").slice(0, 4)) || "📍" })).filter(x => x.name || x.place),
     missing: clean(out.missing, 4, 12).filter(m => ["date", "time", "location", "guests"].includes(m)),
     ideas: (Array.isArray(out.ideas) ? out.ideas : []).slice(0, 4).map(x => ({ label: sv(x && x.label, 60), kind: sv(x && x.kind, 12), value: sv(x && x.value, 200) }))
       .filter(x => x.label && x.value && ["question", "bring", "note", "endTime", "capacity"].includes(x.kind))
@@ -373,10 +375,10 @@ ${q}`;
 //      with a place to eat and the logistics, and the app turns a pick into a plan, a poll, tickets or a table.
 //      curated/{cityKey} is rebuilt nightly for every city someone has set; "night" mode builds three on demand.
 const TAGS = ["weekend", "tonight", "date", "group", "cheap", "family"];
-async function askGrounded(prompt, maxTokens = 6000, onPhase) {
+async function askGrounded(prompt, maxTokens = 6000, onPhase, thinking = 0) {
   const token = (await (await gauth.getClient()).getAccessToken()).token;
   const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${LOCATION}/publishers/google/models/${PLAN_MODEL}:generateContent`;
-  const body = { contents: [{ role: "user", parts: [{ text: prompt }] }], tools: [{ googleSearch: {} }], generationConfig: { temperature: 0.4, maxOutputTokens: maxTokens, thinkingConfig: { thinkingBudget: 0 } } };
+  const body = { contents: [{ role: "user", parts: [{ text: prompt }] }], tools: [{ googleSearch: {} }], generationConfig: { temperature: 0.4, maxOutputTokens: maxTokens + (thinking ? 3000 : 0), thinkingConfig: { thinkingBudget: thinking } } };
   const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 200000);
   const t0 = Date.now(); if (onPhase) await onPhase("searching");
   let r; try { r = await fetch(url, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body), signal: ctl.signal }); }
@@ -391,7 +393,7 @@ async function askGrounded(prompt, maxTokens = 6000, onPhase) {
 }
 const isUrl = u => /^https?:\/\//i.test(String(u || ""));
 // cut long text at a word boundary with an ellipsis instead of mid-word
-const clip = (v, n) => { const t = String(v || "").trim().replace(/\s+/g, " "); if (t.length <= n) return t; const cut = t.slice(0, n - 1); const sp = cut.lastIndexOf(" "); return (sp > n * .6 ? cut.slice(0, sp) : cut).replace(/[\s,;:.\-–—]+$/, "") + "…"; };
+const clip = (v, n) => { const t = String(v || "").trim().replace(/\s+/g, " "); if (t.length <= n) return t; const cut = noLone(t.slice(0, n - 1)); const sp = cut.lastIndexOf(" "); return (sp > n * .6 ? cut.slice(0, sp) : cut).replace(/[\s,;:.\-–—]+$/, "") + "…"; };
 // The same venue twice in a row ("Palato at 7:00", "Palato at 7:30") is one stop: keep the first time, merge the notes.
 const venueKey = v => String(v || "").toLowerCase().replace(/^the\s+/, "").replace(/[^a-z0-9]+/g, " ").trim();
 function mergeRepeatStops(stops) {
@@ -409,12 +411,12 @@ function cleanNight(n) {
     title: sv(n.title, 80), date: /^\d{4}-\d{2}-\d{2}$/.test(n.date || "") ? n.date : "", start: /^\d{2}:\d{2}$/.test(n.start || "") ? n.start : "",
     tags: clean(n.tags, 6, 10).filter(t => TAGS.includes(t)), stops,
     cost: clip(n.cost, 50), size: clip(n.size, 40), parking: clip(n.parking, 120), why: clip(n.why, 260), ticketUrl: isUrl(n.ticketUrl) ? sv(n.ticketUrl, 300) : "",
-    emoji: sv(n.emoji, 8).replace(/[A-Za-z0-9\s]/g, "").slice(0, 4), emojis: sv(n.emojis, 12).replace(/[A-Za-z0-9\s]/g, "").slice(0, 8),
+    emoji: noLone(sv(n.emoji, 8).replace(/[A-Za-z0-9\s]/g, "").slice(0, 4)), emojis: noLone(sv(n.emojis, 12).replace(/[A-Za-z0-9\s]/g, "").slice(0, 8)),
     scene: sv(n.scene, 140), theme: THEME_IDS.includes(n.theme) ? n.theme : "midnight",
     coverId: nodeCrypto.createHash("md5").update(sv(n.title, 80) + "|" + sv(n.date, 10)).digest("hex").slice(0, 12)
   };
 }
-const nightShape = `Return ONLY a JSON array, no prose: [{"title": short and specific, "date": "YYYY-MM-DD", "start": 24-hour "HH:MM" of the first stop, "tags": [any of weekend, tonight, date, group, cheap, family], "stops": [{"time": like "5:30 PM", "name": the real venue or event name, "note": one useful detail (walk time, what to order, parking), "kind": "eat" | "do" | "go", "url": the listing or booking page if you found one}], "cost": like "$45 a head all in", "size": like "Best for 2–6", "parking": one short line, "why": one sentence in Dot's voice on why this night works, "ticketUrl": the ticket page if tickets are sold, "emoji": one emoji for the night, "emojis": exactly two emojis, the thing to do then the food (like "⚾🌮"), "scene": a 10-to-16-word visual description of the night for an illustration, concrete objects and setting only, no people's faces, no text (like "a baseball game under stadium lights beside a plate of street tacos"), "theme": the one of ${THEME_IDS.join(", ")} that fits the vibe (sunset or golden for dinners, confetti for parties, garden or blossom for brunch and outdoors, midnight or cosmic for nights out and shows, disco, rave or retro for dance and costume nights, citrus or bubblegum for playful daytime plans, aurora for big arena events)}]. Every stop must be a different place: never list the same venue twice. If one venue covers both the activity and the food (a festival with food vendors, a restaurant with live music), make it a single stop and pair it with a second, different place (drinks or dessert nearby) or leave it as one stop. Only include things you actually found; never invent an event, a venue, or a price. Times must make sense in sequence. Always use the Oxford comma in lists.`;
+const nightShape = `Return ONLY a JSON array, no prose: [{"title": short and specific, "date": "YYYY-MM-DD", "start": 24-hour "HH:MM" of the first stop, "tags": [any of weekend, tonight, date, group, cheap, family], "stops": [{"time": like "5:30 PM", "name": the real venue or event name, "note": one useful detail (walk time, what to order, parking), "kind": "eat" | "do" | "go", "url": the listing or booking page if you found one}], "cost": like "$45 a head all in", "size": like "Best for 2–6", "parking": one short line, "why": one sentence in Dot's voice on why this night works, "ticketUrl": the ticket page if tickets are sold, "emoji": one emoji for the night, "emojis": exactly two emojis, the thing to do then the food (like "⚾🌮"), "scene": a 10-to-16-word visual description of the night for an illustration, concrete objects and setting only, no people's faces, no text (like "a baseball game under stadium lights beside a plate of street tacos"), "theme": the one of ${THEME_IDS.join(", ")} that fits the vibe (sunset or golden for dinners, confetti for parties, garden or blossom for brunch and outdoors, midnight or cosmic for nights out and shows, disco, rave or retro for dance and costume nights, citrus or bubblegum for playful daytime plans, aurora for big arena events)}]. Every stop is a different venue; never list the same place twice. Only include things you actually found; never invent an event, a venue, or a price. Times must make sense in sequence. Always use the Oxford comma in lists.`;
 // Four nights per filter: one grounded search per category, run in parallel, then merged and de-duplicated.
 const CURATE_KINDS = {
   weekend: from => `for the coming weekend (Friday evening through Sunday, starting ${from}); a mix of the best things on`,
@@ -434,7 +436,8 @@ async function curateCity(d, onPhase) {
   let started = false;
   const one = async kind => {
     const prompt = `You are Dot, the helper in Friendly, an app friends use to plan nights out. Using search, find real, specific things happening ${area} (today is ${today}, ${sv(d.weekday, 10)}; nothing after ${endStr}). Build exactly 4 different nights ${CURATE_KINDS[kind](weekendFrom, today)}. Each pairs one thing to do with one real place to eat or drink within a short walk or drive, with times that work in sequence. Make the 4 genuinely different (different neighborhoods or kinds of thing). Only things friends would actually want to go out for: skip civic and informational events (safety fairs, seminars, council meetings, workshops, expos for businesses). Include "${kind}" in every night's tags, plus any other tags that apply. Keep strings short; at most 3 stops per night; no markdown. ${nightShape}`;
-    const raw = await askGrounded(prompt, 2600, started ? null : (started = true, onPhase));
+    // Fast first; if the search tool answers with an apology, try again letting the model think (slower, far more reliable).
+    let raw; try { raw = await askGrounded(prompt, 2600, started ? null : (started = true, onPhase)); } catch (err) { logger.warn("curate " + kind + " retry: " + err.message.slice(0, 100)); raw = await askGrounded(prompt, 2600, null, 1024); }
     return raw.map(cleanNight).map(n => ({ ...n, src: kind, tags: [...new Set([kind, ...n.tags])] }));
   };
   const results = await Promise.allSettled(Object.keys(CURATE_KINDS).map(one));
@@ -478,7 +481,8 @@ async function buildNight(d) {
   const prompt = `You are Dot, the helper in Friendly, an app friends use to plan nights out. Build 3 different nights out ${nearArea(city, d.miles)} for ${from === to ? from : from + " to " + to} (today is ${today}, ${sv(d.weekday, 10)}), using search to find real, specific events, venues, restaurants and bars.
 The ask: vibe "${sv(d.vibe, 30) || "surprise me"}", for ${sv(d.who, 30) || "a few friends"}, budget ${sv(d.budget, 30) || "flexible"} per person all in.${d.free ? " Also: " + sv(d.free, 300) + "." : ""}
 Make the three genuinely different from each other (different neighborhoods or kinds of thing). Each pairs one thing to do with one real place to eat or drink nearby, with times that work in sequence. Respect the budget and the group size (bar tables and counter service for big groups, a reservation for a date). ${nightShape}`;
-  const raw = await askGrounded(prompt, 3000, d.onPhase);
+  // The search tool now and then answers with an apology instead of results; one retry usually gets them.
+  let raw; try { raw = await askGrounded(prompt, 3000, d.onPhase); } catch (err) { logger.warn("night build retry: " + err.message.slice(0, 120)); raw = await askGrounded(prompt, 3000, null, 1024); }
   const nights = raw.map(cleanNight).filter(n => n.title && n.date && n.stops.length).slice(0, 3);
   if (!nights.length) throw new Error("nothing found");
   return nights;
