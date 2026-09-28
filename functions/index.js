@@ -378,7 +378,7 @@ const TAGS = ["weekend", "tonight", "date", "group", "cheap", "family"];
 // The search tool sometimes loops on a broken call (empty answer) or apologizes instead of searching.
 // Try fast first, then with a little thinking, then once more with a bit more variety; each try has its own time limit.
 async function askGroundedReliably(prompt, maxTokens, onPhase, label) {
-  const tries = [{ thinking: 0, timeoutMs: 60000 }, { thinking: 1024, timeoutMs: 95000 }, { thinking: 1024, timeoutMs: 95000, temperature: 0.9 }];
+  const tries = [{ thinking: 0, timeoutMs: 45000 }, { thinking: 1024, timeoutMs: 80000 }, { thinking: 1024, timeoutMs: 80000, temperature: 0.9 }];   // worst case ~3.5 min
   let last;
   for (let i = 0; i < tries.length; i++) {
     try { return await askGrounded(prompt, maxTokens, i ? null : onPhase, tries[i].thinking, tries[i]); }
