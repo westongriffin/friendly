@@ -1962,7 +1962,8 @@ function planCard() {
 const STOP_CHIPS = [["🍽️", "Dinner"], ["🍸", "Drinks"], ["🎟️", "Show"], ["🎳", "Activity"], ["🍦", "Dessert"]];
 const STOP_EMOJIS = ["🍽️", "🍔", "🌮", "🍕", "🍣", "🍸", "🍻", "🍷", "☕", "🎟️", "🎬", "🎤", "🎳", "⚾", "🏈", "🎮", "🛍️", "🌳", "🏖️", "🍦", "🎂", "🎉", "🚗", "📍"];
 const stopMins = t => { if (!/^\d{2}:\d{2}$/.test(t || "")) return 99999; const [h, m] = t.split(":").map(Number); return (h < 5 ? h + 24 : h) * 60 + m; };   // 12:30 AM sorts after 10 PM
-const sortStops = arr => arr.map((x, i) => [x, i]).sort((a, b) => (stopMins(a[0].time) - stopMins(b[0].time)) || (a[1] - b[1])).map(p => p[0]);
+// Timed stops sort among themselves; a stop with no time yet stays where it is.
+const sortStops = arr => { const slots = arr.map((x, i) => stopMins(x.time) < 99999 ? i : -1).filter(i => i >= 0); const timed = slots.map(i => arr[i]).map((x, k) => [x, k]).sort((a, b) => (stopMins(a[0].time) - stopMins(b[0].time)) || (a[1] - b[1])).map(p => p[0]); const out = arr.slice(); slots.forEach((i, k) => { out[i] = timed[k]; }); return out; };
 const cleanStops = arr => (Array.isArray(arr) ? arr : []).slice(0, 8).map(x => ({ time: /^\d{2}:\d{2}$/.test((x && x.time) || "") ? x.time : "", emoji: String((x && x.emoji) || "📍").slice(0, 4), name: String((x && x.name) || "").trim().slice(0, 60), place: String((x && x.place) || "").trim().slice(0, 120) })).filter(x => x.name || x.place);
 const evStops = ev => { const st = cleanStops(ev && ev.stops); return st.length >= 2 ? sortStops(st) : []; };
 const stopsText = ev => evStops(ev).map(x => `${x.time ? fmtTime(x.time) + " " : ""}${x.name || x.place}${x.name && x.place ? " at " + placeLine(x) : ""}`).join("\n");
@@ -1999,7 +2000,6 @@ function wireStops() {
     if ((H.stops || []).length < 2) H.stops = [{ time: (el(C.time) || {}).value || H.time || "", emoji: H.emoji || "📍", name: "", place: (el(C.where) || {}).value || H.where || "" }];
     if (H.stops.length >= 8) return toast("Eight stops is the most one event can hold.");
     H.stops.push({ time: "", emoji, name, place: "" }); C.save(); refreshStops();
-    const rows = el(C.card).querySelectorAll(".stop-edit"); const last = rows[rows.length - 1]; if (last) last.querySelector(".st-time").focus();
   });
   root.querySelectorAll(".stop-edit").forEach(row => {
     const i = +row.dataset.si;
