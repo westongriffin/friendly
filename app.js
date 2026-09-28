@@ -1970,7 +1970,7 @@ const stopsText = ev => evStops(ev).map(x => `${x.time ? fmtTime(x.time) + " " :
 // "Three Empires Brewing, Frisco, TX" under "Three Empires Brewing" reads as just "Frisco, TX".
 const placeLine = x => x.name && x.place && x.place.startsWith(x.name + ", ") ? x.place.slice(x.name.length + 2) : x.place;
 const cityOnly = p => /^[^,\d]+,\s*[A-Z]{2}$/.test(String(p || "").trim());
-function defaultWrapUp() { const last = lastStopTime(compose.stops || []); if (last && !compose.end) { compose.end = plusHour(last); compose._endAuto = true; } }
+function defaultWrapUp() { const w = wrapUpFor(compose.stops || []); if (w && !compose.end) { compose.end = w; compose._endAuto = true; } }
 const stopMapUrl = x => "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(x.place && x.name && cityOnly(x.place) ? x.name + ", " + x.place : (x.place || x.name));
 // One stops editor serves the composer and the Edit event dialog; stopCtx says which one is on screen.
 // h: the object holding { stops, time, where, emoji }; card/head: element ids; time/where: the plain Start/Where
@@ -1996,14 +1996,26 @@ function stopsHead(ctx = stopCtx) { const n = (ctx.h.stops || []).length; return
 function refreshStops() { const c = el(stopCtx.card); if (!c) return; c.innerHTML = stopsEditor(); const h = el(stopCtx.head); if (h) h.textContent = stopsHead(); document.querySelectorAll("." + stopCtx.hide).forEach(n => n.classList.toggle("hidden", (stopCtx.h.stops || []).length >= 2)); if (stopCtx.endLbl && el(stopCtx.endLbl)) el(stopCtx.endLbl).textContent = (stopCtx.h.stops || []).length >= 2 ? "Wraps up" : "End"; wireStops(); }
 // The first stop mirrors Start and Where, so the preview, weather and calendar stay right.
 const lastStopTime = st => st.filter(x => stopMins(x.time) < 99999).reduce((m, x) => !m || stopMins(x.time) > stopMins(m) ? x.time : m, "");
-const plusHour = t => { const [h, m] = t.split(":").map(Number); const v = (h * 60 + m + 60) % 1440; return String(Math.floor(v / 60)).padStart(2, "0") + ":" + String(v % 60).padStart(2, "0"); };
+const addMins = (t, mins) => { const [h, m] = t.split(":").map(Number); const v = (h * 60 + m + mins) % 1440; return String(Math.floor(v / 60)).padStart(2, "0") + ":" + String(v % 60).padStart(2, "0"); };
+// How long the last stop usually runs, from what it is: a movie or a ballgame takes hours, dessert doesn't.
+const STOP_LENGTHS = [
+  [180, /concert|live music|festival|\bfest\b|game\b|\bvs\.?\b|rangers|mavericks|mavs|stars\b|cowboys|fc dallas|stadium|arena|ballpark|🏈|⚾|🏀|⚽|🏒/i],
+  [150, /movie|film|cinema|cinemark|\bamc\b|alamo|regal|theat(er|re)|musical|\bplay\b|opera|ballet|symphony|🎬|🎭/i],
+  [120, /show|comedy|improv|karaoke|bowling|arcade|topgolf|golf|escape|axe|trivia|museum|zoo|aquarium|🎟️|🎤|🎳|🎮|⛳/i],
+  [90, /dinner|brunch|lunch|restaurant|eatery|kitchen|grill|steak|sushi|tacos?|burger|pizza|bbq|🍽️|🍔|🌮|🍕|🍣|🍝/i],
+  [90, /drinks?|bar\b|pub|brew|beer|wine|cocktail|happy hour|lounge|🍸|🍻|🍷|🍺/i],
+  [45, /dessert|ice cream|gelato|froyo|pinkberry|cake|coffee|boba|donut|🍦|🍰|☕|🎂|🧋/i]
+];
+const stopLength = x => { const txt = [x.emoji, x.name, x.place].filter(Boolean).join(" "); const hit = STOP_LENGTHS.find(([, re]) => re.test(txt)); return hit ? hit[0] : 60; };
+const lastStop = st => st.filter(x => stopMins(x.time) < 99999).reduce((m, x) => !m || stopMins(x.time) > stopMins(m.time) ? x : m, null);
+const wrapUpFor = st => { const l = lastStop(st); return l ? addMins(l.time, stopLength(l)) : ""; };
 function mirrorFirstStop() {
   const H = stopCtx.h, st = H.stops || []; if (st.length < 2) return;
   const ordered = sortStops(st), firstTimed = ordered.find(x => x.time); H.time = (firstTimed && firstTimed.time) || H.time; H.where = ordered[0].place || H.where;
   if (el(stopCtx.time)) el(stopCtx.time).value = H.time; if (el(stopCtx.where)) el(stopCtx.where).value = H.where;
-  // "Wraps up" follows an hour after the last stop, until the host picks their own time.
-  const last = lastStopTime(st), endEl = stopCtx.end && el(stopCtx.end);
-  if (last && endEl && (!endEl.value || H._endAuto)) { endEl.value = plusHour(last); H.end = endEl.value; H._endAuto = true; }
+  // "Wraps up" follows the last stop by however long that kind of stop runs, until the host picks their own time.
+  const wrap = wrapUpFor(st), endEl = stopCtx.end && el(stopCtx.end);
+  if (wrap && endEl && (!endEl.value || H._endAuto)) { endEl.value = wrap; H.end = wrap; H._endAuto = true; }
 }
 function wireStops() {
   const C = stopCtx, H = C.h, root = el(C.card); if (!root) return;
