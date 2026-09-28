@@ -709,7 +709,7 @@ function subscribeAll(u) {
   // reading it once always saw an empty phoneE164 and silently never subscribed, which
   // meant a freshly texted invitee could sign up and never see their group invite.
   S.pendingInvitesPhone = new Map();
-  let invitesPhoneUnsub = null, invitesPhoneKey = null;
+  let invitesPhoneUnsub = null, invitesPhoneKey = null, phoneEventsUnsub = null; S.phoneEvents = new Map();
   add(on("profile", doc(db, "users", u.uid), d => {
     S.profile = d.data(); rebuildContacts(); S.ready = true;
     // Backfill a missing phoneE164 from the sign-in identifier (once), so phone
@@ -723,6 +723,12 @@ function subscribeAll(u) {
         S.pendingInvitesPhone = new Map(snap.docs.map(d2 => ({ id: d2.id, ...d2.data() })).filter(g => !(g.memberUids || []).includes(u.uid)).map(g => [g.id, g])); render();
       });
       add(invitesPhoneUnsub);
+      // Events someone invited this phone number to by text, not joined yet: shown on Events with a "tap to join" veil.
+      if (phoneEventsUnsub) phoneEventsUnsub();
+      phoneEventsUnsub = on("phoneEvents", query(collection(db, "events"), where("invitedPhones", "array-contains", pk), where("openLink", "==", true)), snap => {
+        S.phoneEvents = new Map(snap.docs.map(d2 => ({ id: d2.id, ...d2.data(), _unjoined: true })).filter(e => !(e.invitedUids || []).includes(u.uid)).map(e => [e.id, e])); render();
+      });
+      add(phoneEventsUnsub);
     }
     render();
   }));
@@ -1259,8 +1265,10 @@ function calendarBody(evs) {
     <div class="section-head" style="margin-top:18px"><h2>${sel ? esc(fmtDay(sel[0])) : "Timeline"}</h2>${sel ? `<button class="btn small" id="calClear">All upcoming</button>` : ""}</div>
     <div class="card">${list || `<p class="muted" style="padding:14px 16px;margin:0">Nothing scheduled yet.</p>`}</div>`;
 }
+// Upcoming events I was texted an invite to but haven't joined (see the phoneEvents listener).
+const unjoinedEvents = () => [...((S.phoneEvents || new Map()).values())].filter(e => e.date >= todayStr() && !S.events.has(e.id) && !(e.invitedUids || []).includes(myUid()));
 function homeBody() {
-  const evs = myEvents();
+  const evs = [...myEvents(), ...unjoinedEvents()];
   const t = todayStr();
   let upcoming = evs.filter(e => e.date >= t).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
   let past = evs.filter(e => e.date < t).sort((a, b) => b.date.localeCompare(a.date));
@@ -1299,7 +1307,7 @@ function eventCard(ev) {
   const rsvpDot = myR ? `<span class="you-pill ${myR}">${{ going: "You're going", maybe: "Maybe", no: "Can't go", waitlist: "Waitlisted", pending: "Pending" }[myR] || ""}</span>` : "";
   const pills = `${isNewEvent(ev) ? `<span class="new-pill">New</span>` : ""}${rsvpDot}`;
   return `
-  <a class="ev-card t-${esc(th.id)} ${ev.cover ? "has-cover" : ""}" data-ev="${ev.id}" style="--th-accent:${esc(th.accent)};--th-ink:${esc(th.ink)};--th-on-accent:${esc(th.onAccent)}">
+  <a class="ev-card t-${esc(th.id)} ${ev.cover ? "has-cover" : ""} ${ev._unjoined ? "unjoined" : ""}" data-ev="${ev.id}" style="--th-accent:${esc(th.accent)};--th-ink:${esc(th.ink)};--th-on-accent:${esc(th.onAccent)}">
     ${ev.cover ? `<img class="cover-img" src="${esc(ev.cover)}" alt="" loading="lazy">` : `<div class="ev-card-bg"></div>`}
     <div class="ev-card-body">
       ${pills ? `<div class="ev-pills">${pills}</div>` : ""}
@@ -1313,6 +1321,7 @@ function eventCard(ev) {
         </div>
       </div>
     </div>
+    ${ev._unjoined ? `<div class="unjoined-veil"><span class="uj-tag">✉️ You're invited</span><span class="uj-cta">Tap to join</span></div>` : ""}
   </a>`;
 }
 function wireHome() {
@@ -3696,7 +3705,7 @@ function meetingCard(ev) {
   const going = (ev.invitedUids || []).filter(u => (ev.rsvps || {})[u] === "going").length;
   const guests = (ev.invitedUids || []).slice(0, 3);
   const pills = `${isNewEvent(ev) ? `<span class="new-pill">New</span>` : ""}${myR ? `<span class="you-pill ${myR}">${{ going: "Accepted", maybe: "Maybe", no: "Declined" }[myR] || ""}</span>` : ""}`;
-  return `<a class="ev-card meet-tile" data-ev="${ev.id}">
+  return `<a class="ev-card meet-tile ${ev._unjoined ? "unjoined" : ""}" data-ev="${ev.id}">
     <div class="ev-card-body">
       ${pills ? `<div class="ev-pills">${pills}</div>` : ""}
       <span class="meet-tag">📅 Meeting${ev.repeat ? " · ↻" : ""}</span>
@@ -3710,6 +3719,7 @@ function meetingCard(ev) {
         </div>
       </div>
     </div>
+    ${ev._unjoined ? `<div class="unjoined-veil"><span class="uj-tag">✉️ You're invited</span><span class="uj-cta">Tap to join</span></div>` : ""}
   </a>`;
 }
 

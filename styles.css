@@ -768,3 +768,12 @@ html{background:var(--bg)}
 .tour-btn>*{flex:none}
 .tour-btn svg{display:block}
 .stop-chips .chip.chip-custom{border-style:dashed;color:var(--muted)}
+/* Invited by text, not joined yet: a warm coral wash with a dashed edge and "Tap to join" */
+.ev-card.unjoined .ev-card-body{position:relative;z-index:2}
+.ev-card.unjoined .ev-card-emoji,.ev-card.unjoined .ev-pills{display:none}
+.unjoined-veil{position:absolute;inset:0;z-index:1;border-radius:inherit;background:linear-gradient(165deg,rgba(255,107,87,.84),rgba(255,150,90,.72) 55%,rgba(255,193,69,.6));display:flex;flex-direction:column;align-items:center;gap:7px;padding-top:18%;pointer-events:none}
+.unjoined-veil::after{content:"";position:absolute;inset:6px;border:2px dashed rgba(255,255,255,.8);border-radius:13px}
+.uj-tag{font:700 12px/1 var(--body);color:#fff;letter-spacing:.03em;text-shadow:0 1px 2px rgba(0,0,0,.18)}
+.uj-cta{font:700 13px/1 var(--body);background:#fff;color:var(--accent-strong);padding:8px 14px;border-radius:999px;box-shadow:0 4px 12px rgba(120,30,20,.2)}
+.ev-card.unjoined .ev-card-title,.ev-card.unjoined .ev-card-date,.ev-card.unjoined .count,.ev-card.unjoined .ev-card-loc{color:#fff!important;text-shadow:0 1px 3px rgba(0,0,0,.25)}
+.meet-tile.unjoined .meet-tag{position:relative;z-index:2}
