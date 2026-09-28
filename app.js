@@ -58,6 +58,7 @@ const RESET_OOB = RESET_PARAMS.get("mode") === "resetPassword" ? RESET_PARAMS.ge
 // Invite links as Universal Links use the query form (https://officialfriendly.com/?p=<eventId>),
 // since iOS matches app links on path + query, not on a #hash. Turn it into the app's route.
 if (/^[a-f0-9]{8,64}$/i.test(RESET_PARAMS.get("p") || "")) history.replaceState(null, "", location.pathname + "#/e/" + RESET_PARAMS.get("p"));
+if (/^[A-Za-z0-9_-]{8,64}$/.test(RESET_PARAMS.get("g") || "")) history.replaceState(null, "", location.pathname + "#/join/" + RESET_PARAMS.get("g"));
 
 // A phone hitting the plain web site (not the native app -- NATIVE covers that,
 // since the app shell also loads this same origin) belongs in the App Store,
@@ -105,8 +106,9 @@ function wireAppLinks() {
   const AppPlugin = plugin("App"); if (!AppPlugin || !AppPlugin.addListener) return;
   AppPlugin.addListener("appUrlOpen", ({ url }) => {
     try {
-      const u = new URL(url); const p = u.searchParams.get("p");
+      const u = new URL(url); const p = u.searchParams.get("p"), g = u.searchParams.get("g");
       if (p) location.hash = "#/e/" + p;
+      else if (g) location.hash = "#/join/" + g;
       else if (u.searchParams.get("mode") === "resetPassword") location.href = url;
       else if (u.hash && u.hash.length > 1) location.hash = u.hash;
     } catch {}
@@ -1558,7 +1560,8 @@ function openInviteDialog(g) {
   });
 }
 // The text an invitee gets. It comes from the inviter's own number via Messages.
-const groupInviteText = g => `Hey! I added you to our group "${g.name}" on Friendly, our crew's home base for plans, invites, photos, and settling up. Get the app: ${APP_STORE_URL} (free). Sign up with this phone number and you're in.`;
+// Links to Friendly's own preview page (a compact card with the group's name), not the App Store's tall screenshot card.
+const groupInviteText = g => `Hey! I added you to our group "${g.name}" on Friendly, our crew's home base for plans, invites, photos, and settling up. Join here: ${FN_BASE}/share/g/${g.id} (free). Sign up with this phone number and you're in.`;
 // iOS sometimes narrows a multi-recipient sms: link to an existing thread with just the
 // first person, so with more than one new guest we let the host pick: one group text, or
 // tap through each person.
@@ -1744,7 +1747,15 @@ function ensureCurated() {
 // Painted covers are served one image at a time (cached by the phone) instead of riding along with the nights list.
 function coverUrl(n) { const ids = (S.curated && S.curated.coverIds) || []; return n && n.coverId && curKey && ids.includes(n.coverId) ? `${FN_BASE}/curateCover?c=${curKey}&id=${n.coverId}` : ""; }
 function nightWhen(n) { const d = evDate({ date: n.date }); return `${d.toLocaleDateString("en-US", { weekday: "short" })} · ${MONTHS[d.getMonth()]} ${d.getDate()}${n.start ? " · " + fmtTime(n.start) : ""}`; }
+// Nights saved before the server merged repeats can list one venue twice in a row; show it once.
+const venueKey = v => String(v || "").toLowerCase().replace(/^the\s+/, "").replace(/[^a-z0-9]+/g, " ").trim();
+function mergeNightStops(n) {
+  const out = [];
+  for (const x of n.stops || []) { const prev = out[out.length - 1]; if (prev && venueKey(prev.name) === venueKey(x.name)) { if (x.note && !(prev.note || "").includes(x.note)) prev.note = ((prev.note || "") + " " + x.note).trim(); if (!prev.url && x.url) prev.url = x.url; continue; } out.push({ ...x }); }
+  return { ...n, stops: out };
+}
 function nightCardHtml(n, id) {
+  n = mergeNightStops(n);
   S._nightById = S._nightById || {}; S._nightById[id] = n;
   const eat = n.stops.find(x => x.kind === "eat"), tix = n.ticketUrl || (n.stops.find(x => x.kind === "do" && x.url) || {}).url;
   const th = themeOf(n.theme || "midnight"), cover = coverUrl(n);

@@ -5,6 +5,7 @@
         "appIDs": ["L7H9872BR2.com.officialfriendly.app"],
         "components": [
           { "/": "/", "?": { "p": "*" }, "comment": "invite link: /?p=<eventId>" },
+          { "/": "/", "?": { "g": "*" }, "comment": "group invite: /?g=<groupId>" },
           { "/": "/", "?": { "mode": "resetPassword" }, "comment": "password reset link" }
         ]
       }

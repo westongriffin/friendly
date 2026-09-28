@@ -392,8 +392,19 @@ async function askGrounded(prompt, maxTokens = 6000, onPhase) {
 const isUrl = u => /^https?:\/\//i.test(String(u || ""));
 // cut long text at a word boundary with an ellipsis instead of mid-word
 const clip = (v, n) => { const t = String(v || "").trim().replace(/\s+/g, " "); if (t.length <= n) return t; const cut = t.slice(0, n - 1); const sp = cut.lastIndexOf(" "); return (sp > n * .6 ? cut.slice(0, sp) : cut).replace(/[\s,;:.\-–—]+$/, "") + "…"; };
+// The same venue twice in a row ("Palato at 7:00", "Palato at 7:30") is one stop: keep the first time, merge the notes.
+const venueKey = v => String(v || "").toLowerCase().replace(/^the\s+/, "").replace(/[^a-z0-9]+/g, " ").trim();
+function mergeRepeatStops(stops) {
+  const out = [];
+  for (const x of stops) {
+    const prev = out[out.length - 1];
+    if (prev && venueKey(prev.name) === venueKey(x.name)) { if (x.note && !prev.note.includes(x.note)) prev.note = clip(prev.note + " " + x.note, 220); if (!prev.url && x.url) prev.url = x.url; if (x.kind === "eat" || prev.kind === "eat") prev.kind = prev.kind === "do" || x.kind === "do" ? "do" : "eat"; continue; }
+    out.push({ ...x });
+  }
+  return out;
+}
 function cleanNight(n) {
-  const stops = (Array.isArray(n.stops) ? n.stops : []).slice(0, 5).map(x => ({ time: sv(x && x.time, 10), name: sv(x && x.name, 80), note: clip(x && x.note, 170), kind: ["eat", "do", "go"].includes(x && x.kind) ? x.kind : "do", url: isUrl(x && x.url) ? sv(x.url, 300) : "" })).filter(x => x.name);
+  const stops = mergeRepeatStops((Array.isArray(n.stops) ? n.stops : []).slice(0, 5).map(x => ({ time: sv(x && x.time, 10), name: sv(x && x.name, 80), note: clip(x && x.note, 170), kind: ["eat", "do", "go"].includes(x && x.kind) ? x.kind : "do", url: isUrl(x && x.url) ? sv(x.url, 300) : "" })).filter(x => x.name));
   return {
     title: sv(n.title, 80), date: /^\d{4}-\d{2}-\d{2}$/.test(n.date || "") ? n.date : "", start: /^\d{2}:\d{2}$/.test(n.start || "") ? n.start : "",
     tags: clean(n.tags, 6, 10).filter(t => TAGS.includes(t)), stops,
@@ -403,7 +414,7 @@ function cleanNight(n) {
     coverId: nodeCrypto.createHash("md5").update(sv(n.title, 80) + "|" + sv(n.date, 10)).digest("hex").slice(0, 12)
   };
 }
-const nightShape = `Return ONLY a JSON array, no prose: [{"title": short and specific, "date": "YYYY-MM-DD", "start": 24-hour "HH:MM" of the first stop, "tags": [any of weekend, tonight, date, group, cheap, family], "stops": [{"time": like "5:30 PM", "name": the real venue or event name, "note": one useful detail (walk time, what to order, parking), "kind": "eat" | "do" | "go", "url": the listing or booking page if you found one}], "cost": like "$45 a head all in", "size": like "Best for 2–6", "parking": one short line, "why": one sentence in Dot's voice on why this night works, "ticketUrl": the ticket page if tickets are sold, "emoji": one emoji for the night, "emojis": exactly two emojis, the thing to do then the food (like "⚾🌮"), "scene": a 10-to-16-word visual description of the night for an illustration, concrete objects and setting only, no people's faces, no text (like "a baseball game under stadium lights beside a plate of street tacos"), "theme": the one of ${THEME_IDS.join(", ")} that fits the vibe (sunset or golden for dinners, confetti for parties, garden or blossom for brunch and outdoors, midnight or cosmic for nights out and shows, disco, rave or retro for dance and costume nights, citrus or bubblegum for playful daytime plans, aurora for big arena events)}]. Only include things you actually found; never invent an event, a venue, or a price. Times must make sense in sequence. Always use the Oxford comma in lists.`;
+const nightShape = `Return ONLY a JSON array, no prose: [{"title": short and specific, "date": "YYYY-MM-DD", "start": 24-hour "HH:MM" of the first stop, "tags": [any of weekend, tonight, date, group, cheap, family], "stops": [{"time": like "5:30 PM", "name": the real venue or event name, "note": one useful detail (walk time, what to order, parking), "kind": "eat" | "do" | "go", "url": the listing or booking page if you found one}], "cost": like "$45 a head all in", "size": like "Best for 2–6", "parking": one short line, "why": one sentence in Dot's voice on why this night works, "ticketUrl": the ticket page if tickets are sold, "emoji": one emoji for the night, "emojis": exactly two emojis, the thing to do then the food (like "⚾🌮"), "scene": a 10-to-16-word visual description of the night for an illustration, concrete objects and setting only, no people's faces, no text (like "a baseball game under stadium lights beside a plate of street tacos"), "theme": the one of ${THEME_IDS.join(", ")} that fits the vibe (sunset or golden for dinners, confetti for parties, garden or blossom for brunch and outdoors, midnight or cosmic for nights out and shows, disco, rave or retro for dance and costume nights, citrus or bubblegum for playful daytime plans, aurora for big arena events)}]. Every stop must be a different place: never list the same venue twice. If one venue covers both the activity and the food (a festival with food vendors, a restaurant with live music), make it a single stop and pair it with a second, different place (drinks or dessert nearby) or leave it as one stop. Only include things you actually found; never invent an event, a venue, or a price. Times must make sense in sequence. Always use the Oxford comma in lists.`;
 // Four nights per filter: one grounded search per category, run in parallel, then merged and de-duplicated.
 const CURATE_KINDS = {
   weekend: from => `for the coming weekend (Friday evening through Sunday, starting ${from}); a mix of the best things on`,
@@ -654,6 +665,25 @@ const htmlEsc = s => String(s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<
 // tags (iMessage, WhatsApp, Slack unfurl them) then sends people on to the app;
 // /p/{eventId}/cover.jpg serves the preview's cover image.
 exports.share = onRequest({ region: "us-central1", invoker: "public", memory: "256MiB" }, async (req, res) => {
+  // /g/{groupId}: a group invite. A compact card (square icon) instead of the App Store's tall screenshot card.
+  const gm = /^\/g\/([A-Za-z0-9_-]{8,64})\/?$/.exec(req.path || "");
+  if (gm) {
+    const gid = gm[1]; const gs = await db.doc("groups/" + gid).get(); const g = gs.exists ? gs.data() : null;
+    const title = g ? `Join ${g.emoji ? g.emoji + " " : ""}${g.name} on Friendly` : "Join the crew on Friendly";
+    const n = g ? (g.memberUids || []).length : 0;
+    const desc = "Your crew's home base for plans, invites, photos, and settling up." + (n > 1 ? ` ${n} friends are already in.` : "");
+    const target = SITE + "/#/join/" + gid, openUrl = SITE + "/?g=" + gid, img = SITE + "/icons/icon-512.png";
+    const ogTags = `<meta property="og:type" content="website"><meta property="og:site_name" content="Friendly">
+<meta property="og:title" content="${htmlEsc(title)}"><meta property="og:description" content="${htmlEsc(desc)}">
+<meta property="og:image" content="${img}"><meta property="og:image:width" content="512"><meta property="og:image:height" content="512"><meta property="og:url" content="${FN_BASE}/share/g/${gid}">
+<meta name="twitter:card" content="summary"><meta name="twitter:title" content="${htmlEsc(title)}"><meta name="twitter:description" content="${htmlEsc(desc)}"><meta name="twitter:image" content="${img}">`;
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(req.get("user-agent") || "");
+    res.set("Cache-Control", "public, max-age=300");
+    if (isMobile) { res.type("html").send(mobileGateHtml({ title, desc: "Get the app and sign up with the phone number that got this text. You'll be in the group automatically.", target, openUrl, extraHead: ogTags, appFirst: true })); return; }
+    res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${htmlEsc(title)}</title><meta name="viewport" content="width=device-width, initial-scale=1">${ogTags}
+<meta http-equiv="refresh" content="0;url=${target}"><script>location.replace(${JSON.stringify(target)});</script></head><body><p><a href="${target}">Open Friendly</a></p></body></html>`);
+    return;
+  }
   const m = /^\/p\/([a-f0-9]{8,64})(\/cover\.jpg)?\/?$/i.exec(req.path || "");
   if (!m) { res.redirect(302, SITE); return; }
   const id = m[1]; const snap = await db.doc("previews/" + id).get(); const p = snap.exists ? snap.data() : null;
@@ -694,7 +724,7 @@ ${ogTags}
 // registered (see comment above), so we can't tell if Friendly is installed.
 // Offer the App Store as the clear first move, with the web invite one tap away.
 const APP_STORE_URL = "https://apps.apple.com/app/id6810875052";
-function mobileGateHtml({ title, desc, target, openUrl, extraHead = "" }) {
+function mobileGateHtml({ title, desc, target, openUrl, extraHead = "", appFirst = false }) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${htmlEsc(title)}</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 ${extraHead}
@@ -712,8 +742,9 @@ ${extraHead}
   <div class="brand">Friend<span class="tilt">l</span>y</div>
   <h1>${htmlEsc(title)}</h1>
   <p class="sub">${htmlEsc(desc)}</p>
-  <a class="btn primary" href="${openUrl || target}">Open in Friendly</a>
-  <a class="btn secondary" href="${APP_STORE_URL}">Get the Friendly app</a>
+  ${appFirst ? `<a class="btn primary" href="${APP_STORE_URL}">Get the Friendly app</a>
+  <a class="btn secondary" href="${openUrl || target}">I already have Friendly</a>` : `<a class="btn primary" href="${openUrl || target}">Open in Friendly</a>
+  <a class="btn secondary" href="${APP_STORE_URL}">Get the Friendly app</a>`}
 </body></html>`;
 }
 
