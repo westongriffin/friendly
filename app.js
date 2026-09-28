@@ -393,7 +393,7 @@ function placeTour() {
   const t = st.target && document.querySelector(st.target);
   card.classList.remove("in"); void card.offsetWidth; card.classList.add("in");
   if (!t) { hole.className = "tour-hole none"; card.style.cssText = "left:50%;top:50%;transform:translate(-50%,-50%)"; return; }
-  if (st.target === "#edgeDot") t.classList.add("tour-peek");
+  if (st.target === "#edgeDot" && !t.classList.contains("tour-peek")) { t.classList.add("tour-peek"); setTimeout(placeTour, 420); }   // measure once Dot has slid out
   document.querySelectorAll(".tour-peek").forEach(n => { if (n !== t) n.classList.remove("tour-peek"); });
   const r = t.getBoundingClientRect(), pad = 8, vw = innerWidth, vh = innerHeight;
   hole.className = "tour-hole";
@@ -3476,7 +3476,7 @@ function profileBody() {
     <div class="btnrow"><button class="btn primary small" id="calSubscribe">Add to iPhone / Apple Calendar</button><button class="btn small" id="calCopy">Copy link for Google Calendar</button></div>
     <p class="muted sm" style="margin:8px 0 0">Google Calendar: Other calendars → ＋ → From URL → paste the link. Calendars refresh on their own schedule (usually within a few hours).</p></div>
   <div class="section-head" style="margin-top:22px"><h2>Account</h2></div>
-  <button class="btn" id="takeTour" style="width:100%;justify-content:center;margin-bottom:10px">${dot("happy", 26)} Take the tour with Dot</button>
+  <button class="btn tour-btn" id="takeTour">${dot("happy", 26)}<span>Take the tour with Dot</span></button>
   <button class="btn danger-ghost" id="signOut" style="width:100%;justify-content:center;font-weight:700;border:1.5px solid var(--bad)">Sign out</button>
   <div class="section-head" style="margin-top:22px"><h2>Blocked people</h2></div>
   <div class="card">${(p.blockedUids || []).length ? p.blockedUids.map(u => `<div class="member-row">${avatar(u, "lg")}<div style="flex:1;min-width:0"><b>${esc(nameOf(u))}</b><div class="muted sm">You don't see anything they post.</div></div><button class="btn small" data-unblock="${u}">Unblock</button></div>`).join("") : `<p class="muted sm" style="padding:14px 16px;margin:0">Nobody blocked. Use ⋯ on a message or photo to report it or block the person.</p>`}</div>

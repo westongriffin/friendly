@@ -748,7 +748,7 @@ html{background:var(--bg)}
 @media (prefers-reduced-motion:reduce){.splash-say{animation-duration:.01s}}
 /* First-run tour */
 #tourLayer{position:fixed;inset:0;z-index:200}
-.tour-hole{position:fixed;border-radius:16px;box-shadow:0 0 0 9999px rgba(30,20,12,.55);transition:all .35s cubic-bezier(.4,0,.2,1);pointer-events:none;outline:2px solid rgba(255,255,255,.9)}
+.tour-hole{position:fixed;border-radius:16px;box-shadow:0 0 0 9999px rgba(30,20,12,.64);transition:all .35s cubic-bezier(.4,0,.2,1);pointer-events:none;outline:2px solid rgba(255,255,255,.9)}
 .tour-hole.none{left:50%!important;top:40%!important;width:0!important;height:0!important;outline:0}
 .tour-card{position:fixed;background:var(--surface);border-radius:20px;padding:14px 14px 12px;box-shadow:var(--shadow-lg);max-width:calc(100vw - 32px);width:340px}
 .tour-card.in{animation:tour-in .3s ease-out}
@@ -763,3 +763,7 @@ html{background:var(--bg)}
 .tour-dots i.on{background:var(--accent);width:16px;border-radius:4px}
 .edge-dot.tour-peek{right:0}
 @media (prefers-reduced-motion:reduce){.tour-hole{transition:none}.tour-card.in{animation:none}}
+
+.tour-btn{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px}
+.tour-btn>*{flex:none}
+.tour-btn svg{display:block}
