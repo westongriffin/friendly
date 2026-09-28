@@ -223,6 +223,13 @@ function whenContext(d) {
 const DOT = "You are Dot, the helper inside Friendly, an app friends use to plan get-togethers and split costs. Only include what the user actually said; never invent people, places or facts.";
 
 // mode "event": what the user said -> an event draft, plus a few concrete ideas that would make the invite better organised.
+// An event's stops ("6:00 PM Dinner at Hat Creek"), for calendar descriptions.
+function stopsText(ev) {
+  const st = (Array.isArray(ev && ev.stops) ? ev.stops : []).filter(x => x && (x.name || x.place));
+  if (st.length < 2) return "";
+  const t12 = t => { if (!/^\d{2}:\d{2}$/.test(t || "")) return ""; let [h, m] = t.split(":").map(Number); const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12; return h + ":" + String(m).padStart(2, "0") + " " + ap; };
+  return "The plan:\n" + st.map(x => (x.time ? t12(x.time) + " " : "") + (x.name || x.place) + (x.name && x.place ? " at " + x.place : "")).join("\n") + "\n\n";
+}
 async function draftPlan(d) {
   const text = sv(d.text, 1500); if (text.length < 4) throw new Error("nothing to plan");
   const people = clean(d.people, 150, 40), groups = clean(d.groups, 40, 40);
@@ -239,6 +246,7 @@ Rules:
 - title: short and natural, the way the user would name it (e.g. "Taco Night", "Sam's 30th").
 - food: what's being served or the food plan ("tacos and margs, BYOB", "we'll order pizza"), or empty. Things guests are asked to bring go in bring, not food.
 - notes: details that don't fit elsewhere (dress code, parking, what to expect), in the user's words, or empty.
+- stops: ONLY when the plan has two or more activities in sequence (dinner then bowling, drinks then a show then dessert), list each in order: time as 24-hour "HH:MM" if stated or clearly implied (else empty), name as a short label for the activity ("Dinner", "Bowling", "Dessert"), place as the venue or address if named (else empty), emoji as one emoji for that stop. When there are stops, set time to the first stop's time and location to the first stop's place. A single activity means stops is empty.
 - summary: one warm sentence in Dot's voice, starting "Here's what I heard:", restating the plan in plain words. No emoji.
 - ideas: 2 to 4 concrete, specific suggestions that would make THIS invite clearer or better organised, each as something the app can add with one tap. Think like a good host: an RSVP question the guests would need answering (dietary needs, plus-ones, who's driving), an item people always forget for this kind of plan (ice, cups, a speaker, sunscreen), an end time so people can plan around it, a head count if space is tight, a note about parking, what to wear or where to meet. Never suggest something the user already covered. Each idea: "label" is the chip text starting with a verb ("Ask about dietary needs", "Add ice to the bring list", "End it at 10 PM"); "kind" is one of question, bring, note, endTime, capacity; "value" is exactly what to add (the question text, the item, the note sentence, HH:MM, or a number).
 Friends: ${people.join("; ") || "(none)"}.
@@ -249,6 +257,7 @@ ${text}`;
   const schema = { type: "OBJECT", required: ["title", "kind", "summary"], properties: {
     kind: { type: "STRING", enum: ["event", "meeting"] }, title: str, emoji: str, theme: { type: "STRING", enum: THEME_IDS },
     date: str, time: str, endTime: str, location: str, food: str, notes: str, capacity: { type: "INTEGER" },
+    stops: { type: "ARRAY", items: { type: "OBJECT", required: ["name"], properties: { time: str, name: str, place: str, emoji: str } } },
     guests: { type: "ARRAY", items: str }, group: str,
     bring: { type: "ARRAY", items: { type: "OBJECT", required: ["item"], properties: { item: str, qty: str } } },
     questions: { type: "ARRAY", items: str },
@@ -269,6 +278,7 @@ ${text}`;
     guests: clean(out.guests, 30, 60), group: sv(out.group, 60),
     bring: (Array.isArray(out.bring) ? out.bring : []).slice(0, 12).map(b => ({ item: sv(b && b.item, 60), qty: sv(b && b.qty, 20) })).filter(b => b.item),
     questions: clean(out.questions, 5, 120),
+    stops: (Array.isArray(out.stops) ? out.stops : []).slice(0, 8).map(x => ({ time: /^\d{2}:\d{2}$/.test((x && x.time) || "") ? x.time : "", name: sv(x && x.name, 60), place: sv(x && x.place, 120), emoji: sv(x && x.emoji, 8).replace(/[A-Za-z0-9\s]/g, "").slice(0, 4) || "📍" })).filter(x => x.name || x.place),
     missing: clean(out.missing, 4, 12).filter(m => ["date", "time", "location", "guests"].includes(m)),
     ideas: (Array.isArray(out.ideas) ? out.ideas : []).slice(0, 4).map(x => ({ label: sv(x && x.label, 60), kind: sv(x && x.kind, 12), value: sv(x && x.value, 200) }))
       .filter(x => x.label && x.value && ["question", "bring", "note", "endTime", "capacity"].includes(x.kind))
@@ -548,7 +558,7 @@ function buildIcs(id, ev, method, attendees, host, seq) {
     "UID:" + id + "@officialfriendly.com", "SEQUENCE:" + seq, "DTSTAMP:" + new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, ""), dt,
     "SUMMARY:" + icsEsc((ev.kind === "meeting" ? "" : (ev.emoji ? ev.emoji + " " : "")) + ev.title),
     ev.location ? "LOCATION:" + icsEsc(ev.location) : null,
-    "DESCRIPTION:" + icsEsc((ev.notes ? ev.notes + "\n\n" : "") + "RSVP and details in Friendly: " + FN_BASE + "/share/p/" + id),
+    "DESCRIPTION:" + icsEsc(stopsText(ev) + (ev.notes ? ev.notes + "\n\n" : "") + "RSVP and details in Friendly: " + FN_BASE + "/share/p/" + id),
     "URL:" + FN_BASE + "/share/p/" + id,
     host.email ? `ORGANIZER;CN=${icsEsc(host.name)}:mailto:${host.email}` : null,
     ...attendees.map(a => `ATTENDEE;CN=${icsEsc(a.name)};ROLE=REQ-PARTICIPANT;RSVP=TRUE;PARTSTAT=NEEDS-ACTION:mailto:${a.email}`),
@@ -797,7 +807,7 @@ exports.cal = onRequest({ region: "us-central1", invoker: "public", memory: "256
     lines.push("BEGIN:VEVENT", "UID:" + d.id + "@officialfriendly.com", "DTSTAMP:" + stamp, dt,
       "SUMMARY:" + icsEsc((ev.kind === "meeting" ? "" : (ev.emoji ? ev.emoji + " " : "")) + ev.title),
       ev.location ? "LOCATION:" + icsEsc(ev.location) : null,
-      "DESCRIPTION:" + icsEsc("Your RSVP: " + my + (ev.hostName ? "\nHost: " + ev.hostName : "") + (ev.notes ? "\n\n" + ev.notes : "") + "\n\n" + SITE + "/#/e/" + d.id),
+      "DESCRIPTION:" + icsEsc("Your RSVP: " + my + (ev.hostName ? "\nHost: " + ev.hostName : "") + (stopsText(ev) ? "\n\n" + stopsText(ev).trim() : "") + (ev.notes ? "\n\n" + ev.notes : "") + "\n\n" + SITE + "/#/e/" + d.id),
       "URL:" + SITE + "/#/e/" + d.id, "STATUS:" + (my === "no" ? "CANCELLED" : "CONFIRMED"), "END:VEVENT");
   });
   lines.push("END:VCALENDAR");
@@ -1142,7 +1152,7 @@ exports.onRsvp = onDocumentUpdated({ document: "events/{id}", ...MAIL }, async e
   }
   // Edits to the essentials -> bump the sequence once and re-send invites.
   const essentials = ["title", "date", "time", "endTime", "location", "notes"];
-  if (essentials.some(k => (before[k] || "") !== (after[k] || ""))) {
+  if (essentials.some(k => (before[k] || "") !== (after[k] || "")) || stopsText(before) !== stopsText(after)) {
     const seq = Number(after.sequence || 0) + 1;
     await e.data.after.ref.update({ sequence: seq });
     await sendInviteEmails(id, { ...after, sequence: seq }, "REQUEST");

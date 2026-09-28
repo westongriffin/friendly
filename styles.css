@@ -675,3 +675,45 @@ html{background:var(--bg)}
 .skel-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .skel-tile{aspect-ratio:1/1.1}
 @media (prefers-reduced-motion:reduce){.skel{animation:none}}
+/* ---- The plan: several stops in one event ---- */
+.stop-chips{display:flex;gap:6px;flex-wrap:wrap}
+.stop-chips .chip{font-size:13px;font-weight:600;padding:7px 12px;border-radius:999px;background:var(--surface);border:1px solid var(--line);color:var(--ink)}
+.stop-chips .chip:active{transform:scale(.97)}
+.tl{position:relative;display:flex;flex-direction:column;gap:8px;padding-left:24px}
+.tl::before{content:"";position:absolute;left:9px;top:16px;bottom:16px;border-left:2px dotted #E7C9B0}
+.tl .stop{position:relative;display:flex;gap:10px;align-items:center;border-radius:14px;padding:9px 11px}
+.tl .stop::before{content:"";position:absolute;left:-21px;top:22px;width:12px;height:12px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px var(--surface)}
+/* composer + edit dialog */
+.tl-edit .stop-edit{flex-direction:column;align-items:stretch;gap:6px;background:var(--bg);border:1px solid var(--line)}
+.stop-top{display:flex;gap:6px;align-items:center}
+.stop-edit input{border:1px solid var(--line);border-radius:10px;padding:7px 9px;background:var(--surface);min-width:0}
+.stop-edit .st-time{width:108px;flex:none}
+.stop-edit .st-name{flex:1;font-weight:600}
+.stop-edit .st-place{width:100%}
+.st-emoji{font-size:20px;width:38px;height:36px;border-radius:10px;background:var(--surface2);flex:none}
+.st-del{width:30px;height:30px;border-radius:50%;color:var(--muted);flex:none}
+.st-emo-pick{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;padding-top:4px}
+.st-emo-pick button{font-size:20px;padding:4px 0;border-radius:8px}
+.st-emo-pick button:hover{background:var(--surface2)}
+.stop-edit .places-list{margin-top:0}
+.stops-card.in-dialog{margin-bottom:10px}
+/* event page timeline, on the event's own theme */
+.tl-ev::before{border-color:color-mix(in srgb,var(--th-ink) 28%,transparent)}
+.tl-ev .stop{background:color-mix(in srgb,var(--th-chip,#fff) 70%,transparent)}
+.tl-ev .stop::before{background:var(--th-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--th-accent) 25%,transparent)}
+.tl-ev .t{font-weight:700;font-size:12px;min-width:58px;color:var(--th-accent);font-variant-numeric:tabular-nums}
+.tl-ev .e{font-size:20px}
+.tl-ev .stop-txt{flex:1;min-width:0}
+.tl-ev .stop-txt b{display:block;font-size:14.5px;line-height:1.25}
+.tl-ev .stop-txt small{display:block;font-size:12px;opacity:.75;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stop-dir{font-size:11.5px;font-weight:700;padding:6px 10px;border-radius:999px;background:var(--th-accent);color:var(--th-on-accent);white-space:nowrap;flex:none}
+.stop-pill{display:inline-block;vertical-align:1px;font:700 10.5px/1 var(--body);padding:4px 7px;border-radius:999px;background:color-mix(in srgb,var(--th-accent) 18%,transparent);color:var(--th-accent);margin-left:4px}
+.stop-pill.now{background:var(--good);color:#fff}
+.tl-ev .stop.done{opacity:.5}
+.tl-ev .stop.done::before{background:color-mix(in srgb,var(--th-ink) 45%,transparent)}
+.tl-ev .stop.cur{background:var(--th-card,#fff);box-shadow:0 6px 18px rgba(0,0,0,.12)}
+.tl-ev .stop.cur::before{background:var(--good)}
+.ev-where-btn{font:inherit;color:inherit;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px;opacity:.95}
+/* tiles: a little route of emojis */
+.ev-route{white-space:nowrap}
+.ev-route i{font-style:normal;opacity:.7;margin:0 1px;font-size:.9em}

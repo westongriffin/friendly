@@ -1245,7 +1245,7 @@ function eventCard(ev) {
       ${ev.cover ? "" : `<div class="ev-card-emoji">${esc(ev.emoji || "🎉")}</div>`}
       <div class="ev-card-text">
         <div class="ev-card-title" style="font-family:${esc(th.font)},system-ui">${esc(ev.title)}</div>
-        <div class="ev-card-date">${MONTHS[d.getMonth()]} ${d.getDate()}${ev.time ? " · " + fmtTime(ev.time) : ""}</div>
+        <div class="ev-card-date">${MONTHS[d.getMonth()]} ${d.getDate()}${ev.time ? " · " + fmtTime(ev.time) : ""}${evStops(ev).length ? ` · <span class="ev-route">${evStops(ev).slice(0, 4).map(x => esc(x.emoji || "📍")).join("<i>›</i>")}</span>` : ""}</div>
         <div class="ev-card-foot">
           <span class="mini-guests">${guests.map(u => avatar(u, "xs")).join("")}${(ev.invitedUids || []).length > 3 ? `<span class="more">+${ev.invitedUids.length - 3}</span>` : ""}</span>
           <span class="count">${going} going${ev.capacity > 0 ? " / " + ev.capacity : ""}</span>
@@ -1571,7 +1571,7 @@ async function leaveGroup(g) {
 const compose = { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji",
   title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false,
   questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "" };
-function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", repeat: "", _restored: false, _fromDraft: false, _plan: null }); }
+function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", repeat: "", stops: [], _restored: false, _fromDraft: false, _plan: null }); }
 // ---- "Let me plan it": say the plan, Dot drafts it, you review it in the composer. Nothing is created or sent until you tap Create.
 function planContext(text, mode, ctx) {
   const d = new Date(), pad = n => String(n).padStart(2, "0");
@@ -1695,7 +1695,12 @@ function nightToPlan(n) {
   compose.title = n.title.slice(0, 80); compose.date = n.date; compose.time = n.start || ""; compose.emoji = n.emoji || [...(n.emojis || "🌆")][0] || "🌆"; compose.theme = THEMES.some(t => t.id === n.theme) ? n.theme : "midnight";
   const cover = coverUrl(n); if (cover) { compose.cover = cover; compose.coverTab = "upload"; }
   compose.where = ((main && main.name) || "").slice(0, 200); compose.food = eat ? eat.name.slice(0, 120) : "";
-  compose.notes = [n.stops.map(x => `${x.time} · ${x.name}${x.note ? " (" + x.note + ")" : ""}`).join("\n"), n.parking ? "Parking: " + n.parking : "", n.cost ? "Cost: " + n.cost : "", n.ticketUrl ? "Tickets: " + n.ticketUrl : ""].filter(Boolean).join("\n").slice(0, 1000);
+  // Curate's stops become the event's timeline ("5:30 PM" → "17:30"); their tips go in the details.
+  const to24 = t => { const m = /^(\d{1,2})(?::(\d{2}))?\s*([AP]M)$/i.exec(String(t || "").trim()); if (!m) return ""; let h = +m[1] % 12; if (/p/i.test(m[3])) h += 12; return String(h).padStart(2, "0") + ":" + (m[2] || "00"); };
+  const kindEmoji = { eat: "🍽️", do: "🎟️", go: "🚶" }, city = (S.profile.city || "").trim();
+  const st = sortStops(cleanStops(n.stops.map(x => ({ time: to24(x.time), emoji: kindEmoji[x.kind] || "📍", name: x.name, place: x.name + (city ? ", " + city : "") }))));
+  if (st.length >= 2) { compose.stops = st; compose.time = st[0].time || compose.time; compose.where = st[0].place; }
+  compose.notes = [st.length >= 2 ? n.stops.filter(x => x.note).map(x => `${x.name}: ${x.note}`).join("\n") : n.stops.map(x => `${x.time} · ${x.name}${x.note ? " (" + x.note + ")" : ""}`).join("\n"), n.parking ? "Parking: " + n.parking : "", n.cost ? "Cost: " + n.cost : "", n.ticketUrl ? "Tickets: " + n.ticketUrl : ""].filter(Boolean).join("\n").slice(0, 1000);
   compose._plan = { summary: "Here's the night, set up: " + n.title + ". Add who's coming and it's ready.", missing: ["guests"], unmatched: [], bring: [], ideas: [] };
   go("#/new");
 }
@@ -1881,6 +1886,7 @@ function applyPlan(p, said) {
   if (/^\d{2}:\d{2}$/.test(p.endTime || "")) compose.end = p.endTime;
   compose.where = String(p.location || "").slice(0, 200); compose.food = String(p.food || "").slice(0, 120); compose.notes = String(p.notes || "").slice(0, 1000);
   if (p.capacity > 0) compose.cap = String(Math.min(500, p.capacity));
+  { const st = sortStops(cleanStops(p.stops)); if (st.length >= 2 && compose.kind !== "meeting") { compose.stops = st; compose.time = st[0].time || compose.time; compose.where = st[0].place || compose.where; } }
   compose.questions = (p.questions || []).slice(0, 5).map(q => ({ id: newId().slice(0, 6), q: String(q).slice(0, 120) }));
   const gname = String(p.group || "").trim().toLowerCase();
   const g = gname && [...S.groups.values()].find(x => (x.name || "").trim().toLowerCase() === gname);
@@ -1948,8 +1954,69 @@ function planCard() {
   const ideas = (p.ideas || []).length ? `<div class="idea-row"><span class="muted sm">Want me to…</span>${p.ideas.map((x, i) => `<button type="button" class="idea-chip" data-idea="${i}">＋ ${esc(x.label)}</button>`).join("")}</div>` : (p.applied ? `<div class="muted sm" style="margin-top:6px">That's everything I'd add. Looks good.</div>` : "");
   return `<div class="dot-say plan-card">${dot(miss.length ? "thinking" : "happy", 56)}<div class="say-bubble"><b>${esc(p.summary)}</b>${bits.length ? `<div class="muted sm" style="margin-top:4px">${bits.map(esc).join(" ")}</div>` : ""}${ideas}<div style="margin-top:6px"><a id="planRedo" style="color:var(--accent);font-weight:600">Say it again</a></div></div></div>`;
 }
+// ---- The plan: one event, several stops (dinner, then bowling, then dessert) ----
+// An event with 2+ stops carries ev.stops = [{ time "HH:MM", emoji, name, place }], kept in time order;
+// ev.time and ev.location mirror the first stop so calendars, weather and the tiles keep working.
+const STOP_CHIPS = [["🍽️", "Dinner"], ["🍸", "Drinks"], ["🎟️", "Show"], ["🎳", "Activity"], ["🍦", "Dessert"]];
+const STOP_EMOJIS = ["🍽️", "🍔", "🌮", "🍕", "🍣", "🍸", "🍻", "🍷", "☕", "🎟️", "🎬", "🎤", "🎳", "⚾", "🏈", "🎮", "🛍️", "🌳", "🏖️", "🍦", "🎂", "🎉", "🚗", "📍"];
+const stopMins = t => { if (!/^\d{2}:\d{2}$/.test(t || "")) return 99999; const [h, m] = t.split(":").map(Number); return (h < 5 ? h + 24 : h) * 60 + m; };   // 12:30 AM sorts after 10 PM
+const sortStops = arr => arr.map((x, i) => [x, i]).sort((a, b) => (stopMins(a[0].time) - stopMins(b[0].time)) || (a[1] - b[1])).map(p => p[0]);
+const cleanStops = arr => (Array.isArray(arr) ? arr : []).slice(0, 8).map(x => ({ time: /^\d{2}:\d{2}$/.test((x && x.time) || "") ? x.time : "", emoji: String((x && x.emoji) || "📍").slice(0, 4), name: String((x && x.name) || "").trim().slice(0, 60), place: String((x && x.place) || "").trim().slice(0, 120) })).filter(x => x.name || x.place);
+const evStops = ev => { const st = cleanStops(ev && ev.stops); return st.length >= 2 ? sortStops(st) : []; };
+const stopsText = ev => evStops(ev).map(x => `${x.time ? fmtTime(x.time) + " " : ""}${x.name || x.place}${x.name && x.place ? " at " + placeLine(x) : ""}`).join("\n");
+// "Three Empires Brewing, Frisco, TX" under "Three Empires Brewing" reads as just "Frisco, TX".
+const placeLine = x => x.name && x.place && x.place.startsWith(x.name + ", ") ? x.place.slice(x.name.length + 2) : x.place;
+const stopMapUrl = x => "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent([x.place || x.name].filter(Boolean).join(", "));
+// One stops editor serves the composer and the Edit event dialog; stopCtx says which one is on screen.
+// h: the object holding { stops, time, where, emoji }; card/head: element ids; time/where: the plain Start/Where
+// inputs the first stop mirrors; hide: class on the Start/Where fields that step aside once there are 2+ stops.
+const composeStopCtx = { get h() { return compose; }, card: "stopsCard", head: "stopsHead", time: "cTime", where: "cWhere", hide: "stops-hide", save: () => saveDraft(), before: () => syncCompose() };
+let stopCtx = composeStopCtx;
+function stopsEditor(ctx = stopCtx) {
+  const st = ctx.h.stops || [];
+  const chips = `<div class="chips stop-chips">${STOP_CHIPS.map(([e, n]) => `<button type="button" class="chip" data-addstop="${e}|${n}">${e} ${n}</button>`).join("")}</div>`;
+  if (st.length < 2) return `<p class="muted sm" style="margin:0 0 10px">Doing more than one thing? Add the next stop and it becomes a timeline.</p>${chips}`;
+  return `<div class="tl tl-edit">${st.map((x, i) => `<div class="stop stop-edit" data-si="${i}">
+      <div class="stop-top"><input type="time" class="st-time" data-sf="time" value="${esc(x.time)}" aria-label="Time">
+      <button type="button" class="st-emoji" data-semo="${i}" aria-label="Change emoji">${esc(x.emoji || "📍")}</button>
+      <input class="st-name" data-sf="name" maxlength="60" value="${esc(x.name)}" placeholder="${i === 0 ? "First stop, like Dinner" : "Then what?"}" aria-label="What">
+      <button type="button" class="st-del" data-sdel="${i}" aria-label="Remove stop">✕</button></div>
+      <input class="st-place" data-sf="place" maxlength="120" value="${esc(x.place)}" placeholder="Where" aria-label="Where" autocomplete="off">
+      <div class="st-emo-pick hidden" data-epick="${i}">${STOP_EMOJIS.map(e => `<button type="button" data-pe="${e}">${e}</button>`).join("")}</div>
+    </div>`).join("")}</div>
+    <div class="stop-add"><span class="field-label" style="margin:12px 0 6px">Add a stop</span>${chips}</div>`;
+}
+function stopsHead(ctx = stopCtx) { const n = (ctx.h.stops || []).length; return n >= 2 ? `${n} stops · in time order` : "One stop, or several"; }
+function refreshStops() { const c = el(stopCtx.card); if (!c) return; c.innerHTML = stopsEditor(); const h = el(stopCtx.head); if (h) h.textContent = stopsHead(); document.querySelectorAll("." + stopCtx.hide).forEach(n => n.classList.toggle("hidden", (stopCtx.h.stops || []).length >= 2)); wireStops(); }
+// The first stop mirrors Start and Where, so the preview, weather and calendar stay right.
+function mirrorFirstStop() { const H = stopCtx.h, st = H.stops || []; if (st.length < 2) return; const first = sortStops(st)[0]; H.time = first.time || H.time; H.where = first.place || H.where; if (el(stopCtx.time)) el(stopCtx.time).value = H.time; if (el(stopCtx.where)) el(stopCtx.where).value = H.where; }
+function wireStops() {
+  const C = stopCtx, H = C.h, root = el(C.card); if (!root) return;
+  root.querySelectorAll("[data-addstop]").forEach(b => b.onclick = () => {
+    if (C.before) C.before(); const [emoji, name] = b.dataset.addstop.split("|");
+    if ((H.stops || []).length < 2) H.stops = [{ time: (el(C.time) || {}).value || H.time || "", emoji: H.emoji || "📍", name: "", place: (el(C.where) || {}).value || H.where || "" }];
+    if (H.stops.length >= 8) return toast("Eight stops is the most one event can hold.");
+    H.stops.push({ time: "", emoji, name, place: "" }); C.save(); refreshStops();
+    const rows = el(C.card).querySelectorAll(".stop-edit"); const last = rows[rows.length - 1]; if (last) last.querySelector(".st-time").focus();
+  });
+  root.querySelectorAll(".stop-edit").forEach(row => {
+    const i = +row.dataset.si;
+    row.querySelectorAll("[data-sf]").forEach(inp => {
+      inp.oninput = () => { H.stops[i][inp.dataset.sf] = inp.value; mirrorFirstStop(); C.save(); };
+      if (inp.dataset.sf === "time") inp.onchange = () => { H.stops[i].time = inp.value; H.stops = sortStops(H.stops); mirrorFirstStop(); C.save(); refreshStops(); };
+    });
+    attachPlaces(row.querySelector(".st-place"));
+  });
+  root.querySelectorAll("[data-sdel]").forEach(b => b.onclick = () => {
+    H.stops.splice(+b.dataset.sdel, 1);
+    if (H.stops.length < 2) { const one = H.stops[0]; if (one) { H.time = one.time || H.time; H.where = one.place || H.where; if (el(C.time)) el(C.time).value = H.time; if (el(C.where)) el(C.where).value = H.where; } H.stops = []; }
+    mirrorFirstStop(); C.save(); refreshStops();
+  });
+  root.querySelectorAll("[data-semo]").forEach(b => b.onclick = () => { const p = root.querySelector(`[data-epick="${b.dataset.semo}"]`); if (p) p.classList.toggle("hidden"); });
+  root.querySelectorAll("[data-epick]").forEach(p => p.querySelectorAll("[data-pe]").forEach(b => b.onclick = () => { const i = +p.dataset.epick; H.stops[i].emoji = b.dataset.pe; C.save(); refreshStops(); }));
+}
 function composeBody() {
-  restoreDraft();
+  restoreDraft(); stopCtx = composeStopCtx;
   const emojis = ["🎉", "🍕", "🌮", "🍻", "🎂", "🎬", "🎮", "🏖️", "🥾", "⚽", "🎲", "🍜", "🎃", "🎄", "🕺", "🔥"];
   const groups = [...S.groups.values()];
   const th = themeOf(compose.theme, compose.customTheme);
@@ -1998,19 +2065,21 @@ function composeBody() {
       <label class="field"><span>${compose.kind === "meeting" ? "Meeting title" : "What's the plan?"}</span><input id="cTitle" maxlength="80" value="${esc(compose.title)}" placeholder="Rooftop taco night"></label>
       <div class="two">
         <label class="field"><span>Date</span><input id="cDate" type="date" value="${compose.date || todayStr()}"></label>
-        <label class="field"><span>Start</span><input id="cTime" type="time" value="${compose.time}"></label>
+        <label class="field stops-hide ${(compose.stops || []).length >= 2 ? "hidden" : ""}"><span>Start</span><input id="cTime" type="time" value="${compose.time}"></label>
       </div>
       <div class="two">
         <label class="field"><span>End</span><input id="cEnd" type="time" value="${compose.end}"></label>
         <label class="field"><span>Max spots</span><input id="cCap" type="number" min="1" max="1000" value="${compose.cap}" placeholder="No limit"></label>
       </div>
-      <label class="field"><span>Where</span><input id="cWhere" maxlength="90" value="${esc(compose.where)}" placeholder="Address or vibe"></label>
+      <label class="field stops-hide ${(compose.stops || []).length >= 2 ? "hidden" : ""}"><span>Where</span><input id="cWhere" maxlength="90" value="${esc(compose.where)}" placeholder="Address or vibe"></label>
       ${compose.kind === "meeting" ? "" : `<label class="field"><span>Food &amp; drinks <span class="muted">(optional)</span></span><input id="cFood" maxlength="120" value="${esc(compose.food || "")}" placeholder="Tacos and margs · BYOB · we'll order pizza"></label>`}
       <label class="field"><span>The details</span><textarea id="cNotes" maxlength="600" placeholder="Dress code, what to bring, parking…">${esc(compose.notes)}</textarea></label>
       <label class="field"><span>Repeats</span><select id="cRepeat"><option value="" ${!compose.repeat ? "selected" : ""}>Never</option><option value="weekly" ${compose.repeat === "weekly" ? "selected" : ""}>Every week</option><option value="biweekly" ${compose.repeat === "biweekly" ? "selected" : ""}>Every 2 weeks</option><option value="monthly" ${compose.repeat === "monthly" ? "selected" : ""}>Every month</option></select></label>
       <p class="muted sm" style="margin:-4px 0 0">Guests get a calendar invite at their email on file.</p>
     </div>
 
+    ${compose.kind === "meeting" ? "" : `<div class="section-head"><h2>The plan</h2><span class="muted sm" id="stopsHead">${stopsHead()}</span></div>
+    <div class="form-card card stops-card" id="stopsCard">${stopsEditor()}</div>`}
     <div class="section-head"><h2>Who's invited</h2></div>
     <div class="form-card card">
       ${groups.length ? `<label class="field"><span>Invite a whole group</span>
@@ -2140,6 +2209,7 @@ function wireCompose() {
   ["cTitle", "cDate", "cTime", "cEnd", "cWhere", "cNotes", "cCap"].forEach(id => el(id).oninput = () => { syncCompose(); upd(); }); upd();
   document.querySelectorAll("input[name=coh], #cApproval, #cRepeat").forEach(i => i.onchange = syncCompose);
   attachPlaces(el("cWhere"));
+  wireStops();
   wireCover();
   document.querySelectorAll("[data-theme]").forEach(b => b.onclick = () => { syncCompose(); compose.theme = b.dataset.theme; render(); });
   if (el("customThemeBtn")) el("customThemeBtn").onclick = () => { syncCompose(); openCustomThemeDialog(); };
@@ -2197,14 +2267,15 @@ async function createEvent() {
   const phoneInviteesSnapshot = [...compose.phoneInvitees];
   const cohostUids = [...document.querySelectorAll('input[name=coh]:checked')].map(i => i.value).filter(u => u !== myUid());
   const questions = compose.questions.filter(q => q.q.trim());
+  const stopsOut = compose.kind === "meeting" ? [] : (() => { const st = sortStops(cleanStops(compose.stops)); return st.length >= 2 ? st : []; })();
   const id = newId();
   const ev = {
     hostId: myUid(), hostName: S.profile.name, cohostUids, groupId, invitedUids,
     // Guest names travel with the event so link-joined guests can see who's who.
     names: Object.fromEntries(invitedUids.map(u => [u, u === myUid() ? S.profile.name : nameOf(u)])),
     title, emoji: compose.emoji, theme: compose.theme, customTheme: compose.theme === "custom" ? compose.customTheme : null, cover: compose.cover || "",
-    date, time: el("cTime").value || "", endTime: el("cEnd").value || "",
-    location: el("cWhere").value.trim(), food: el("cFood") ? el("cFood").value.trim() : "", notes: el("cNotes").value.trim(),
+    date, time: stopsOut.length ? (stopsOut[0].time || el("cTime").value || "") : (el("cTime").value || ""), endTime: el("cEnd").value || "",
+    location: stopsOut.length ? (stopsOut[0].place || el("cWhere").value.trim()) : el("cWhere").value.trim(), stops: stopsOut, food: el("cFood") ? el("cFood").value.trim() : "", notes: el("cNotes").value.trim(),
     capacity: Number(el("cCap").value) || 0, approval: !!el("cApproval").checked,
     questions, rsvps: { [myUid()]: "going" }, plusOnes: {}, hypes: {}, answers: {},
     // The event's own unguessable id is the access token behind the "add people" flow
@@ -2237,6 +2308,18 @@ async function createEvent() {
 // ---------- EVENT PAGE (the themed invite) ----------
 let eventBgStop = () => {};
 function cleanupEvent() { S.evSubs.forEach(fn => fn()); S.evSubs = []; eventBgStop(); eventBgStop = () => {}; }
+// The plan on the event page: a timeline of stops. On the day itself, the stop underway is marked Now,
+// earlier ones fade, and the next one is marked Up next; every stop with a place opens directions.
+function planCardHtml(ev) {
+  const st = evStops(ev); if (!st.length) return "";
+  const today = ev.date === todayStr(), d = new Date(), nowM = (d.getHours() < 5 ? d.getHours() + 24 : d.getHours()) * 60 + d.getMinutes();
+  let cur = -1; if (today) st.forEach((x, i) => { if (stopMins(x.time) <= nowM) cur = i; });
+  return `<div class="ev-card-glass plan-card" id="planCard"><div class="glass-head">The plan <span>${st.length} stops</span></div>
+    <div class="tl tl-ev">${st.map((x, i) => { const state = !today ? "" : i < cur ? "done" : i === cur ? "cur" : i === cur + 1 ? "next" : "";
+      return `<div class="stop ${state}"><span class="t">${x.time ? esc(fmtTime(x.time)) : ""}</span><span class="e">${esc(x.emoji || "📍")}</span>
+        <span class="stop-txt"><b>${esc(x.name || x.place)}${state === "cur" ? ` <span class="stop-pill now">Now</span>` : state === "next" ? ` <span class="stop-pill">Up next</span>` : ""}</b>${x.name && x.place ? `<small>${esc(placeLine(x))}</small>` : ""}</span>
+        ${(x.place || x.name) && state !== "done" ? `<a class="stop-dir" href="${esc(stopMapUrl(x))}" target="_blank" rel="noopener">Directions</a>` : ""}</div>`; }).join("")}</div></div>`;
+}
 function renderEventPage(root, id) {
   cleanupEvent();
   const ev = S.events.get(id);
@@ -2322,7 +2405,7 @@ function eventInner(ev) {
     <h1 class="ev-title">${esc(ev.title)}</h1>
     <div class="ev-when">${esc(fmtWhen(ev))}</div>
     <div class="ev-count">${countdown(ev)}</div>
-    ${ev.location ? `<div class="ev-where"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}" target="_blank" rel="noopener" title="Open in Google Maps">📍 ${esc(ev.location)}</a></div>${/zoom|meet\.google|teams|http|online|call/i.test(ev.location) ? "" : `<details class="map-wrap"><summary>Show map</summary><iframe class="map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="https://maps.google.com/maps?q=${encodeURIComponent(ev.location)}&output=embed" title="Map"></iframe></details>`}` : ""}
+    ${evStops(ev).length ? `<div class="ev-where"><button type="button" class="ev-where-btn" data-jump="planCard">🗺️ ${evStops(ev).length} stops · starts at ${esc(evStops(ev)[0].name || evStops(ev)[0].place)}</button></div>` : ev.location ? `<div class="ev-where"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}" target="_blank" rel="noopener" title="Open in Google Maps">📍 ${esc(ev.location)}</a></div>${/zoom|meet\.google|teams|http|online|call/i.test(ev.location) ? "" : `<details class="map-wrap"><summary>Show map</summary><iframe class="map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="https://maps.google.com/maps?q=${encodeURIComponent(ev.location)}&output=embed" title="Map"></iframe></details>`}` : ""}
     ${ev.food ? `<div class="ev-food">🍽️ ${esc(ev.food)}</div>` : ""}
     <div class="ev-hosts">Hosted by ${hosts.map(u => esc(first(nameOf(u)))).join(" & ")}${grp ? ` · <span class="grp-tag">${esc(grp.emoji || "")} ${esc(grp.name)}</span>` : ""}</div>
     ${ev.capacity > 0 ? `<div class="ev-cap ${full ? "full" : ""}">${going} / ${ev.capacity} spots${full ? " · full" : ""}</div>` : ""}
@@ -2330,6 +2413,7 @@ function eventInner(ev) {
   </div>
 
   <div class="ev-jumpnav">
+    ${evStops(ev).length ? `<button type="button" class="jump-chip" data-jump="planCard">The plan</button>` : ""}
     <button type="button" class="jump-chip" data-jump="rsvpCard">RSVP</button>
     <button type="button" class="jump-chip" data-jump="guestCard">Guests</button>
     <button type="button" class="jump-chip" data-jump="dayCard">Day of</button>
@@ -2339,6 +2423,7 @@ function eventInner(ev) {
     <button type="button" class="jump-chip" data-jump="wall">Wall</button>
   </div>
 
+  ${planCardHtml(ev)}
   ${ev.notes ? `<div class="ev-card-glass ev-notes">${esc(ev.notes).replace(/\n/g, "<br>")}</div>` : ""}
 
   <div class="ev-card-glass" id="rsvpCard">${rsvpBtns}</div>
@@ -2605,7 +2690,7 @@ function eventIcs(ev) {
   const dt = (d, t) => d.replace(/-/g, "") + "T" + (t || "09:00").replace(":", "") + "00";
   const end = () => { if (ev.endTime) return dt(ev.date, ev.endTime); const [h, m] = (ev.time || "09:00").split(":").map(Number); const e = new Date(2000, 0, 1, h + 2, m); return dt(ev.date, String(e.getHours()).padStart(2, "0") + ":" + String(e.getMinutes()).padStart(2, "0")); };
   const escI = v => String(v || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
-  return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Friendly//officialfriendly.com//EN", "BEGIN:VEVENT", "UID:" + ev.id + "@officialfriendly.com", "DTSTAMP:" + new Date().toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z", "DTSTART:" + dt(ev.date, ev.time), "DTEND:" + end(), "SUMMARY:" + escI((ev.emoji ? ev.emoji + " " : "") + ev.title), ev.location ? "LOCATION:" + escI(ev.location) : "", "DESCRIPTION:" + escI((ev.notes ? ev.notes + "\n\n" : "") + "https://officialfriendly.com/#/e/" + ev.id), "END:VEVENT", "END:VCALENDAR"].filter(Boolean).join("\r\n");
+  return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Friendly//officialfriendly.com//EN", "BEGIN:VEVENT", "UID:" + ev.id + "@officialfriendly.com", "DTSTAMP:" + new Date().toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z", "DTSTART:" + dt(ev.date, ev.time), "DTEND:" + end(), "SUMMARY:" + escI((ev.emoji ? ev.emoji + " " : "") + ev.title), ev.location ? "LOCATION:" + escI(ev.location) : "", "DESCRIPTION:" + escI((stopsText(ev) ? "The plan:\n" + stopsText(ev) + "\n\n" : "") + (ev.notes ? ev.notes + "\n\n" : "") + "https://officialfriendly.com/#/e/" + ev.id), "END:VEVENT", "END:VCALENDAR"].filter(Boolean).join("\r\n");
 }
 function openCalendarDialog(ev) {
   const dt = (d, t) => d.replace(/-/g, "") + "T" + (t || "09:00").replace(":", "") + "00";
@@ -2961,25 +3046,30 @@ function downloadIcs(ev) {
   let dts, dte;
   if (ev.time) { const [h, m] = ev.time.split(":").map(Number); const s = new Date(parts[0], parts[1] - 1, parts[2], h, m); const e = ev.endTime ? (() => { const [H, M] = ev.endTime.split(":").map(Number); return new Date(parts[0], parts[1] - 1, parts[2], H, M); })() : new Date(s.getTime() + 2 * 3600e3); const f = d => d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + "T" + pad(d.getHours()) + pad(d.getMinutes()) + "00"; dts = "DTSTART:" + f(s); dte = "DTEND:" + f(e); }
   else { const d = ev.date.replace(/-/g, ""); const nx = new Date(parts[0], parts[1] - 1, parts[2] + 1); dts = "DTSTART;VALUE=DATE:" + d; dte = "DTEND;VALUE=DATE:" + nx.getFullYear() + pad(nx.getMonth() + 1) + pad(nx.getDate()); }
-  const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Friendly//EN", "BEGIN:VEVENT", "UID:" + ev.id + "@officialfriendly.com", "DTSTAMP:" + new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z", dts, dte, "SUMMARY:" + esc2(ev.emoji + " " + ev.title), ev.location ? "LOCATION:" + esc2(ev.location) : "", "DESCRIPTION:" + esc2((ev.notes || "") + "\nRSVP: " + location.origin + location.pathname + "#/e/" + ev.id), "END:VEVENT", "END:VCALENDAR"].filter(Boolean).join("\r\n");
+  const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Friendly//EN", "BEGIN:VEVENT", "UID:" + ev.id + "@officialfriendly.com", "DTSTAMP:" + new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z", dts, dte, "SUMMARY:" + esc2(ev.emoji + " " + ev.title), ev.location ? "LOCATION:" + esc2(ev.location) : "", "DESCRIPTION:" + esc2((stopsText(ev) ? "The plan:\n" + stopsText(ev) + "\n\n" : "") + (ev.notes || "") + "\nRSVP: " + location.origin + location.pathname + "#/e/" + ev.id), "END:VEVENT", "END:VCALENDAR"].filter(Boolean).join("\r\n");
   const a = document.createElement("a"); a.href = "data:text/calendar;charset=utf-8," + encodeURIComponent(ics); a.download = ev.title.replace(/[^a-z0-9]+/gi, "-") + ".ics"; a.click();
 }
 async function delEvent(ev) { if (isDemo() && DEMO_EVENTS.includes(ev.id)) return toast("Deleting this demo event is off -- it resets nightly instead."); if (!confirm(`Delete “${ev.title}”?`)) return; try { await deleteDoc(doc(db, "events", ev.id)); go("#/"); toast("Event deleted"); } catch (e) { toast(e.message); } }
 function editEvent(ev) {
+  const E = { stops: evStops(ev).map(x => ({ ...x })), time: ev.time || "", where: ev.location || "", emoji: ev.emoji || "📍" };
+  const ectx = { h: E, card: "eStopsCard", head: "eStopsHead", time: "eTime", where: "eWhere", hide: "estops-hide", save: () => {}, before: null };
+  const many = E.stops.length >= 2;
   dialog(`<h3>Edit event</h3>
     <label class="field"><span>Title</span><input id="eTitle" value="${esc(ev.title)}"></label>
     <div class="two"><label class="field"><span>Date</span><input id="eDate" type="date" value="${ev.date}"></label>
-    <label class="field"><span>Start</span><input id="eTime" type="time" value="${ev.time || ""}"></label></div>
-    <label class="field"><span>Where</span><input id="eWhere" value="${esc(ev.location || "")}"></label>
+    <label class="field estops-hide ${many ? "hidden" : ""}"><span>Start</span><input id="eTime" type="time" value="${ev.time || ""}"></label></div>
+    <label class="field estops-hide ${many ? "hidden" : ""}"><span>Where</span><input id="eWhere" value="${esc(ev.location || "")}"></label>
+    ${ev.kind === "meeting" ? "" : `<span class="field-label" style="display:flex;justify-content:space-between;margin-top:6px">The plan <small class="muted" id="eStopsHead">${stopsHead(ectx)}</small></span><div class="stops-card in-dialog" id="eStopsCard">${stopsEditor(ectx)}</div>`}
     ${ev.kind === "meeting" ? "" : `<label class="field"><span>Food &amp; drinks</span><input id="eFood" maxlength="120" value="${esc(ev.food || "")}" placeholder="Tacos and margs · BYOB"></label>`}
     <label class="field"><span>Repeats</span><select id="eRepeat"><option value="" ${!ev.repeat ? "selected" : ""}>Never</option><option value="weekly" ${ev.repeat === "weekly" ? "selected" : ""}>Every week</option><option value="biweekly" ${ev.repeat === "biweekly" ? "selected" : ""}>Every 2 weeks</option><option value="monthly" ${ev.repeat === "monthly" ? "selected" : ""}>Every month</option></select></label>
     <label class="field"><span>Details</span><textarea id="eNotes">${esc(ev.notes || "")}</textarea></label>
     <span class="field-label" style="margin-top:10px">Co-hosts (can edit &amp; manage)</span><div class="check-grid">${contactChecks("ecoh", new Set(ev.cohostUids || []))}</div>`,
     "Save", async () => {
       const cohostUids = [...document.querySelectorAll("input[name=ecoh]:checked")].map(i => i.value).filter(u => u !== ev.hostId);
-      try { await updateDoc(doc(db, "events", ev.id), { cohostUids, ...(cohostUids.length ? { invitedUids: arrayUnion(...cohostUids) } : {}), title: el("eTitle").value.trim(), date: el("eDate").value, time: el("eTime").value, location: el("eWhere").value.trim(), ...(el("eFood") ? { food: el("eFood").value.trim() } : {}), notes: el("eNotes").value.trim(), repeat: el("eRepeat").value }); closeDialog(); toast("Saved"); } catch (e) { toast(e.message); }
+      try { await updateDoc(doc(db, "events", ev.id), { cohostUids, ...(cohostUids.length ? { invitedUids: arrayUnion(...cohostUids) } : {}), title: el("eTitle").value.trim(), date: el("eDate").value, ...(() => { const st = sortStops(cleanStops(E.stops)); return st.length >= 2 ? { stops: st, time: st[0].time || el("eTime").value, location: st[0].place || el("eWhere").value.trim() } : { stops: [], time: el("eTime").value, location: el("eWhere").value.trim() }; })(), ...(el("eFood") ? { food: el("eFood").value.trim() } : {}), notes: el("eNotes").value.trim(), repeat: el("eRepeat").value }); closeDialog(); toast("Saved"); } catch (e) { toast(e.message); }
     });
   attachPlaces(el("eWhere"));
+  stopCtx = ectx; wireStops();
 }
 
 // ---------- MONEY ----------
@@ -3475,7 +3565,7 @@ function meetingCard(ev) {
       <span class="meet-tag">📅 Meeting${ev.repeat ? " · ↻" : ""}</span>
       <div class="ev-card-text">
         <div class="ev-card-title">${esc(ev.title)}</div>
-        <div class="ev-card-date">${MONTHS[d.getMonth()]} ${d.getDate()}${ev.time ? " · " + fmtTime(ev.time) : ""}</div>
+        <div class="ev-card-date">${MONTHS[d.getMonth()]} ${d.getDate()}${ev.time ? " · " + fmtTime(ev.time) : ""}${evStops(ev).length ? ` · <span class="ev-route">${evStops(ev).slice(0, 4).map(x => esc(x.emoji || "📍")).join("<i>›</i>")}</span>` : ""}</div>
         ${ev.location ? `<div class="ev-card-loc">📍 ${esc(ev.location)}</div>` : ""}
         <div class="ev-card-foot">
           <span class="mini-guests">${guests.map(u => avatar(u, "xs")).join("")}${(ev.invitedUids || []).length > 3 ? `<span class="more">+${ev.invitedUids.length - 3}</span>` : ""}</span>
@@ -3624,7 +3714,7 @@ function restoreDraft() {
 }
 function duplicateEvent(ev) {
   resetCompose(); compose._restored = true;
-  Object.assign(compose, { title: ev.title, emoji: ev.emoji || "🎉", theme: ev.theme || DEFAULT_THEME, customTheme: ev.customTheme || null, cover: ev.cover || null, coverTab: ev.cover ? "upload" : "emoji", time: ev.time || "", end: ev.endTime || "", where: ev.location || "", notes: ev.notes || "", cap: ev.capacity ? String(ev.capacity) : "", approval: !!ev.approval, questions: (ev.questions || []).map(q => ({ ...q, id: newId() })), groupId: ev.groupId || "", invitees: new Set(ev.groupId ? [] : (ev.invitedUids || []).filter(u => u !== myUid())), phoneInvitees: ev.groupId ? [] : Object.entries(ev.invitedPhoneNames || {}).map(([e164, name]) => ({ e164, name })), cohosts: new Set(ev.cohostUids || []), kind: ev.kind || "event", repeat: ev.repeat || "", date: "" });
+  Object.assign(compose, { stops: evStops(ev).map(x => ({ ...x })), title: ev.title, emoji: ev.emoji || "🎉", theme: ev.theme || DEFAULT_THEME, customTheme: ev.customTheme || null, cover: ev.cover || null, coverTab: ev.cover ? "upload" : "emoji", time: ev.time || "", end: ev.endTime || "", where: ev.location || "", notes: ev.notes || "", cap: ev.capacity ? String(ev.capacity) : "", approval: !!ev.approval, questions: (ev.questions || []).map(q => ({ ...q, id: newId() })), groupId: ev.groupId || "", invitees: new Set(ev.groupId ? [] : (ev.invitedUids || []).filter(u => u !== myUid())), phoneInvitees: ev.groupId ? [] : Object.entries(ev.invitedPhoneNames || {}).map(([e164, name]) => ({ e164, name })), cohosts: new Set(ev.cohostUids || []), kind: ev.kind || "event", repeat: ev.repeat || "", date: "" });
   go("#/new"); toast("Copied. Pick a date and it's ready.");
 }
 // ---------- passwordless sign-in (email link) ----------
