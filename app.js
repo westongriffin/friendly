@@ -1758,9 +1758,15 @@ function coverUrl(n) { const ids = (S.curated && S.curated.coverIds) || []; retu
 function nightWhen(n) { const d = evDate({ date: n.date }); return `${d.toLocaleDateString("en-US", { weekday: "short" })} · ${MONTHS[d.getMonth()]} ${d.getDate()}${n.start ? " · " + fmtTime(n.start) : ""}`; }
 // Nights saved before the server merged repeats can list one venue twice in a row; show it once.
 const venueKey = v => String(v || "").toLowerCase().replace(/^the\s+/, "").replace(/[^a-z0-9]+/g, " ").trim();
+// "Live Music at Palato" and "Palato Italian Kitchen and Lounge" are one place: compare the part after " at " too.
+const atPart = v => { const m = / at (?:the )?(.+)$/i.exec(String(v || "")); return m ? venueKey(m[1]) : ""; };
+const sameVenue = (a, b) => { const ka = venueKey(a), kb = venueKey(b); if (!ka || !kb) return false; if (ka === kb) return true;
+  const starts = (x, y) => x.length >= 4 && (y === x || y.startsWith(x + " "));
+  const aa = atPart(a), ab = atPart(b);
+  return starts(aa, kb) || starts(ab, ka) || starts(kb, aa) || starts(ka, ab) || (aa && aa === ab); };
 function mergeNightStops(n) {
   const out = [];
-  for (const x of n.stops || []) { const prev = out[out.length - 1]; if (prev && venueKey(prev.name) === venueKey(x.name)) { if (x.note && !(prev.note || "").includes(x.note)) prev.note = ((prev.note || "") + " " + x.note).trim(); if (!prev.url && x.url) prev.url = x.url; continue; } out.push({ ...x }); }
+  for (const x of n.stops || []) { const prev = out[out.length - 1]; if (prev && sameVenue(prev.name, x.name)) { if (x.note && !(prev.note || "").includes(x.note)) prev.note = ((prev.note || "") + " " + x.note).trim(); if (!prev.url && x.url) prev.url = x.url; continue; } out.push({ ...x }); }
   return { ...n, stops: out };
 }
 function nightCardHtml(n, id) {

@@ -407,11 +407,17 @@ const isUrl = u => /^https?:\/\//i.test(String(u || ""));
 const clip = (v, n) => { const t = String(v || "").trim().replace(/\s+/g, " "); if (t.length <= n) return t; const cut = noLone(t.slice(0, n - 1)); const sp = cut.lastIndexOf(" "); return (sp > n * .6 ? cut.slice(0, sp) : cut).replace(/[\s,;:.\-–—]+$/, "") + "…"; };
 // The same venue twice in a row ("Palato at 7:00", "Palato at 7:30") is one stop: keep the first time, merge the notes.
 const venueKey = v => String(v || "").toLowerCase().replace(/^the\s+/, "").replace(/[^a-z0-9]+/g, " ").trim();
+// "Live Music at Palato" and "Palato Italian Kitchen and Lounge" are one place: compare the part after " at " too.
+const atPart = v => { const m = / at (?:the )?(.+)$/i.exec(String(v || "")); return m ? venueKey(m[1]) : ""; };
+const sameVenue = (a, b) => { const ka = venueKey(a), kb = venueKey(b); if (!ka || !kb) return false; if (ka === kb) return true;
+  const starts = (x, y) => x.length >= 4 && (y === x || y.startsWith(x + " "));
+  const aa = atPart(a), ab = atPart(b);
+  return starts(aa, kb) || starts(ab, ka) || starts(kb, aa) || starts(ka, ab) || (aa && aa === ab); };
 function mergeRepeatStops(stops) {
   const out = [];
   for (const x of stops) {
     const prev = out[out.length - 1];
-    if (prev && venueKey(prev.name) === venueKey(x.name)) { if (x.note && !prev.note.includes(x.note)) prev.note = clip(prev.note + " " + x.note, 220); if (!prev.url && x.url) prev.url = x.url; if (x.kind === "eat" || prev.kind === "eat") prev.kind = prev.kind === "do" || x.kind === "do" ? "do" : "eat"; continue; }
+    if (prev && sameVenue(prev.name, x.name)) { if (x.note && !prev.note.includes(x.note)) prev.note = clip(prev.note + " " + x.note, 220); if (!prev.url && x.url) prev.url = x.url; if (x.kind === "eat" || prev.kind === "eat") prev.kind = prev.kind === "do" || x.kind === "do" ? "do" : "eat"; continue; }
     out.push({ ...x });
   }
   return out;
