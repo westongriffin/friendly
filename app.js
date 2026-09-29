@@ -3138,7 +3138,7 @@ async function postComment(ev) {
 }
 // ----- Reporting & blocking (App Store guideline 1.2 for user content) -----
 const isAdmin = () => adminUids.includes(myUid());
-const REPORT_REASONS = ["Spam", "Harassment or bullying", "Hate or violence", "Nudity or sexual content", "Something else"];
+const REPORT_REASONS = ["Spam", "Harassment or bullying", "Hate or violence", "Nudity or sexual content", "Child safety concern", "Something else"];
 // Hide anything I reported and everything from people I blocked.
 const visibleContent = item => !(S.profile.blockedUids || []).includes(item.authorId || item.addedBy) && !(S.profile.hiddenIds || []).includes(item.id);
 // "⋯" on someone else's message or photo: report it, or block the person outright.
@@ -3583,7 +3583,8 @@ function reportsInner(rows) {
 function wireReports() {
   if (!el("reportsCard")) return;
   S.evSubs.push(onSnapshot(query(collection(db, "reports"), where("status", "==", "open")), snap => {
-    const rows = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.createdAt - a.createdAt);
+    const urgent = r => /child safety/i.test(r.reason || "") ? 1 : 0;   // child safety reports first, always
+    const rows = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => urgent(b) - urgent(a) || b.createdAt - a.createdAt);
     const c = el("reportsCard"); if (!c) return; c.innerHTML = reportsInner(rows);
     c.querySelectorAll("[data-rmreport]").forEach(b => b.onclick = async () => {
       const r = rows.find(x => x.id === b.dataset.rmreport); if (!r || !confirm("Remove this content for everyone?")) return;

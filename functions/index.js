@@ -1158,7 +1158,9 @@ exports.onExpenseComment = onDocumentCreated({ document: "expenses/{xid}/comment
 const ADMIN_UIDS = ["zzJY7MHFnyN2kAqq13hv79rZTVF2", "TUngQGsAKTRtHBpVEpZwFFHE0sP2"];
 exports.onReport = onDocumentCreated({ document: "reports/{id}", ...PUSH }, async e => {
   const r = e.data && e.data.data(); if (!r) return;
-  await notify(ADMIN_UIDS, "Content reported: " + (r.reason || "review needed"), String(r.snippet || r.kind || "").slice(0, 120), "/#/profile");
+  // Child safety reports jump the queue: an urgent title so they're handled first (see child-safety.html).
+  const urgent = /child safety/i.test(r.reason || "");
+  await notify(ADMIN_UIDS, urgent ? "URGENT child safety report" : "Content reported: " + (r.reason || "review needed"), String(r.snippet || r.kind || "").slice(0, 120), "/#/profile");
 });
 
 // A phone invite for someone who is already a member/guest (the host typed or
