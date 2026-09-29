@@ -1184,7 +1184,16 @@ exports.onRsvp = onDocumentUpdated({ document: "events/{id}", ...MAIL }, async e
   const id = e.params.id;
   const b = before.rsvps || {}, a = after.rsvps || {};
   const changed = Object.keys(a).find(u => a[u] !== b[u] && u !== after.hostId);
-  if (changed) {
+  const sbB = before.rsvpSetBy || {}, sbA = after.rsvpSetBy || {};
+  const setNow = changed && sbA[changed] && JSON.stringify(sbA[changed]) !== JSON.stringify(sbB[changed] || null) ? sbA[changed] : null;
+  if (changed && setNow) {
+    // A host or co-host answered for this guest: tell the guest who did it, not the host.
+    const nm = await names([setNow.by]);
+    const word = { going: after.kind === "meeting" ? "accepted" : "going", maybe: "maybe", no: after.kind === "meeting" ? "declined" : "can't go" }[a[changed]] || a[changed];
+    await notify([changed], `${firstName(nm[setNow.by])} marked you as ${word}`, after.title + ". Tap to change it.", "/#/e/" + id, { type: "rsvp", actorId: setNow.by });
+  } else if (changed) {
+    // The guest answered themselves: drop any old "marked by the host" note.
+    if (sbA[changed]) await e.data.after.ref.update({ ["rsvpSetBy." + changed]: FieldValue.delete() }).catch(() => {});
     const nm = await names([changed]);
     const word = { going: "is going to", maybe: "might come to", no: "can't make", waitlist: "joined the waitlist for", pending: "requested to join" }[a[changed]] || "updated";
     await notify([after.hostId], firstName(nm[changed]) + " " + word, after.title, "/#/e/" + id, { type: "rsvp", actorId: changed });

@@ -780,3 +780,6 @@ html{background:var(--bg)}
 /* Sign-up terms: a big, easy box; the whole row toggles it */
 .cbox.terms-box{display:flex;align-items:flex-start;gap:12px;margin:14px 0 0;padding:12px 14px;border-radius:14px;font-weight:500;color:var(--ink);line-height:1.4}
 .cbox.terms-box input{width:26px;height:26px;flex:none;margin:0;cursor:pointer}
+/* Host marks a guest's RSVP */
+.guest-chip .approve.setrsvp{background:var(--th-accent,var(--accent));color:var(--th-on-accent,#fff);font-size:11px}
+.set-rsvp .btn{justify-content:center;width:100%}

@@ -2526,7 +2526,9 @@ function eventInner(ev) {
     return `<button class="hype ${mine ? "on" : ""}" data-hype="${h}">${h}${n ? `<b>${n}</b>` : ""}</button>`;
   }).join("")}</div>`;
 
+  const setBy = (ev.rsvpSetBy || {})[me];
   const rsvpBtns = (ev.invitedUids || []).includes(me) ? `
+    ${myR && setBy && setBy.by !== me ? `<p class="muted-th sm" style="margin:0 0 8px">${esc(first(nameOf(setBy.by)))} marked you as ${esc({ going: "going", maybe: "maybe", no: "can't go", waitlist: "waitlisted", pending: "pending" }[myR] || myR)}. Change it below if that's not right.</p>` : ""}
     <div class="rsvp">
       <button class="rb going ${myR === "going" ? "on" : ""}" data-rsvp="going">Going</button>
       <button class="rb maybe ${myR === "maybe" ? "on" : ""}" data-rsvp="maybe">Maybe</button>
@@ -2552,7 +2554,7 @@ function eventInner(ev) {
       })() : ""}
       ${manage && (k === "pending") ? `<button class="approve" data-approve="${u}" title="Approve">✓</button>` : ""}
       ${manage && (k === "waitlist") ? `<button class="approve" data-promote="${u}" title="Move in">↑</button>` : ""}
-      ${manage && u !== me && u !== ev.hostId ? `<button class="approve remove" data-removeguest="${u}" title="Remove from guest list">✕</button>` : ""}</span>`).join("")}</div></div>`;
+      ${manage && u !== me && u !== ev.hostId ? `<button class="approve setrsvp" data-setrsvp="${u}" title="Mark their RSVP" aria-label="Mark ${esc(first(nameOf(u)))}'s RSVP">✎</button><button class="approve remove" data-removeguest="${u}" title="Remove from guest list">✕</button>` : ""}</span>`).join("")}</div></div>`;
   }).join("");
 
   const cost = [...S.expenses.values()].filter(x => x.eventId === ev.id).reduce((t, x) => t + x.amountCents, 0);
@@ -2895,6 +2897,7 @@ function wireEventPage(ev) {
   document.querySelectorAll("[data-approve]").forEach(b => b.onclick = () => hostSetRsvp(ev, b.dataset.approve, "going"));
   document.querySelectorAll("[data-promote]").forEach(b => b.onclick = () => hostSetRsvp(ev, b.dataset.promote, "going"));
   document.querySelectorAll("[data-removeguest]").forEach(b => b.onclick = () => removeGuest(ev, b.dataset.removeguest));
+  document.querySelectorAll("[data-setrsvp]").forEach(b => b.onclick = e => { e.stopPropagation(); openSetRsvpDialog(ev, b.dataset.setrsvp); });
   if (el("saveAnswers")) el("saveAnswers").onclick = () => saveAnswers(ev);
   // Saves as they type (debounced) instead of waiting for blur: a name typed
   // here otherwise had a real chance of vanishing unsaved, since ANY change to
@@ -3076,6 +3079,21 @@ async function setHype(ev, emoji) {
 }
 // Host/co-host takes someone off the guest list: drops their invite and
 // everything keyed to them (RSVP, plus-ones, answers, hype, name).
+// Hosts and co-hosts can answer for a guest (they said yes by text, at work, in person). rsvpSetBy records who
+// and when, so the guest is told "Wes marked you as going" and the host isn't notified about their own change.
+function openSetRsvpDialog(ev, uid) {
+  const cur = (ev.rsvps || {})[uid] || "", nm = first(nameOf(uid)), meeting = ev.kind === "meeting";
+  const opts = meeting ? [["going", "✓ Accepted"], ["maybe", "Maybe"], ["no", "Declined"], ["", "No answer"]] : [["going", "✓ Going"], ["maybe", "Maybe"], ["no", "Can't go"], ["", "No answer"]];
+  dialog(`<h3>Mark ${esc(nm)}'s RSVP</h3><p class="muted" style="margin-top:-6px">Use this when ${esc(nm)} told you in person or by text. They'll get a note that you marked it, and they can change it anytime.</p>
+    <div class="stack set-rsvp">${opts.map(([v, l]) => `<button type="button" class="btn ${cur === v ? "primary" : ""}" data-pick="${v}">${l}${cur === v ? " · current" : ""}</button>`).join("")}</div>`, null, null);
+  document.querySelectorAll(".set-rsvp [data-pick]").forEach(b => b.onclick = async () => {
+    const v = b.dataset.pick; closeDialog();
+    if (v === (cur || "")) return;
+    const up = v ? { [`rsvps.${uid}`]: v, [`rsvpSetBy.${uid}`]: { by: myUid(), at: Date.now() } } : { [`rsvps.${uid}`]: deleteField(), [`rsvpSetBy.${uid}`]: deleteField() };
+    try { await updateDoc(doc(db, "events", ev.id), up); toast(v ? `${nm} is marked ${{ going: meeting ? "accepted" : "going", maybe: "maybe", no: meeting ? "declined" : "can't go" }[v]}.` : `${nm}'s answer is cleared.`, null, null, "happy"); }
+    catch (e) { toast(e.message); }
+  });
+}
 async function removeGuest(ev, uid) {
   if (!confirm(`Remove ${first(nameOf(uid))} from the guest list?`)) return;
   const up = { invitedUids: arrayRemove(uid), cohostUids: arrayRemove(uid) };
@@ -3659,7 +3677,7 @@ function wireActivity() {
 function meetingBody(ev) {
   const me = myUid(); const myR = (ev.rsvps || {})[me]; const invited = (ev.invitedUids || []).includes(me); const manage = canManage(ev);
   const g = statusGroups(ev);
-  const row = (label, uids) => uids.length ? `<div class="muted sm" style="margin:8px 0 4px;font-weight:600">${label} · ${uids.length}</div>${uids.map(u => `<div class="member-row" style="padding:6px 0"><span data-viewprofile="${u}" style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;cursor:pointer">${avatar(u, "sm")}<span>${esc(nameOf(u))}${u === ev.hostId ? " · organizer" : ""}</span></span>${manage && u !== me && u !== ev.hostId ? `<button class="btn ghost small" data-removeguest="${u}" title="Remove from invite list">✕</button>` : ""}</div>`).join("")}` : "";
+  const row = (label, uids) => uids.length ? `<div class="muted sm" style="margin:8px 0 4px;font-weight:600">${label} · ${uids.length}</div>${uids.map(u => `<div class="member-row" style="padding:6px 0"><span data-viewprofile="${u}" style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;cursor:pointer">${avatar(u, "sm")}<span>${esc(nameOf(u))}${u === ev.hostId ? " · organizer" : ""}</span></span>${manage && u !== me && u !== ev.hostId ? `<button class="btn ghost small" data-setrsvp="${u}" title="Mark their answer">✎ Set</button><button class="btn ghost small" data-removeguest="${u}" title="Remove from invite list">✕</button>` : ""}</div>`).join("")}` : "";
   return `
   <button class="link-back" data-go="#/">‹ Back</button>
   <div class="group-hero"><span class="li" style="width:52px;height:52px;font-size:24px">📅</span>
@@ -3697,6 +3715,7 @@ function wireMeeting(ev) {
   document.querySelectorAll("[data-rsvp]").forEach(b => b.onclick = () => setRsvp(ev, b.dataset.rsvp));
   document.querySelectorAll("[data-viewprofile]").forEach(el2 => el2.onclick = () => openProfileDialog(el2.dataset.viewprofile));
   document.querySelectorAll("[data-removeguest]").forEach(b => b.onclick = () => removeGuest(ev, b.dataset.removeguest));
+  document.querySelectorAll("[data-setrsvp]").forEach(b => b.onclick = e => { e.stopPropagation(); openSetRsvpDialog(ev, b.dataset.setrsvp); });
   const j = $("[data-join]"); if (j) j.onclick = () => joinViaLink(ev, j);
   const cal = $("[data-cal]"); if (cal) cal.onclick = () => downloadIcs(ev);
   if (el("addPeopleBtn")) el("addPeopleBtn").onclick = () => openEventInviteDialog(ev);
