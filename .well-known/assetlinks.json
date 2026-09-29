@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls", "delegate_permission/common.get_login_creds"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.officialfriendly.app",
+      "sha256_cert_fingerprints": [
+        "76:7A:31:0F:C9:19:8C:B0:D5:67:41:42:CD:10:BD:01:F2:78:22:68:F0:B3:39:83:A8:11:96:C8:1D:FC:69:C7",
+        "AA:B6:6A:43:49:E8:D0:EE:E0:59:7D:C6:8C:50:59:AE:E7:E4:62:94:09:47:B8:98:53:E8:F0:45:90:A1:14:92"
+      ]
+    }
+  }
+]
