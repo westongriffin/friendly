@@ -1231,7 +1231,8 @@ function routeBody(r) {
 
 // ---------- helpers for events visibility/counts ----------
 const myUid = () => S.user.uid;
-function goingCount(ev) { return (ev.invitedUids || []).reduce((t, u) => (ev.rsvps || {})[u] === "going" ? t + 1 + (((ev.plusOnes || {})[u]) || 0) : t, 0); }
+const phoneStatus = (ev, p) => ((ev.phoneRsvps || {})[p] || {}).status || "";
+function goingCount(ev) { return (ev.invitedUids || []).reduce((t, u) => (ev.rsvps || {})[u] === "going" ? t + 1 + (((ev.plusOnes || {})[u]) || 0) : t, 0) + (ev.invitedPhones || []).filter(p => phoneStatus(ev, p) === "going").length; }
 function isFull(ev) { return ev.capacity > 0 && goingCount(ev) >= ev.capacity; }
 function canManage(ev) { if (ev._manage != null) return ev._manage; return ev.hostId === myUid() || (ev.cohostUids || []).includes(myUid()); }
 function myEvents() {
@@ -2605,7 +2606,7 @@ function eventInner(ev) {
     <button type="button" class="glass-head inv-toggle" id="invToggle" aria-expanded="${open}"><span>Not on Friendly yet <span class="muted-th sm">· ${ev.invitedPhones.length} invited by text</span></span><span class="inv-chev">›</span></button>
     <div class="inv-body">
       <p class="muted-th sm" style="margin:0 0 8px">They got a text with the link. Once they sign up, they'll move into the guest list above.</p>
-      ${ev.invitedPhones.map(p => { const nm = (ev.invitedPhoneNames || {})[p]; return `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">💬</span><div style="flex:1;min-width:0"><b>${esc(nm || p)}</b><div class="muted sm">${nm ? esc(p) + " · " : ""}Hasn't joined yet</div></div>${manage ? `<span class="btnrow" style="gap:6px"><button class="btn ghost small" data-textinvite="${esc(p)}">Text again</button><button class="btn ghost small" data-uninvitephone="${esc(p)}" title="Remove">✕</button></span>` : ""}</div>`; }).join("")}
+      ${ev.invitedPhones.map(p => { const nm = (ev.invitedPhoneNames || {})[p]; return `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">💬</span><div style="flex:1;min-width:0"><b>${esc(nm || p)}</b><div class="muted sm">${nm ? esc(p) + " · " : ""}${phoneStatus(ev, p) ? `<b class="phone-rsvp ${phoneStatus(ev, p)}">${{ going: ev.kind === "meeting" ? "Accepted" : "Going", maybe: "Maybe", no: ev.kind === "meeting" ? "Declined" : "Can't go" }[phoneStatus(ev, p)]}</b> · ` : ""}Hasn't joined yet</div></div>${manage ? `<span class="btnrow" style="gap:6px"><button class="btn ghost small" data-setphone="${esc(p)}" title="Mark their RSVP">✎</button><button class="btn ghost small" data-textinvite="${esc(p)}">Text again</button><button class="btn ghost small" data-uninvitephone="${esc(p)}" title="Remove">✕</button></span>` : ""}</div>`; }).join("")}
     </div>
   </div>`; })() : ""}
 
@@ -2898,6 +2899,7 @@ function wireEventPage(ev) {
   document.querySelectorAll("[data-promote]").forEach(b => b.onclick = () => hostSetRsvp(ev, b.dataset.promote, "going"));
   document.querySelectorAll("[data-removeguest]").forEach(b => b.onclick = () => removeGuest(ev, b.dataset.removeguest));
   document.querySelectorAll("[data-setrsvp]").forEach(b => b.onclick = e => { e.stopPropagation(); openSetRsvpDialog(ev, b.dataset.setrsvp); });
+  document.querySelectorAll("[data-setphone]").forEach(b => b.onclick = e => { e.stopPropagation(); openSetRsvpDialog(ev, null, b.dataset.setphone); });
   if (el("saveAnswers")) el("saveAnswers").onclick = () => saveAnswers(ev);
   // Saves as they type (debounced) instead of waiting for blur: a name typed
   // here otherwise had a real chance of vanishing unsaved, since ANY change to
@@ -3081,15 +3083,17 @@ async function setHype(ev, emoji) {
 // everything keyed to them (RSVP, plus-ones, answers, hype, name).
 // Hosts and co-hosts can answer for a guest (they said yes by text, at work, in person). rsvpSetBy records who
 // and when, so the guest is told "Wes marked you as going" and the host isn't notified about their own change.
-function openSetRsvpDialog(ev, uid) {
-  const cur = (ev.rsvps || {})[uid] || "", nm = first(nameOf(uid)), meeting = ev.kind === "meeting";
+function openSetRsvpDialog(ev, uid, phone) {
+  const meeting = ev.kind === "meeting";
+  const cur = phone ? phoneStatus(ev, phone) : ((ev.rsvps || {})[uid] || ""), nm = phone ? (first((ev.invitedPhoneNames || {})[phone] || "") || phone) : first(nameOf(uid));
   const opts = meeting ? [["going", "✓ Accepted"], ["maybe", "Maybe"], ["no", "Declined"], ["", "No answer"]] : [["going", "✓ Going"], ["maybe", "Maybe"], ["no", "Can't go"], ["", "No answer"]];
-  dialog(`<h3>Mark ${esc(nm)}'s RSVP</h3><p class="muted" style="margin-top:-6px">Use this when ${esc(nm)} told you in person or by text. They'll get a note that you marked it, and they can change it anytime.</p>
+  dialog(`<h3>Mark ${esc(nm)}'s RSVP</h3><p class="muted" style="margin-top:-6px">${phone ? `Use this when ${esc(nm)} told you in person or by text. When they join Friendly, their answer comes with them and they can change it.` : `Use this when ${esc(nm)} told you in person or by text. They'll get a note that you marked it, and they can change it anytime.`}</p>
     <div class="stack set-rsvp">${opts.map(([v, l]) => `<button type="button" class="btn ${cur === v ? "primary" : ""}" data-pick="${v}">${l}${cur === v ? " · current" : ""}</button>`).join("")}</div>`, null, null);
   document.querySelectorAll(".set-rsvp [data-pick]").forEach(b => b.onclick = async () => {
     const v = b.dataset.pick; closeDialog();
     if (v === (cur || "")) return;
-    const up = v ? { [`rsvps.${uid}`]: v, [`rsvpSetBy.${uid}`]: { by: myUid(), at: Date.now() } } : { [`rsvps.${uid}`]: deleteField(), [`rsvpSetBy.${uid}`]: deleteField() };
+    const up = phone ? { [`phoneRsvps.${phone}`]: v ? { status: v, by: myUid(), at: Date.now() } : deleteField() }
+      : v ? { [`rsvps.${uid}`]: v, [`rsvpSetBy.${uid}`]: { by: myUid(), at: Date.now() } } : { [`rsvps.${uid}`]: deleteField(), [`rsvpSetBy.${uid}`]: deleteField() };
     try { await updateDoc(doc(db, "events", ev.id), up); toast(v ? `${nm} is marked ${{ going: meeting ? "accepted" : "going", maybe: "maybe", no: meeting ? "declined" : "can't go" }[v]}.` : `${nm}'s answer is cleared.`, null, null, "happy"); }
     catch (e) { toast(e.message); }
   });
@@ -3212,7 +3216,13 @@ async function joinViaLink(ev, btn) {
   // the host's invitedPhones tracking list, but only their own -- never anyone else's.
   const myPhone = myPhoneE164();
   if (myPhone && (ev.invitedPhones || []).includes(myPhone)) { patch.invitedPhones = arrayRemove(myPhone); patch[`invitedPhoneNames.${myPhone}`] = deleteField(); }
-  try { await updateDoc(doc(db, "events", ev.id), patch); toast("You're on the list! RSVP below."); }
+  try {
+    await updateDoc(doc(db, "events", ev.id), patch);
+    // A host already marked this number (they told the host by text or in person): bring that answer along.
+    const pre = myPhone && (ev.phoneRsvps || {})[myPhone];
+    if (pre && pre.status) { await updateDoc(doc(db, "events", ev.id), { [`rsvps.${myUid()}`]: pre.status }).catch(() => {}); toast(`You're in, marked ${{ going: "going", maybe: "maybe", no: "can't go" }[pre.status] || pre.status}. Change it below anytime.`); }
+    else toast("You're on the list! RSVP below.");
+  }
   catch (e) { if (btn) { btn.disabled = false; btn.textContent = "Join this event"; } toast("Couldn't join: " + e.message); }
 }
 function shareEvent(ev) {
@@ -3702,7 +3712,7 @@ function meetingBody(ev) {
     <div class="inv-body">${row("Accepted", g.going) + row("Maybe", g.maybe) + row("Declined", g.no) + row("No answer yet", g.none) || `<p class="muted">Nobody invited yet.</p>`}</div></div>`}
   ${(ev.invitedPhones || []).length && canSeeGuests(ev) ? `<div class="card inv-card ${collapsedOpen("friendlyInvOpen:" + ev.id, false) ? "open" : ""}" id="invCard" style="padding:12px 16px">
     <button type="button" class="inv-toggle" id="invToggle"><b>Not on Friendly yet <span class="muted sm">· ${ev.invitedPhones.length} invited by text</span></b><span class="inv-chev">›</span></button>
-  <div class="inv-body">${ev.invitedPhones.map(p => { const nm = (ev.invitedPhoneNames || {})[p]; return `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">💬</span><div style="flex:1;min-width:0"><b>${esc(nm || p)}</b><div class="muted sm">${nm ? esc(p) + " · " : ""}Hasn't joined yet</div></div>${manage ? `<span class="btnrow" style="gap:6px"><button class="btn ghost small" data-textinvite="${esc(p)}">Text</button><button class="btn ghost small" data-uninvitephone="${esc(p)}">✕</button></span>` : ""}</div>`; }).join("")}</div></div>` : ""}
+  <div class="inv-body">${ev.invitedPhones.map(p => { const nm = (ev.invitedPhoneNames || {})[p]; return `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">💬</span><div style="flex:1;min-width:0"><b>${esc(nm || p)}</b><div class="muted sm">${nm ? esc(p) + " · " : ""}${phoneStatus(ev, p) ? `<b class="phone-rsvp ${phoneStatus(ev, p)}">${{ going: ev.kind === "meeting" ? "Accepted" : "Going", maybe: "Maybe", no: ev.kind === "meeting" ? "Declined" : "Can't go" }[phoneStatus(ev, p)]}</b> · ` : ""}Hasn't joined yet</div></div>${manage ? `<span class="btnrow" style="gap:6px"><button class="btn ghost small" data-setphone="${esc(p)}" title="Mark their RSVP">✎</button><button class="btn ghost small" data-textinvite="${esc(p)}">Text</button><button class="btn ghost small" data-uninvitephone="${esc(p)}">✕</button></span>` : ""}</div>`; }).join("")}</div></div>` : ""}
   <div class="card th-plain" id="wall" style="margin-top:22px"><p class="muted">Loading…</p></div>`;
 }
 function wireMeeting(ev) {
@@ -3716,6 +3726,7 @@ function wireMeeting(ev) {
   document.querySelectorAll("[data-viewprofile]").forEach(el2 => el2.onclick = () => openProfileDialog(el2.dataset.viewprofile));
   document.querySelectorAll("[data-removeguest]").forEach(b => b.onclick = () => removeGuest(ev, b.dataset.removeguest));
   document.querySelectorAll("[data-setrsvp]").forEach(b => b.onclick = e => { e.stopPropagation(); openSetRsvpDialog(ev, b.dataset.setrsvp); });
+  document.querySelectorAll("[data-setphone]").forEach(b => b.onclick = e => { e.stopPropagation(); openSetRsvpDialog(ev, null, b.dataset.setphone); });
   const j = $("[data-join]"); if (j) j.onclick = () => joinViaLink(ev, j);
   const cal = $("[data-cal]"); if (cal) cal.onclick = () => downloadIcs(ev);
   if (el("addPeopleBtn")) el("addPeopleBtn").onclick = () => openEventInviteDialog(ev);

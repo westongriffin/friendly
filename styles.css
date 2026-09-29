@@ -783,3 +783,5 @@ html{background:var(--bg)}
 /* Host marks a guest's RSVP */
 .guest-chip .approve.setrsvp{background:var(--th-accent,var(--accent));color:var(--th-on-accent,#fff);font-size:11px}
 .set-rsvp .btn{justify-content:center;width:100%}
+.phone-rsvp{font-weight:700}
+.phone-rsvp.going{color:var(--good)} .phone-rsvp.maybe{color:#C98A12} .phone-rsvp.no{color:var(--bad)}
