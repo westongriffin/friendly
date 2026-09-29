@@ -2601,7 +2601,7 @@ function eventInner(ev) {
   <div class="ev-card-glass" id="rsvpCard">${rsvpBtns}</div>
 
   ${!canSeeGuests(ev) ? `<div class="ev-card-glass" id="guestCard"><div class="glass-head">Guest list <span>${going} going</span></div><p class="muted-th sm" style="margin:0">🔒 RSVP above to see who's coming.</p></div>` : (() => { const gOpen = collapsedOpen("friendlyGuestOpen:" + ev.id, true); return `<div class="ev-card-glass inv-card ${gOpen ? "open" : ""}" id="guestCard">
-    <button type="button" class="glass-head inv-toggle" id="guestToggle" aria-expanded="${gOpen}"><span>Guest list <span class="muted-th sm">· ${(ev.invitedUids || []).length} invited</span></span><span class="inv-chev">›</span></button>
+    <button type="button" class="glass-head inv-toggle" id="guestToggle" aria-expanded="${gOpen}"><span>Guest list <span class="muted-th sm">· ${(ev.invitedUids || []).length + (ev.invitedPhones || []).length} invited</span></span><span class="inv-chev">›</span></button>
     <div class="inv-body">
     ${guestList || `<p class="muted-th">No guests yet.</p>`}
     ${manage ? `<button class="btn-th ghost small" id="addPeopleBtn">＋ Add people</button>` : ""}
@@ -3717,7 +3717,7 @@ function meetingBody(ev) {
     ${manage ? `<button class="btn small" id="addPeopleBtn">＋ Add people</button><button class="btn small" data-nudge>Nudge non-responders</button><button class="btn small" data-edit>Edit</button><button class="btn small" data-dup>Duplicate</button><button class="btn small danger-ghost" data-del>Delete</button>` : ""}
   </div>
   ${!canSeeGuests(ev) ? `<div class="card" style="padding:14px 16px;margin-top:22px"><b>Who's coming</b><p class="muted sm" style="margin:4px 0 0">🔒 Accept, maybe, or decline to see who's coming. ${g.going.length} accepted so far.</p></div>` : `<div class="card inv-card ${collapsedOpen("friendlyGuestOpen:" + ev.id, true) ? "open" : ""}" id="guestCard" style="padding:12px 16px;margin-top:22px">
-    <button type="button" class="inv-toggle" id="guestToggle"><b>Who's coming <span class="muted sm">· ${(ev.invitedUids || []).length} invited</span></b><span class="inv-chev">›</span></button>
+    <button type="button" class="inv-toggle" id="guestToggle"><b>Who's coming <span class="muted sm">· ${(ev.invitedUids || []).length + (ev.invitedPhones || []).length} invited</span></b><span class="inv-chev">›</span></button>
     <div class="inv-body">${row("Accepted", g.going, phonesWith(ev, "going")) + row("Maybe", g.maybe, phonesWith(ev, "maybe")) + row("Declined", g.no, phonesWith(ev, "no")) + row("No answer yet", g.none) || `<p class="muted">Nobody invited yet.</p>`}</div></div>`}
   ${unansweredPhones(ev).length && canSeeGuests(ev) ? `<div class="card inv-card ${collapsedOpen("friendlyInvOpen:" + ev.id, false) ? "open" : ""}" id="invCard" style="padding:12px 16px">
     <button type="button" class="inv-toggle" id="invToggle"><b>Not on Friendly yet <span class="muted sm">· ${unansweredPhones(ev).length} invited by text</span></b><span class="inv-chev">›</span></button>
