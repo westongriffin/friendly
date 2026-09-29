@@ -1232,6 +1232,14 @@ function routeBody(r) {
 // ---------- helpers for events visibility/counts ----------
 const myUid = () => S.user.uid;
 const phoneStatus = (ev, p) => ((ev.phoneRsvps || {})[p] || {}).status || "";
+// Texted invitees a host has answered for sit in the guest list with everyone else; the "Not on Friendly yet" card keeps only the unanswered.
+const phonesWith = (ev, k) => (ev.invitedPhones || []).filter(p => phoneStatus(ev, p) === k);
+const unansweredPhones = ev => (ev.invitedPhones || []).filter(p => !phoneStatus(ev, p));
+const phoneName = (ev, p) => (ev.invitedPhoneNames || {})[p] || p;
+function phoneChip(ev, p, manage) {
+  return `<span class="guest-chip texted" title="${esc(p)} · not on Friendly yet"><span style="display:inline-flex;align-items:center;gap:4px"><span class="avatar texted-av">💬</span>${esc(first(phoneName(ev, p)))}</span><i class="texted-tag">by text</i>
+    ${manage ? `<button class="approve setrsvp" data-setphone="${esc(p)}" title="Mark their RSVP" aria-label="Mark ${esc(first(phoneName(ev, p)))}'s RSVP">✎</button><button class="approve remove" data-uninvitephone="${esc(p)}" title="Remove">✕</button>` : ""}</span>`;
+}
 function goingCount(ev) { return (ev.invitedUids || []).reduce((t, u) => (ev.rsvps || {})[u] === "going" ? t + 1 + (((ev.plusOnes || {})[u]) || 0) : t, 0) + (ev.invitedPhones || []).filter(p => phoneStatus(ev, p) === "going").length; }
 function isFull(ev) { return ev.capacity > 0 && goingCount(ev) >= ev.capacity; }
 function canManage(ev) { if (ev._manage != null) return ev._manage; return ev.hostId === myUid() || (ev.cohostUids || []).includes(myUid()); }
@@ -2546,9 +2554,10 @@ function eventInner(ev) {
     ${questionsBlock(ev, me, myR)}` : ev.openLink ? `<p class="not-invited">You're invited! Join the guest list to RSVP.</p><div class="rsvp"><button class="rb going" data-join>Join this event</button></div>` : `<p class="not-invited">You're viewing this event but aren't on the guest list.</p>`;
 
   const guestList = ["going", "maybe", "waitlist", "pending", "no", "none"].map(k => {
-    if (!g[k].length) return "";
+    const ph = ["going", "maybe", "no"].includes(k) ? phonesWith(ev, k) : [];
+    if (!g[k].length && !ph.length) return "";
     const label = { going: "Going", maybe: "Maybe", waitlist: "Waitlist", pending: "Awaiting approval", no: "Can't make it", none: "Invited" }[k];
-    return `<div class="guest-group"><div class="guest-label">${label} · ${g[k].length}</div><div class="guest-chips">${g[k].map(u => `
+    return `<div class="guest-group"><div class="guest-label">${label} · ${g[k].length + ph.length}</div><div class="guest-chips">${ph.map(p => phoneChip(ev, p, manage)).join("")}${g[k].map(u => `
       <span class="guest-chip"><span data-viewprofile="${u}" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px">${avatar(u)}${esc(first(nameOf(u)))}</span>${(ev.plusOnes || {})[u] ? (() => {
         const n = ev.plusOnes[u]; const raw = (ev.plusNames || {})[u]; const names = (Array.isArray(raw) ? raw : (raw ? [raw] : [])).filter(Boolean);
         return `<i class="plusone">+${n}${names.length ? ` (${names.map(esc).join(", ")})` : ""}</i>`;
@@ -2602,11 +2611,11 @@ function eventInner(ev) {
     </div>
   </div>`; })()}
 
-  ${(ev.invitedPhones || []).length && canSeeGuests(ev) ? (() => { const open = collapsedOpen("friendlyInvOpen:" + ev.id, false); return `<div class="ev-card-glass inv-card ${open ? "open" : ""}" id="invCard">
-    <button type="button" class="glass-head inv-toggle" id="invToggle" aria-expanded="${open}"><span>Not on Friendly yet <span class="muted-th sm">· ${ev.invitedPhones.length} invited by text</span></span><span class="inv-chev">›</span></button>
+  ${unansweredPhones(ev).length && canSeeGuests(ev) ? (() => { const open = collapsedOpen("friendlyInvOpen:" + ev.id, false); return `<div class="ev-card-glass inv-card ${open ? "open" : ""}" id="invCard">
+    <button type="button" class="glass-head inv-toggle" id="invToggle" aria-expanded="${open}"><span>Not on Friendly yet <span class="muted-th sm">· ${unansweredPhones(ev).length} invited by text</span></span><span class="inv-chev">›</span></button>
     <div class="inv-body">
-      <p class="muted-th sm" style="margin:0 0 8px">They got a text with the link. Once they sign up, they'll move into the guest list above.</p>
-      ${ev.invitedPhones.map(p => { const nm = (ev.invitedPhoneNames || {})[p]; return `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">💬</span><div style="flex:1;min-width:0"><b>${esc(nm || p)}</b><div class="muted sm">${nm ? esc(p) + " · " : ""}${phoneStatus(ev, p) ? `<b class="phone-rsvp ${phoneStatus(ev, p)}">${{ going: ev.kind === "meeting" ? "Accepted" : "Going", maybe: "Maybe", no: ev.kind === "meeting" ? "Declined" : "Can't go" }[phoneStatus(ev, p)]}</b> · ` : ""}Hasn't joined yet</div></div>${manage ? `<span class="btnrow" style="gap:6px"><button class="btn ghost small" data-setphone="${esc(p)}" title="Mark their RSVP">✎</button><button class="btn ghost small" data-textinvite="${esc(p)}">Text again</button><button class="btn ghost small" data-uninvitephone="${esc(p)}" title="Remove">✕</button></span>` : ""}</div>`; }).join("")}
+      <p class="muted-th sm" style="margin:0 0 8px">They got a text with the link. Once they sign up, or you mark their answer with ✎, they move into the guest list above.</p>
+      ${unansweredPhones(ev).map(p => { const nm = (ev.invitedPhoneNames || {})[p]; return `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">💬</span><div style="flex:1;min-width:0"><b>${esc(nm || p)}</b><div class="muted sm">${nm ? esc(p) + " · " : ""}${phoneStatus(ev, p) ? `<b class="phone-rsvp ${phoneStatus(ev, p)}">${{ going: ev.kind === "meeting" ? "Accepted" : "Going", maybe: "Maybe", no: ev.kind === "meeting" ? "Declined" : "Can't go" }[phoneStatus(ev, p)]}</b> · ` : ""}Hasn't joined yet</div></div>${manage ? `<span class="btnrow" style="gap:6px"><button class="btn ghost small" data-setphone="${esc(p)}" title="Mark their RSVP">✎</button><button class="btn ghost small" data-textinvite="${esc(p)}">Text again</button><button class="btn ghost small" data-uninvitephone="${esc(p)}" title="Remove">✕</button></span>` : ""}</div>`; }).join("")}
     </div>
   </div>`; })() : ""}
 
@@ -3687,7 +3696,7 @@ function wireActivity() {
 function meetingBody(ev) {
   const me = myUid(); const myR = (ev.rsvps || {})[me]; const invited = (ev.invitedUids || []).includes(me); const manage = canManage(ev);
   const g = statusGroups(ev);
-  const row = (label, uids) => uids.length ? `<div class="muted sm" style="margin:8px 0 4px;font-weight:600">${label} · ${uids.length}</div>${uids.map(u => `<div class="member-row" style="padding:6px 0"><span data-viewprofile="${u}" style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;cursor:pointer">${avatar(u, "sm")}<span>${esc(nameOf(u))}${u === ev.hostId ? " · organizer" : ""}</span></span>${manage && u !== me && u !== ev.hostId ? `<button class="btn ghost small" data-setrsvp="${u}" title="Mark their answer">✎ Set</button><button class="btn ghost small" data-removeguest="${u}" title="Remove from invite list">✕</button>` : ""}</div>`).join("")}` : "";
+  const row = (label, uids, phones = []) => uids.length || phones.length ? `<div class="muted sm" style="margin:8px 0 4px;font-weight:600">${label} · ${uids.length + phones.length}</div>${phones.map(p => `<div class="member-row" style="padding:6px 0"><span style="display:flex;align-items:center;gap:8px;flex:1;min-width:0"><span class="avatar sm texted-av">💬</span><span>${esc(phoneName(ev, p))} <span class="muted sm">· by text, not on Friendly yet</span></span></span>${manage ? `<button class="btn ghost small" data-setphone="${esc(p)}" title="Mark their answer">✎ Set</button><button class="btn ghost small" data-uninvitephone="${esc(p)}" title="Remove">✕</button>` : ""}</div>`).join("")}${uids.map(u => `<div class="member-row" style="padding:6px 0"><span data-viewprofile="${u}" style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;cursor:pointer">${avatar(u, "sm")}<span>${esc(nameOf(u))}${u === ev.hostId ? " · organizer" : ""}</span></span>${manage && u !== me && u !== ev.hostId ? `<button class="btn ghost small" data-setrsvp="${u}" title="Mark their answer">✎ Set</button><button class="btn ghost small" data-removeguest="${u}" title="Remove from invite list">✕</button>` : ""}</div>`).join("")}` : "";
   return `
   <button class="link-back" data-go="#/">‹ Back</button>
   <div class="group-hero"><span class="li" style="width:52px;height:52px;font-size:24px">📅</span>
@@ -3709,10 +3718,10 @@ function meetingBody(ev) {
   </div>
   ${!canSeeGuests(ev) ? `<div class="card" style="padding:14px 16px;margin-top:22px"><b>Who's coming</b><p class="muted sm" style="margin:4px 0 0">🔒 Accept, maybe, or decline to see who's coming. ${g.going.length} accepted so far.</p></div>` : `<div class="card inv-card ${collapsedOpen("friendlyGuestOpen:" + ev.id, true) ? "open" : ""}" id="guestCard" style="padding:12px 16px;margin-top:22px">
     <button type="button" class="inv-toggle" id="guestToggle"><b>Who's coming <span class="muted sm">· ${(ev.invitedUids || []).length} invited</span></b><span class="inv-chev">›</span></button>
-    <div class="inv-body">${row("Accepted", g.going) + row("Maybe", g.maybe) + row("Declined", g.no) + row("No answer yet", g.none) || `<p class="muted">Nobody invited yet.</p>`}</div></div>`}
-  ${(ev.invitedPhones || []).length && canSeeGuests(ev) ? `<div class="card inv-card ${collapsedOpen("friendlyInvOpen:" + ev.id, false) ? "open" : ""}" id="invCard" style="padding:12px 16px">
-    <button type="button" class="inv-toggle" id="invToggle"><b>Not on Friendly yet <span class="muted sm">· ${ev.invitedPhones.length} invited by text</span></b><span class="inv-chev">›</span></button>
-  <div class="inv-body">${ev.invitedPhones.map(p => { const nm = (ev.invitedPhoneNames || {})[p]; return `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">💬</span><div style="flex:1;min-width:0"><b>${esc(nm || p)}</b><div class="muted sm">${nm ? esc(p) + " · " : ""}${phoneStatus(ev, p) ? `<b class="phone-rsvp ${phoneStatus(ev, p)}">${{ going: ev.kind === "meeting" ? "Accepted" : "Going", maybe: "Maybe", no: ev.kind === "meeting" ? "Declined" : "Can't go" }[phoneStatus(ev, p)]}</b> · ` : ""}Hasn't joined yet</div></div>${manage ? `<span class="btnrow" style="gap:6px"><button class="btn ghost small" data-setphone="${esc(p)}" title="Mark their RSVP">✎</button><button class="btn ghost small" data-textinvite="${esc(p)}">Text</button><button class="btn ghost small" data-uninvitephone="${esc(p)}">✕</button></span>` : ""}</div>`; }).join("")}</div></div>` : ""}
+    <div class="inv-body">${row("Accepted", g.going, phonesWith(ev, "going")) + row("Maybe", g.maybe, phonesWith(ev, "maybe")) + row("Declined", g.no, phonesWith(ev, "no")) + row("No answer yet", g.none) || `<p class="muted">Nobody invited yet.</p>`}</div></div>`}
+  ${unansweredPhones(ev).length && canSeeGuests(ev) ? `<div class="card inv-card ${collapsedOpen("friendlyInvOpen:" + ev.id, false) ? "open" : ""}" id="invCard" style="padding:12px 16px">
+    <button type="button" class="inv-toggle" id="invToggle"><b>Not on Friendly yet <span class="muted sm">· ${unansweredPhones(ev).length} invited by text</span></b><span class="inv-chev">›</span></button>
+  <div class="inv-body">${unansweredPhones(ev).map(p => { const nm = (ev.invitedPhoneNames || {})[p]; return `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">💬</span><div style="flex:1;min-width:0"><b>${esc(nm || p)}</b><div class="muted sm">${nm ? esc(p) + " · " : ""}${phoneStatus(ev, p) ? `<b class="phone-rsvp ${phoneStatus(ev, p)}">${{ going: ev.kind === "meeting" ? "Accepted" : "Going", maybe: "Maybe", no: ev.kind === "meeting" ? "Declined" : "Can't go" }[phoneStatus(ev, p)]}</b> · ` : ""}Hasn't joined yet</div></div>${manage ? `<span class="btnrow" style="gap:6px"><button class="btn ghost small" data-setphone="${esc(p)}" title="Mark their RSVP">✎</button><button class="btn ghost small" data-textinvite="${esc(p)}">Text</button><button class="btn ghost small" data-uninvitephone="${esc(p)}">✕</button></span>` : ""}</div>`; }).join("")}</div></div>` : ""}
   <div class="card th-plain" id="wall" style="margin-top:22px"><p class="muted">Loading…</p></div>`;
 }
 function wireMeeting(ev) {

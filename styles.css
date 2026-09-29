@@ -785,3 +785,7 @@ html{background:var(--bg)}
 .set-rsvp .btn{justify-content:center;width:100%}
 .phone-rsvp{font-weight:700}
 .phone-rsvp.going{color:var(--good)} .phone-rsvp.maybe{color:#C98A12} .phone-rsvp.no{color:var(--bad)}
+/* Texted invitees a host answered for, shown in the guest list */
+.avatar.texted-av{background:#E9DCD2;color:#6b5a4c;font-size:13px}
+.guest-chip.texted{border:1.5px dashed color-mix(in srgb,var(--th-ink) 30%,transparent)}
+.texted-tag{font-style:normal;font-size:10.5px;font-weight:700;opacity:.65;margin-left:2px}
