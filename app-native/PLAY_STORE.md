@@ -59,9 +59,11 @@ Friendly is free, private by design, and built for real friend groups, not follo
 - **Government app:** No. **Financial features:** None (the app links out to Venmo, Zelle, and Cash App but does not move money).
 - **Health:** No.
 - **Data safety:** see below.
+- **Child safety standards** (required for Social apps): URL `https://officialfriendly.com/child-safety.html`, contact = developer account email. Two declarations (in-app child safety reporting; complies with child safety laws and reports to authorities) are ticked by the owner. In-app: Report → "Child safety concern" (urgent push to admins, sorted first in the moderation queue).
 
 ### Content rating questionnaire (IARC)
-- Category: **Social / Communication** (not a game)
+- Category: **Social / Communication** (not a game); sub-type **Communication** (people you already know)
+- Block users: **Yes**. Report users/content: **Yes**. Chat moderation: **Yes**. Interactions limited to invited friends: **Yes**. Result (Sept 29 2026): ESRB Everyone, "Users Interact".
 - Violence, sexuality, language, controlled substances, gambling: **No**
 - Does the app allow users to interact or exchange content with other users? **Yes** (party wall, photos, polls)
 - Can users share their physical location with other users? **No** (event addresses are typed in by hosts; no device location is shared)
