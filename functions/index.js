@@ -1180,6 +1180,40 @@ async function dropRedundantPhoneInvites(ref, before, after, memberUids) {
   drop.forEach(p => { up["invitedPhoneNames." + p] = FieldValue.delete(); });
   await ref.update(up).catch(err => logger.warn("dropRedundantPhoneInvites: " + err.message));
 }
+// Someone texted an event invite joins Friendly (or adds their phone) later: turn every
+// "not on Friendly yet" phone invite into a real invite for their account, exactly like
+// tapping the link would (joinViaLink): carry a host-marked RSVP along, and clear the
+// phone row. Without this they stay a phone number on the event until they open the
+// link, so group pages (which need every member invited) and guest lists miss them.
+const phoneKeyOf = e164 => require("crypto").createHash("sha256").update("friendly:" + e164).digest().subarray(0, 12).toString("hex");
+async function claimPhoneInvites(uid, phone, name) {
+  let n = 0;
+  const evs = await db.collection("events").where("invitedPhones", "array-contains", phone).get();
+  for (const d of evs.docs) {
+    const ev = d.data();
+    const up = { invitedPhones: FieldValue.arrayRemove(phone), ["invitedPhoneNames." + phone]: FieldValue.delete(), ["phoneRsvps." + phone]: FieldValue.delete() };
+    if (!(ev.invitedUids || []).includes(uid)) {
+      up.invitedUids = FieldValue.arrayUnion(uid);
+      up["names." + uid] = name || (ev.invitedPhoneNames || {})[phone] || "Friend";
+      up["phoneKeys." + uid] = phoneKeyOf(phone);
+      const pre = (ev.phoneRsvps || {})[phone];
+      if (pre && pre.status && !(ev.rsvps || {})[uid]) { up["rsvps." + uid] = pre.status; up["rsvpSetBy." + uid] = { by: pre.by || ev.hostId, at: pre.at || Date.now() }; }
+    }
+    await d.ref.update(up).then(() => n++).catch(err => logger.warn("claimPhoneInvites " + d.id + ": " + err.message));
+  }
+  // Groups: a pending phone invite for someone who is already a member is stale. (A real
+  // pending group invite stays, so they still get to accept or decline it.)
+  const gs = await db.collection("groups").where("invitedPhones", "array-contains", phone).get();
+  for (const g of gs.docs) if ((g.data().memberUids || []).includes(uid))
+    await g.ref.update({ invitedPhones: FieldValue.arrayRemove(phone), ["invitedPhoneNames." + phone]: FieldValue.delete() }).catch(() => {});
+  return n;
+}
+exports.onUserPhone = onDocumentWritten({ document: "users/{uid}" }, async e => {
+  const before = e.data.before.exists ? e.data.before.data() : {}, after = e.data.after.exists ? e.data.after.data() : null;
+  if (!after || !after.phoneE164 || after.phoneE164 === before.phoneE164) return;
+  const n = await claimPhoneInvites(e.params.uid, after.phoneE164, after.name);
+  if (n) logger.info(`onUserPhone: linked ${n} texted event invite(s) to ${e.params.uid}`);
+});
 exports.onGroupUpdated = onDocumentUpdated({ document: "groups/{gid}" }, async e => {
   const before = e.data.before.data(), after = e.data.after.data();
   await dropRedundantPhoneInvites(e.data.after.ref, before, after, after.memberUids || []);
