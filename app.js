@@ -1243,6 +1243,14 @@ function phoneChip(ev, p, manage) {
 function goingCount(ev) { return (ev.invitedUids || []).reduce((t, u) => (ev.rsvps || {})[u] === "going" ? t + 1 + (((ev.plusOnes || {})[u]) || 0) : t, 0) + (ev.invitedPhones || []).filter(p => phoneStatus(ev, p) === "going").length; }
 function isFull(ev) { return ev.capacity > 0 && goingCount(ev) >= ev.capacity; }
 function canManage(ev) { if (ev._manage != null) return ev._manage; return ev.hostId === myUid() || (ev.cohostUids || []).includes(myUid()); }
+// An event belongs on a group's page when it was planned for that group, or when every member
+// of the group is on its invite list (hand-picked, or planned for a bigger group that includes them).
+function evInGroup(e, g) {
+  if (!g) return false;
+  if (e.groupId === g.id) return true;
+  const mem = g.memberUids || [], inv = new Set(e.invitedUids || []);
+  return mem.length >= 2 && mem.every(u => inv.has(u));
+}
 function myEvents() {
   return [...S.events.values()].filter(ev => (ev.invitedUids || []).includes(myUid()) || (ev.groupId && S.groups.has(ev.groupId)));
 }
@@ -1285,7 +1293,7 @@ function homeBody() {
   const t = todayStr();
   let upcoming = evs.filter(e => e.date >= t).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
   let past = evs.filter(e => e.date < t).sort((a, b) => b.date.localeCompare(a.date));
-  if (homeFilter !== "all") { const f = e => (e.groupId || "none") === homeFilter; upcoming = upcoming.filter(f); past = past.filter(f); }
+  if (homeFilter !== "all") { const f = homeFilter === "none" ? e => !e.groupId && ![...S.groups.values()].some(g => evInGroup(e, g)) : e => evInGroup(e, S.groups.get(homeFilter)); upcoming = upcoming.filter(f); past = past.filter(f); }
 
   // Pending group invites render in shell(), so they show on every page.
   const groups = [...S.groups.values()];
@@ -1388,7 +1396,7 @@ function groupPageBody(gid) {
     <button class="btn primary" data-go="#/new">＋ Plan for this group</button>
     ${host ? `<button class="btn" id="inviteBtn">＋ Add people</button>` : ""}
   </div>
-  ${(() => { const t = todayStr(); const evs = myEvents().filter(e => e.groupId === g.id);
+  ${(() => { const t = todayStr(); const evs = myEvents().filter(e => evInGroup(e, g));
     const up = evs.filter(e => e.date >= t).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
     const past = evs.filter(e => e.date < t).sort((a, b) => b.date.localeCompare(a.date));
     return `<div class="section-head" style="margin-top:22px"><h2>Plans</h2>${evs.length ? `<button class="btn small" data-homefilter="${g.id}">Open in Events</button>` : ""}</div>
@@ -2563,7 +2571,9 @@ function eventInner(ev) {
     const ph = ["going", "maybe", "no"].includes(k) ? phonesWith(ev, k) : [];
     if (!g[k].length && !ph.length) return "";
     const label = { going: "Going", maybe: "Maybe", waitlist: "Waitlist", pending: "Awaiting approval", no: "Can't make it", none: "Invited" }[k];
-    return `<div class="guest-group"><div class="guest-label">${label} · ${g[k].length + ph.length}</div><div class="guest-chips">${ph.map(p => phoneChip(ev, p, manage)).join("")}${g[k].map(u => `
+    // Heads, not invites: each guest's +1s count toward their group (Going 3 = Sam, Alex, and Alex's +1).
+    const heads = g[k].length + ph.length + g[k].reduce((t, u) => t + (((ev.plusOnes || {})[u]) || 0), 0);
+    return `<div class="guest-group"><div class="guest-label">${label} · ${heads}</div><div class="guest-chips">${ph.map(p => phoneChip(ev, p, manage)).join("")}${g[k].map(u => `
       <span class="guest-chip"><span data-viewprofile="${u}" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px">${avatar(u)}${esc(first(nameOf(u)))}</span>${(ev.plusOnes || {})[u] ? (() => {
         const n = ev.plusOnes[u]; const raw = (ev.plusNames || {})[u]; const names = (Array.isArray(raw) ? raw : (raw ? [raw] : [])).filter(Boolean);
         return `<i class="plusone">+${n}${names.length ? ` (${names.map(esc).join(", ")})` : ""}</i>`;
