@@ -701,7 +701,7 @@ function focusRoute() {
     const sec = q.to && document.getElementById(q.to);
     const target = msg || ((!q.c || tries > 16) && sec);   // give a message 4 seconds to load, then settle for its section
     if (!target) { if (tries < 60) setTimeout(tick, 250); return; }
-    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    target.scrollIntoView({ block: "center" });
     target.classList.add("focus-flash"); setTimeout(() => target.classList.remove("focus-flash"), 2400);
   };
   tick();
