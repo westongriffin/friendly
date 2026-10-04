@@ -912,7 +912,8 @@ async function notify(uids, title, body, url = "/", extra = {}) {
       const acts = q.docs.filter(d => { const a = d.data(); const k = key(a.url); return !(k && (peeked[k] || 0) >= a.createdAt); }).length;
       // Plus private conversations with something new from the other person (the Messages count in the app).
       const threads = await db.collection("dms").where("uids", "array-contains", s.id).get();
-      const dms = threads.docs.filter(d => { const t = d.data(); return t.lastBy && t.lastBy !== s.id && (t.lastAt || 0) > ((t.readAt || {})[s.id] || 0); }).length;
+      const cleared = s.get("hiddenDms") || {}, blockedU = s.get("blockedUids") || [];
+      const dms = threads.docs.filter(d => { const t = d.data(); return t.lastBy && t.lastBy !== s.id && !blockedU.includes(t.lastBy) && (t.lastAt || 0) > ((t.readAt || {})[s.id] || 0) && (t.lastAt || 0) > (cleared[d.id] || 0); }).length;
       badge[s.id] = Math.min(99, acts + dms);
     } catch (err) { logger.warn("badge count: " + err.message); }
   }));

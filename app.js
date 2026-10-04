@@ -3756,7 +3756,7 @@ const incomingRequests = () => [...S.friends.values()].filter(f => f.status === 
 const outgoingRequests = () => [...S.friends.values()].filter(f => f.status === "pending" && f.requestedBy === myUid());
 const acceptedFriends = () => [...S.friends.values()].filter(f => f.status === "accepted");
 const dmIsUnread = t => !!(t && t.lastBy && t.lastBy !== myUid() && (t.lastAt || 0) > ((t.readAt || {})[myUid()] || 0));
-const dmUnread = () => [...S.dms.values()].filter(t => dmIsUnread(t) && !(S.profile.blockedUids || []).includes(otherIn(t))).length;
+const dmUnread = () => [...S.dms.values()].filter(t => dmIsUnread(t) && !(S.profile.blockedUids || []).includes(otherIn(t)) && (t.lastAt || 0) > ((S.profile.hiddenDms || {})[t.id] || 0)).length;
 const msgBadge = () => { try { return dmUnread() + incomingRequests().length; } catch { return 0; } };
 const personName = u => nameOf(u) !== "Someone" ? nameOf(u) : "Friend";
 
