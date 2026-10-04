@@ -1,7 +1,7 @@
 // Friendly service worker: cache the app shell so the installed PWA opens
 // instantly. Firebase (Firestore/Auth) traffic and fonts always hit the
 // network. Bump CACHE to invalidate old shells on deploy.
-const CACHE = "friendly-fb-v151";
+const CACHE = "friendly-fb-v152";
 const SHELL = [
   "./", "./index.html", "./styles.css", "./app.js", "./blip.js", "./themes.js",
   "./firebase-config.js", "./manifest.webmanifest",
@@ -34,10 +34,12 @@ self.addEventListener("fetch", e => {
 // ---- Web push ----
 self.addEventListener("push", e => {
   let d = {}; try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data && e.data.text() }; }
-  e.waitUntil(self.registration.showNotification(d.title || "Friendly", {
+  // d.badge = unread count for the Home Screen icon (where the browser supports it).
+  const setBadge = typeof d.badge === "number" && self.navigator && self.navigator.setAppBadge ? self.navigator.setAppBadge(d.badge).catch(() => {}) : Promise.resolve();
+  e.waitUntil(Promise.all([setBadge, self.registration.showNotification(d.title || "Friendly", {
     body: d.body || "", icon: "./icons/icon-192.png", badge: "./icons/icon-192.png",
     data: { url: d.url || "/" }, tag: d.tag || undefined
-  }));
+  })]));
 });
 self.addEventListener("notificationclick", e => {
   e.notification.close();

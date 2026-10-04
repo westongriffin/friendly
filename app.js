@@ -156,7 +156,7 @@ async function registerPush(uid) {
     if (perm.receive !== "granted") perm = await Push.requestPermissions();
     if (perm.receive !== "granted") return;
     Push.addListener("registration", async t => { try { await updateDoc(doc(db, "users", uid), { pushTokens: arrayUnion(t.value) }); } catch {} });
-    Push.addListener("pushNotificationActionPerformed", a => { const url = a && a.notification && a.notification.data && a.notification.data.url; if (url) location.hash = url; });
+    Push.addListener("pushNotificationActionPerformed", a => { const url = a && a.notification && a.notification.data && a.notification.data.url; if (url) { location.hash = routeTail(url); focusRoute(); } });
     await Push.register();
   } catch {}
 }
@@ -655,8 +655,14 @@ const S = {
   evSubs: [], photos: [], polls: [], songs: []
 };
 
+// A link can point inside a screen: #/e/<id>?to=<section id>&c=<message id> (see focusRoute).
 function parseRoute() {
-  const h = (location.hash || "#/").replace(/^#/, "");
+  const [path, qs] = (location.hash || "#/").replace(/^#/, "").split("?");
+  const r = routeFromPath(path);
+  r.q = {}; try { new URLSearchParams(qs || "").forEach((v, k) => { r.q[k] = v; }); } catch {}
+  return r;
+}
+function routeFromPath(h) {
   const p = h.split("/").filter(Boolean);
   if (!p.length) return { name: "home" };
   if (p[0] === "e") return { name: "event", id: p[1] };
@@ -675,7 +681,31 @@ function parseRoute() {
 }
 // New screen, start at the top (the SPA otherwise keeps the old scroll position,
 // so an event page could open at the party wall instead of the cover).
-window.addEventListener("hashchange", () => { S.route = parseRoute(); window.scrollTo(0, 0); render(); });
+window.addEventListener("hashchange", () => { S.route = parseRoute(); window.scrollTo(0, 0); render(); focusRoute(); });
+// The "#/..." part of any url (activity items and pushes carry "/#/e/<id>"), with or without a query.
+const routeTail = url => { const s = String(url || ""); const i = s.indexOf("#"); return i < 0 ? "#/" : s.slice(i); };
+const tailOf = url => routeTail(url).split("?")[0];
+// Notifications and Activity rows open the exact spot: scroll to the message (?c=) or the
+// section (?to=) and flash it. Waits for sign-in and for the data to arrive, since a
+// tapped notification can cold-start the app.
+let focusKey = "";
+function focusRoute() {
+  const q = S.route.q || {}; if (!q.to && !q.c) return;
+  const key = location.hash; if (focusKey === key) return; focusKey = key;
+  let tries = 0;
+  const tick = () => {
+    if (location.hash !== key) return;
+    if (!S.user || !S.ready || document.querySelector(".splash")) { if (tries++ < 400) setTimeout(tick, 250); return; }
+    tries++;
+    const msg = q.c && document.querySelector(`[data-cmsg="${CSS.escape(q.c)}"]`);
+    const sec = q.to && document.getElementById(q.to);
+    const target = msg || ((!q.c || tries > 16) && sec);   // give a message 4 seconds to load, then settle for its section
+    if (!target) { if (tries < 60) setTimeout(tick, 250); return; }
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    target.classList.add("focus-flash"); setTimeout(() => target.classList.remove("focus-flash"), 2400);
+  };
+  tick();
+}
 window.go = path => { location.hash = path; };
 
 // ---------- auth ----------
@@ -831,7 +861,7 @@ function withInputKept(fn) {
   n.focus({ preventScroll: true });
   try { if (snap.s != null) n.setSelectionRange(snap.s, snap.e); } catch {}
 }
-function render() { withInputKept(renderNow); }
+function render() { withInputKept(renderNow); try { syncBadge(); } catch {} }
 // The loading screen: the wordmark flows into Blip (blip.js), then Blip idles until the app is ready.
 let splashStop = null;
 function splashInner(msg) { return window.Blip ? `<svg class="splash-blip"></svg><div class="splash-say" aria-hidden="true"><b>Hi, I'm Dot!</b> Let's get everyone together.</div>` : `<div class="brand splash-brand">Friend<span class="tilt">l</span>y</div>`; }
@@ -1403,7 +1433,7 @@ function groupPageBody(gid) {
     <div class="card">${up.length ? up.map(planRow).join("") : `<p class="muted" style="padding:14px 16px;margin:0">Nothing planned yet. Tap “Plan for this group” to start one.</p>`}</div>
     ${past.length ? `<details class="adv" style="margin-top:8px"><summary>${past.length} past</summary><div class="card" style="margin-top:8px">${past.slice(0, 20).map(planRow).join("")}</div></details>` : ""}`; })()}
   ${(() => { const bs = upcomingBirthdays(90, g.id); const anySet = members.some(m => m.birthday); return `<div class="section-head" style="margin-top:22px"><h2>Birthdays</h2></div>
-    <div class="card">${bs.length ? bs.map(b => `<div class="member-row">${avatar(b.uid, "lg")}<div style="flex:1;min-width:0"><b>${esc(first(b.name))}</b><div class="muted sm">${esc(fmtDay({ date: b.date }))} · ${b.days === 0 ? "today 🎉" : b.days === 1 ? "tomorrow" : "in " + b.days + " days"}</div></div>${b.days <= 45 ? `<button class="btn small ${b.days <= 30 ? "primary" : ""}" data-bplan="${b.uid}">Plan something</button>` : ""}</div>`).join("") : `<p class="muted sm" style="padding:14px 16px;margin:0">${anySet ? "No birthdays in the next 90 days." : "Nobody has added a birthday yet. Add yours on your profile and the group gets a heads-up a month before."}</p>`}</div>`; })()}
+    <div class="card" id="bdayCard">${bs.length ? bs.map(b => `<div class="member-row">${avatar(b.uid, "lg")}<div style="flex:1;min-width:0"><b>${esc(first(b.name))}</b><div class="muted sm">${esc(fmtDay({ date: b.date }))} · ${b.days === 0 ? "today 🎉" : b.days === 1 ? "tomorrow" : "in " + b.days + " days"}</div></div>${b.days <= 45 ? `<button class="btn small ${b.days <= 30 ? "primary" : ""}" data-bplan="${b.uid}">Plan something</button>` : ""}</div>`).join("") : `<p class="muted sm" style="padding:14px 16px;margin:0">${anySet ? "No birthdays in the next 90 days." : "Nobody has added a birthday yet. Add yours on your profile and the group gets a heads-up a month before."}</p>`}</div>`; })()}
   <div class="section-head" style="margin-top:22px"><h2>Members</h2></div>
   <div class="card">${members.map(m => `<div class="member-row"><span class="member-click" data-viewprofile="${m.uid}" style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;cursor:pointer">${avatar(m.uid, "lg")}
     <div style="flex:1;min-width:0"><b>${esc(m.name || "Member")}${m.uid === myUid() ? " (you)" : ""}${hostUids.includes(m.uid) ? " · host" : ""}</b>
@@ -2692,7 +2722,7 @@ function wallInner(ev, title = "Party wall") {
   const msg = (c, topId) => {
     const rx = Object.entries(c.reactions || {}).filter(([k, us]) => rshow(k) && us && us.length);
     const who = first(c.authorName || nameOf(c.authorId));
-    return `<div class="wall-msg${topId ? " reply" : ""}">${avatar(c.authorId, "sm")}<div style="flex:1;min-width:0"><div class="wall-who">${esc(who)} <i>${ago(c.createdAt)}</i></div>
+    return `<div class="wall-msg${topId ? " reply" : ""}" data-cmsg="${esc(c.id)}">${avatar(c.authorId, "sm")}<div style="flex:1;min-width:0"><div class="wall-who">${esc(who)} <i>${ago(c.createdAt)}</i></div>
       ${c.gif ? `<img class="wall-img wall-gif" src="${esc(c.gif)}" alt="GIF">` : ""}${c.img ? `<img class="wall-img" src="${esc(c.img)}" alt="">` : ""}${c.text ? `<div class="wall-text">${renderText(c.text, c.mentions)}</div>` : ""}
       <div class="react-row">${rx.map(([k, us]) => `<button type="button" class="react ${us.includes(me) ? "on" : ""}" data-react="${c.id}|${k}">${rshow(k)} ${us.length}</button>`).join("")}<button type="button" class="react add" data-reactpick="${c.id}" title="React">＋</button><button type="button" class="react add" data-reply="${topId || c.id}|${esc(who)}">↩ Reply</button></div>
       ${(kids[c.id] || []).map(r => msg(r, c.id)).join("")}</div>
@@ -3623,7 +3653,7 @@ function wireProfile() {
     } catch (e) { toast(e.message); }
   };
   if (el("takeTour")) el("takeTour").onclick = () => { go("#/"); setTimeout(() => { tourStep = 0; showTourStep(); }, 500); };
-  el("signOut").onclick = async () => { stopListening(); await signOut(auth).catch(() => {}); wipeLocalData(); };
+  el("signOut").onclick = async () => { clearBadge(); stopListening(); await signOut(auth).catch(() => {}); wipeLocalData(); };
   const pt = el("pushToggle"); if (pt) pt.onclick = () => pushState() === "on" ? disableWebPush() : enableWebPush();
   const nr = el("notifRow"); if (nr) nr.onclick = () => { location.href = "app-settings:"; };
   document.querySelectorAll("[data-notifpref]").forEach(cb => cb.onchange = () => updateDoc(doc(db, "users", myUid()), { [`notifPrefs.${cb.dataset.notifpref}`]: cb.checked }).catch(e => toast(e.message)));
@@ -3678,17 +3708,40 @@ async function deleteAccount() {
   } catch (e) { toast(e.code === "auth/invalid-credential" || e.code === "auth/wrong-password" ? "That password didn't match." : e.message); }
 }
 
+// ---------- APP ICON BADGE ----------
+// The red number on the app icon = the bell's unread count. Pushes set it from the server;
+// whenever the app is open it re-syncs, so reading something clears it. Only app builds
+// with the Badge plugin (iOS 1.0.3+, Android 1.0.4+) set users.badgeOk, and the server
+// sends a badge only to those, so older builds never get a number they can't clear.
+let lastBadge = -1;
+function syncBadge() {
+  if (!S.user || !S.profile || !S.activity) return;
+  const n = Math.min(99, unreadCount()); if (n === lastBadge) return; lastBadge = n;
+  const B = NATIVE ? plugin("Badge") : null;
+  if (B && B.set) {
+    (n ? B.set({ count: n }) : B.clear()).catch(() => {});
+    if (!S.profile.badgeOk) updateDoc(doc(db, "users", S.user.uid), { badgeOk: true }).catch(() => {});
+  } else if (!NATIVE && navigator.setAppBadge) (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
+}
+function clearBadge() { lastBadge = -1; const B = NATIVE ? plugin("Badge") : null; if (B && B.clear) B.clear().catch(() => {}); else if (navigator.clearAppBadge) navigator.clearAppBadge().catch(() => {}); }
+
 // ---------- ACTIVITY ----------
 const seenAt = () => (S.profile && S.profile.activitySeenAt) || 0;
 // A "New" pill clears the moment you actually open that event or group, not only
 // when you visit the Activity page -- opening the thing IS seeing the alert.
 // Tracked per-device in localStorage, keyed by the same url tail activity items carry.
 const peekedMap = () => { try { return JSON.parse(localStorage.getItem("friendlyPeeked") || "{}"); } catch { return {}; } };
-const markPeeked = urlTail => { try { const m = peekedMap(); m[urlTail] = Date.now(); localStorage.setItem("friendlyPeeked", JSON.stringify(m)); } catch {} };
-const isPeeked = a => { const tail = "#" + (String(a.url || "").split("#")[1] || ""); if (tail === "#") return false; return (peekedMap()[tail] || 0) >= a.createdAt; };
+// Also saved on the account (users.peeked.<e_id>) so the app icon badge the server sends matches the bell.
+const peekKey = tail => tail.replace(/^#\//, "").replace(/[^A-Za-z0-9_-]/g, "_");
+const markPeeked = urlTail => {
+  const hadNew = newCountFor(urlTail) > 0;
+  try { const m = peekedMap(); m[urlTail] = Date.now(); localStorage.setItem("friendlyPeeked", JSON.stringify(m)); } catch {}
+  if (hadNew && S.user) updateDoc(doc(db, "users", S.user.uid), { ["peeked." + peekKey(urlTail)]: Date.now() }).catch(() => {});
+};
+const isPeeked = a => { const tail = tailOf(a.url); if (tail === "#/" || tail === "#") return false; return Math.max(peekedMap()[tail] || 0, ((S.profile && S.profile.peeked) || {})[peekKey(tail)] || 0) >= a.createdAt; };
 const unreadCount = () => (S.activity || []).filter(a => a.createdAt > seenAt() && !isPeeked(a)).length;
-const newCountFor = urlTail => (S.activity || []).filter(a => a.createdAt > seenAt() && !isPeeked(a) && String(a.url || "").endsWith(urlTail)).length;
-const isNewEvent = ev => (S.activity || []).some(a => a.createdAt > seenAt() && !isPeeked(a) && String(a.url || "").endsWith("#/e/" + ev.id));
+const newCountFor = urlTail => (S.activity || []).filter(a => a.createdAt > seenAt() && !isPeeked(a) && tailOf(a.url) === urlTail).length;
+const isNewEvent = ev => (S.activity || []).some(a => a.createdAt > seenAt() && !isPeeked(a) && tailOf(a.url) === "#/e/" + ev.id);
 const actIcon = a => /joined via your link/.test(a.title) ? "🔗" : /waiting on your RSVP/.test(a.title) ? "📣" : /mentioned you/.test(a.title) ? "＠" : /to a meeting/.test(a.title) ? "📅" : /You're in!/.test(a.title) ? "🎟️" : /still owe/.test(a.title) ? "💸" : /invited you/.test(a.title) ? "🎟️" : /^Today:/.test(a.title) ? "⏰" : /reported/i.test(a.title) ? "⚑" : /is going|might come|can't make|joined the waitlist|requested/.test(a.title) ? "✅" : "💬";
 function notifCard() {
   let pushDismissed = false; try { pushDismissed = !!localStorage.getItem("friendlyPushDismissed"); } catch {}
@@ -3705,7 +3758,7 @@ function activityBody() {
   ${rows.length ? `<div class="empty caughtup">${dot("sleepy", 64)}<b>You're all caught up</b><p class="muted">Nothing new since you last looked.</p></div>` : ""}`;
 }
 function wireActivity() {
-  document.querySelectorAll("[data-act]").forEach(a => a.onclick = e => { e.preventDefault(); location.hash = String(a.dataset.act).replace(/^.*#/, "#"); });
+  document.querySelectorAll("[data-act]").forEach(a => a.onclick = e => { e.preventDefault(); location.hash = routeTail(a.dataset.act); });
   if (unreadCount()) updateDoc(doc(db, "users", myUid()), { activitySeenAt: Date.now() }).catch(() => {});
 }
 
