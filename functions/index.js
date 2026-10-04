@@ -1290,9 +1290,21 @@ exports.onDmMessage = onDocumentCreated({ document: "dms/{fid}/messages/{mid}", 
   const m = e.data && e.data.data(); if (!m) return;
   const uids = e.params.fid.split("_"); const other = uids.find(u => u !== m.authorId);
   if (!other || !uids.includes(m.authorId)) return;
-  const preview = m.text ? String(m.text).slice(0, 140) : m.photo ? "📷 Photo" : "New message";
-  await db.doc("dms/" + e.params.fid).set({ uids, lastText: preview, lastAt: m.createdAt || Date.now(), lastBy: m.authorId, readAt: { [m.authorId]: m.createdAt || Date.now() } }, { merge: true });
-  await notify([other], m.authorName || "New message", preview, "/#/m/" + e.params.fid + "?c=" + e.params.mid, { type: "dm", actorId: m.authorId, skipActivity: true });
+  const preview = dmPreview(m);
+  await db.doc("dms/" + e.params.fid).set({ uids, lastText: preview, lastAt: m.createdAt || Date.now(), lastBy: m.authorId, readAt: { [m.authorId]: m.createdAt || Date.now() }, typing: { [m.authorId]: 0 } }, { merge: true });
+  // "Hide alerts" on this conversation: no push (it still shows as unread in the app).
+  const them = await db.doc("users/" + other).get();
+  if ((them.get("mutedDms") || []).includes(e.params.fid)) return;
+  await notify([other], m.authorName || "New message", preview + (m.effect ? " (sent with " + m.effect + ")" : ""), "/#/m/" + e.params.fid + "?c=" + e.params.mid, { type: "dm", actorId: m.authorId, skipActivity: true });
+});
+const dmPreview = m => m.text ? String(m.text).slice(0, 140) : m.photo ? "📷 Photo" : m.gif ? "GIF" : m.audio ? "🎤 Voice message" : "New message";
+// Unsent (deleted) message: the inbox shows whatever is now the latest one.
+exports.onDmMessageDeleted = onDocumentDeleted({ document: "dms/{fid}/messages/{mid}" }, async e => {
+  const ref = db.doc("dms/" + e.params.fid); const t = await ref.get(); if (!t.exists) return;
+  const gone = e.data && e.data.data(); if (gone && t.get("lastAt") && gone.createdAt < t.get("lastAt")) return;   // not the latest one
+  const q = await ref.collection("messages").orderBy("createdAt", "desc").limit(1).get();
+  if (q.empty) await ref.update({ lastText: "", lastAt: 0, lastBy: "" });
+  else { const m = q.docs[0].data(); await ref.update({ lastText: dmPreview(m), lastAt: m.createdAt, lastBy: m.authorId }); }
 });
 
 // People who share a group are friends automatically (so they can message each other). Runs

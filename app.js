@@ -2804,7 +2804,7 @@ function wireWall(ev) {
   };
 }
 // GIF search (GIPHY). The button only appears once giphyKey is set in firebase-config.js.
-function openGifPicker(ev) {
+function openGifPicker(ev, onPick) {
   dialog(`<h3>Add a GIF</h3><input id="gifQ" class="search-box" placeholder="Search GIPHY…" autocomplete="off"><div class="gif-grid" id="gifGrid"><p class="muted sm">Loading…</p></div><p class="muted sm" style="margin:6px 0 0">Powered by GIPHY</p>`, null, null);
   const grid = el("gifGrid"), q = el("gifQ"); let timer;
   const load = async term => {
@@ -2814,6 +2814,7 @@ function openGifPicker(ev) {
       grid.innerHTML = (j.data || []).map(g => `<img src="${esc(g.images.fixed_height_small.url)}" data-gif="${esc(g.images.fixed_height.url)}" alt="${esc(g.title || "GIF")}" loading="lazy">`).join("") || `<p class="muted sm">No GIFs found.</p>`;
       grid.querySelectorAll("[data-gif]").forEach(im => im.onclick = async () => {
         const gif = im.dataset.gif; closeDialog();
+        if (onPick) return onPick(gif);
         try { await addDoc(subCol(ev, "comments"), { authorId: myUid(), authorName: S.profile.name, text: "", gif, ...parentPatch(ev), createdAt: Date.now() }); replyTo = null; }
         catch (e) { toast("Couldn't add GIF: " + e.message); }
       });
@@ -3826,8 +3827,12 @@ function messagesBody() {
   const inc = incomingRequests().filter(f => !blocked.has(otherIn(f)));
   const out = outgoingRequests();
   const friends = acceptedFriends().filter(f => !blocked.has(otherIn(f)));
-  const threads = friends.map(f => ({ f, t: S.dms.get(f.id) })).filter(x => x.t && x.t.lastAt).sort((a, b) => b.t.lastAt - a.t.lastAt);
-  const quiet = friends.filter(f => !(S.dms.get(f.id) || {}).lastAt).sort((a, b) => personName(otherIn(a)).localeCompare(personName(otherIn(b))));
+  // A deleted conversation stays hidden until something new arrives; pinned ones sit on top as big circles.
+  const cleared = S.profile.hiddenDms || {}, pins = S.profile.pinnedDms || [], muted = new Set(S.profile.mutedDms || []);
+  const live = t => t && t.lastAt && t.lastAt > (cleared[t.id] || 0);
+  const threads = friends.map(f => ({ f, t: S.dms.get(f.id) })).filter(x => live(x.t) && !pins.includes(x.f.id)).sort((a, b) => b.t.lastAt - a.t.lastAt);
+  const pinned = pins.map(id => friends.find(f => f.id === id)).filter(Boolean);
+  const quiet = friends.filter(f => !live(S.dms.get(f.id)) && !pins.includes(f.id)).sort((a, b) => personName(otherIn(a)).localeCompare(personName(otherIn(b))));
   const row = (u, mid, right, go, extra = "") => `<div class="member-row ${go ? "dm-row" : ""}" data-find="${esc((personName(u) + " " + extra).toLowerCase())}" ${go ? `data-go="${go}" role="button"` : ""}>${avatar(u, "lg")}<div style="flex:1;min-width:0">${mid}</div>${right}</div>`;
   return `
   <div class="section-head msg-head"><h1 style="margin:0">Messages</h1><span class="btnrow" style="gap:8px;margin:0"><button class="btn small" id="addFriendsBtn">＋ Add friends</button><button class="btn primary small" id="newMsgBtn">✏️ New</button></span></div>
@@ -3835,8 +3840,9 @@ function messagesBody() {
   <p class="muted sm hidden" id="msgNoHits" style="margin:6px 2px">No friends or messages match that.</p>` : ""}
   ${inc.length ? `<div class="section-head" style="margin-top:18px"><h2>Friend requests</h2></div>
     <div class="card" id="reqCard">${inc.map(f => { const u = otherIn(f); return row(u, `<b>${esc(personName(u))}</b><div class="muted sm">Wants to be friends</div>`, `<span class="btnrow" style="gap:6px"><button class="btn small primary" data-friendaccept="${f.id}">Accept</button><button class="btn ghost small" data-frienddecline="${f.id}">Decline</button></span>`); }).join("")}</div>` : `<div id="reqCard"></div>`}
+  ${pinned.length ? `<div class="dm-pins">${pinned.map(f => { const u = otherIn(f), t = S.dms.get(f.id); return `<button type="button" class="dm-pin" data-go="#/m/${f.id}" data-find="${esc(personName(u).toLowerCase())}">${avatar(u, "xl")}${dmIsUnread(t) ? `<span class="dm-dot"></span>` : ""}<span>${esc(first(personName(u)))}</span></button>`; }).join("")}</div>` : ""}
   ${threads.length ? `<div class="card" style="margin-top:18px">${threads.map(({ f, t }) => { const u = otherIn(f); const unread = dmIsUnread(t);
-      return row(u, `<b>${esc(personName(u))}</b><div class="muted sm dm-last ${unread ? "unread" : ""}">${t.lastBy === me ? "You: " : ""}${esc(t.lastText || "")}</div>`, `<span class="muted sm">${ago(t.lastAt)}</span>${unread ? `<span class="dm-dot" aria-label="Unread"></span>` : ""}`, "#/m/" + f.id, t.lastText || ""); }).join("")}</div>` : ""}
+      return row(u, `<b>${esc(personName(u))}</b>${muted.has(f.id) ? ` <span title="Alerts hidden">🔕</span>` : ""}<div class="muted sm dm-last ${unread ? "unread" : ""}">${t.lastBy === me ? "You: " : ""}${esc(t.lastText || "")}</div>`, `<span class="muted sm">${ago(t.lastAt)}</span>${unread ? `<span class="dm-dot" aria-label="Unread"></span>` : ""}`, "#/m/" + f.id, t.lastText || ""); }).join("")}</div>` : ""}
   ${quiet.length ? `<div class="section-head" style="margin-top:18px"><h2>Friends</h2></div>
     <div class="card">${quiet.map(f => { const u = otherIn(f); return row(u, `<b>${esc(personName(u))}</b>`, `<button class="btn small" data-go="#/m/${f.id}">Message</button>`); }).join("")}</div>` : ""}
   ${out.length ? `<div class="section-head" style="margin-top:18px"><h2>Waiting on</h2></div>
@@ -3885,48 +3891,95 @@ function wireMessages() {
   document.querySelectorAll("[data-friendcancel]").forEach(b => b.onclick = () => { const f = S.friends.get(b.dataset.friendcancel); if (f) dropFriendship(f, "Request canceled"); });
 }
 
-// One conversation. Its messages stream in through their own listener (kept across re-renders,
-// stopped when you leave), so typing and scroll position survive every refresh of the page.
+// ---- One conversation, iMessage-style ----
+// Messages: { authorId, authorName, text?, photo?, gif?, audio?, audioDur?, replyTo?{id,text,authorId},
+// effect?, reactions{uid: emoji}, editedAt?, createdAt }. They stream in through their own listener
+// (kept across re-renders, stopped when you leave) so typing and scroll survive every refresh.
 let dmSub = null;   // { fid, unsub, msgs, first }
-function stopDmSub() { if (dmSub) { dmSub.unsub(); dmSub = null; } }
+let dmReply = null; // message being replied to { id, text, authorId }
+let dmSearchQ = null; // null = search closed; "" or text = filtering
+const DM_TAPBACKS = ["❤️", "👍", "👎", "😂", "‼️", "❓"];
+const DM_EFFECTS = { confetti: { label: "Confetti", em: ["🎉", "🎊", "✨", "🥳"] }, balloons: { label: "Balloons", em: ["🎈", "🎈", "🎈", "🎀"] }, love: { label: "Love", em: ["❤️", "💖", "💕", "😍"] }, fireworks: { label: "Fireworks", em: ["🎆", "🎇", "✨", "💥"] } };
+const EDIT_WINDOW = 15 * 60 * 1000, UNSEND_WINDOW = 2 * 60 * 1000;
+function stopDmSub() { if (dmSub) { dmSub.unsub(); dmSub = null; } dmReply = null; dmSearchQ = null; stopDmRec(); }
 // Coming back to an open conversation (app reopened, tab refocused) counts as reading it.
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && S.user && S.route.name === "dm" && S.msgsReady) markDmRead(S.route.id); });
 function ensureDmSub(fid) {
   if (dmSub && dmSub.fid === fid) return;
   stopDmSub();
   const sub = { fid, msgs: null, first: true, unsub: () => {} }; dmSub = sub;
-  sub.unsub = onSnapshot(query(collection(db, "dms", fid, "messages"), orderBy("createdAt", "desc"), limit(200)), snap => {
-    sub.msgs = snap.docs.map(d => ({ id: d.id, ...d.data() })).reverse();
-    paintDm(); markDmRead(fid);
+  sub.unsub = onSnapshot(query(collection(db, "dms", fid, "messages"), orderBy("createdAt", "desc"), limit(200)), { includeMetadataChanges: true }, snap => {
+    sub.msgs = snap.docs.map(d => ({ id: d.id, ...d.data(), _pending: d.metadata.hasPendingWrites })).reverse();
+    paintDm(); markDmRead(fid); playDmEffects(fid);
   }, err => { sub.msgs = []; paintDm(); console.warn("dm listener:", err.message); });
 }
 function markDmRead(fid) {
   const t = S.dms.get(fid);
-  if (t && dmIsUnread(t) && document.visibilityState === "visible") updateDoc(doc(db, "dms", fid), { [`readAt.${myUid()}`]: Date.now() }).catch(() => {});
+  if (t && dmIsUnread(t) && document.visibilityState === "visible" && S.route.name === "dm") updateDoc(doc(db, "dms", fid), { [`readAt.${myUid()}`]: Date.now() }).catch(() => {});
+}
+// Links become tappable; 1-3 emoji with no other text show big, like iMessage.
+const linkifyHtml = h => h.replace(/\b(https?:\/\/[^\s<]+[^\s<.,;:!?)\]'"])/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+const bigEmoji = t => { const s = String(t || "").trim(); if (!s || s.length > 24 || /[\p{L}\p{N}]/u.test(s)) return false; try { const n = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(s)].filter(x => x.segment.trim()).length; return n > 0 && n <= 3 && /\p{Extended_Pictographic}/u.test(s); } catch { return false; } };
+const fmtClock = ms => new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+function dmVisibleMsgs() {
+  const msgs = (dmSub && dmSub.msgs) || [];
+  const blocked = new Set(S.profile.blockedUids || []), hidden = new Set(S.profile.hiddenIds || []);
+  const clearedAt = ((S.profile.hiddenDms || {})[dmSub && dmSub.fid]) || 0;   // "Delete conversation" hides everything before then
+  return msgs.filter(m => !blocked.has(m.authorId) && !hidden.has(m.id) && m.createdAt > clearedAt);
 }
 function dmListInner() {
-  const msgs = dmSub && dmSub.msgs; if (!msgs) return `<p class="muted sm" style="text-align:center">Loading…</p>`;
-  const blocked = new Set([...(S.profile.blockedUids || [])]), hidden = new Set(S.profile.hiddenIds || []);
-  const vis = msgs.filter(m => !blocked.has(m.authorId) && !hidden.has(m.id));
+  if (!dmSub || !dmSub.msgs) return `<p class="muted sm" style="text-align:center">Loading…</p>`;
+  let vis = dmVisibleMsgs();
+  if (dmSearchQ) { const q = dmSearchQ.toLowerCase(); vis = vis.filter(m => String(m.text || "").toLowerCase().includes(q)); if (!vis.length) return `<p class="muted sm" style="text-align:center">No messages match “${esc(dmSearchQ)}”.</p>`; }
   if (!vis.length) return `<div class="dm-empty">${window.Blip ? window.Blip.svg({ mood: "happy", size: 64 }) : "👋"}<p class="muted">Say hi! Only the two of you can see this conversation.</p></div>`;
+  const me = myUid(), t = S.dms.get(dmSub.fid) || {}, otherRead = Object.entries(t.readAt || {}).find(([u]) => u !== me);
+  const theirReadAt = otherRead ? otherRead[1] : 0;
+  const lastMine = [...vis].reverse().find(m => m.authorId === me);
   let prev = null;
   return vis.map(m => {
-    const mine = m.authorId === myUid();
+    const mine = m.authorId === me;
     const gap = !prev || m.createdAt - prev.createdAt > 15 * 60 * 1000;
-    const stamp = gap ? `<div class="dm-stamp">${esc(new Date(m.createdAt).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }))}</div>` : "";
+    const stamp = gap ? `<div class="dm-stamp">${esc(new Date(m.createdAt).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }))}</div>` : "";
     prev = m;
-    return `${stamp}<div class="dm-msg ${mine ? "mine" : "theirs"}" data-cmsg="${esc(m.id)}" data-dmmsg="${esc(m.id)}">${m.photo ? `<img class="dm-photo" src="${esc(m.photo)}" alt="">` : ""}${m.text ? `<span>${renderText(m.text, [])}</span>` : ""}</div>`;
-  }).join("");
+    const big = !m.photo && !m.gif && !m.audio && bigEmoji(m.text);
+    const quote = m.replyTo ? `<button type="button" class="dm-quote" data-jumpmsg="${esc(m.replyTo.id)}">${esc(first(personName(m.replyTo.authorId)))}: ${esc(String(m.replyTo.text || "📷 Photo").slice(0, 80))}</button>` : "";
+    const media = m.photo ? `<img class="dm-photo" src="${esc(m.photo)}" alt="Photo" data-dmimg>` : m.gif ? `<img class="dm-photo" src="${esc(m.gif)}" alt="GIF" data-dmimg>` : m.audio ? `<audio class="dm-audio" controls preload="none" src="${esc(m.audio)}"></audio>` : "";
+    const rx = Object.entries(m.reactions || {}).filter(([, e]) => e);
+    const tap = rx.length ? `<span class="dm-tapbacks">${[...new Set(rx.map(([, e]) => e))].slice(0, 4).map(e => esc(e)).join("")}${rx.length > 1 ? `<i>${rx.length}</i>` : ""}</span>` : "";
+    const receipt = mine && lastMine && m.id === lastMine.id && !dmSearchQ ? `<div class="dm-receipt">${m._pending ? "Sending…" : theirReadAt >= m.createdAt ? "Read " + fmtClock(theirReadAt) : "Delivered"}</div>` : "";
+    return `${stamp}<div class="dm-wrap ${mine ? "mine" : "theirs"}">${quote}<div class="dm-msg ${mine ? "mine" : "theirs"} ${big ? "big" : ""} ${media && !m.text ? "media" : ""}" data-cmsg="${esc(m.id)}" data-dmmsg="${esc(m.id)}">${tap}${media}${m.text ? `<span>${big ? esc(m.text) : linkifyHtml(renderText(m.text, []))}</span>` : ""}</div>${m.editedAt ? `<div class="dm-edited">Edited</div>` : ""}${receipt}</div>`;
+  }).join("") + dmTypingHtml();
+}
+function dmTypingHtml() {
+  const t = S.dms.get(dmSub && dmSub.fid) || {}; const other = Object.entries(t.typing || {}).find(([u]) => u !== myUid());
+  return other && Date.now() - other[1] < 7000 ? `<div class="dm-wrap theirs"><div class="dm-msg theirs dm-typing" aria-label="Typing"><i></i><i></i><i></i></div></div>` : "";
 }
 function paintDm() {
   const box = el("dmList"); if (!box) return;
-  const nearBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 140;
+  const nearBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 160;
   box.innerHTML = dmListInner();
-  if (dmSub && (dmSub.first || nearBottom) && dmSub.msgs) {
-    const focusing = (S.route.q || {}).c;
-    if (!focusing) window.scrollTo(0, document.documentElement.scrollHeight);
+  if (dmSub && (dmSub.first || nearBottom) && dmSub.msgs && !dmSearchQ) {
+    if (!(S.route.q || {}).c) window.scrollTo(0, document.documentElement.scrollHeight);
     dmSub.first = false;
   }
+}
+// The typing bubble fades on its own, so repaint while a chat is open.
+setInterval(() => { if (S.route && S.route.name === "dm" && dmSub && el("dmList")) { const had = !!el("dmList").querySelector(".dm-typing"); if (had !== !!dmTypingHtml()) paintDm(); } }, 2000);
+// Effects (confetti, balloons…) play once for the recipient when a fresh message arrives.
+function playDmEffects(fid) {
+  if (!dmSub || document.visibilityState !== "visible") return;
+  let seen = {}; try { seen = JSON.parse(localStorage.getItem("friendlyFx") || "{}"); } catch {}
+  for (const m of dmSub.msgs || []) {
+    if (!m.effect || !DM_EFFECTS[m.effect] || seen[m.id] || Date.now() - m.createdAt > 10 * 60 * 1000) continue;
+    seen[m.id] = 1; burstEffect(m.effect);
+  }
+  try { localStorage.setItem("friendlyFx", JSON.stringify(Object.fromEntries(Object.entries(seen).slice(-200)))); } catch {}
+}
+function burstEffect(kind) {
+  const fx = DM_EFFECTS[kind]; if (!fx) return;
+  const layer = document.createElement("div"); layer.className = "fx-layer fx-" + kind;
+  for (let i = 0; i < 34; i++) { const s = document.createElement("span"); s.textContent = fx.em[i % fx.em.length]; s.style.left = Math.random() * 100 + "vw"; s.style.animationDelay = Math.random() * 0.9 + "s"; s.style.fontSize = 18 + Math.random() * 22 + "px"; layer.appendChild(s); }
+  document.body.appendChild(layer); setTimeout(() => layer.remove(), 3600);
 }
 function dmBody(fid) {
   const parts = String(fid || "").split("_");
@@ -3934,16 +3987,35 @@ function dmBody(fid) {
   const u = parts.find(x => x !== myUid());
   const f = S.friends.get(fid); const friends = f && f.status === "accepted";
   const blocked = (S.profile.blockedUids || []).includes(u);
+  const muted = (S.profile.mutedDms || []).includes(fid);
   ensureDmSub(fid);
   return `
   <button class="link-back" data-go="#/messages">‹ Messages</button>
-  <div class="dm-head"><span class="member-click" data-viewprofile="${u}" style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;cursor:pointer">${avatar(u, "lg")}<b>${esc(personName(u))}</b></span>
-    <button type="button" class="btn ghost small" id="dmMore" title="More">⋯</button></div>
+  <div class="dm-head"><span class="member-click" data-viewprofile="${u}" style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;cursor:pointer">${avatar(u, "lg")}<b>${esc(personName(u))}</b>${muted ? `<span title="Alerts hidden">🔕</span>` : ""}</span>
+    <button type="button" class="btn ghost small" id="dmSearchBtn" title="Search this conversation">🔍</button><button type="button" class="btn ghost small" id="dmMore" title="More">⋯</button></div>
+  ${dmSearchQ !== null ? `<div class="dm-searchbar"><input type="search" class="inv-search" id="dmSearch" placeholder="Search this conversation…" value="${esc(dmSearchQ)}" autocomplete="off"><button type="button" class="btn ghost small" id="dmSearchClose">Done</button></div>` : ""}
   <div class="dm-list" id="dmList">${dmListInner()}</div>
   ${blocked ? `<p class="muted sm dm-note">You blocked ${esc(first(personName(u)))}. Unblock them from your profile to message again.</p>`
-    : friends ? `<form class="dm-compose" id="dmForm"><textarea id="dmInput" rows="1" maxlength="4000" placeholder="Message ${esc(first(personName(u)))}…" enterkeyhint="send"></textarea><button class="btn primary" id="dmSend" type="submit" aria-label="Send">➤</button></form>`
+    : friends ? `<div class="dm-dock">
+      <div class="dm-replychip ${dmReply ? "" : "hidden"}" id="dmReplyChip"><span>↩︎ Replying to <b id="dmReplyWho">${dmReply ? esc(first(personName(dmReply.authorId))) : ""}</b>: <i id="dmReplyText">${dmReply ? esc(String(dmReply.text || "Photo").slice(0, 60)) : ""}</i></span><button type="button" class="btn ghost small" id="dmReplyX" aria-label="Cancel reply">✕</button></div>
+      <div class="dm-rec hidden" id="dmRec"><span class="rec-dot"></span><b id="dmRecTime">0:00</b><span class="muted sm">Recording…</span><button type="button" class="btn ghost small" id="dmRecCancel">Cancel</button><button type="button" class="btn primary small" id="dmRecSend">Send</button></div>
+      <form class="dm-compose" id="dmForm">
+        <button type="button" class="dm-tool" id="dmPhoto" title="Photo" aria-label="Send a photo">📷</button>${giphyKey ? `<button type="button" class="dm-tool" id="dmGif" title="GIF" aria-label="Send a GIF">GIF</button>` : ""}
+        <textarea id="dmInput" rows="1" maxlength="4000" placeholder="Message ${esc(first(personName(u)))}…" enterkeyhint="send"></textarea>
+        <button type="button" class="dm-tool" id="dmMic" title="Voice message" aria-label="Record a voice message">🎤</button>
+        <button type="button" class="dm-tool" id="dmFx" title="Send with an effect" aria-label="Send with an effect">✨</button>
+        <button class="btn primary dm-send" id="dmSend" type="submit" aria-label="Send">➤</button>
+      </form></div>`
     : `<div class="card dm-note"><p class="muted sm" style="margin:0 0 8px">You're not friends with ${esc(first(personName(u)))} right now, so you can't send messages.</p>${friendActions(u)}</div>`}`;
 }
+async function sendDm(fid, patch) {
+  const msg = { authorId: myUid(), authorName: S.profile.name || "", createdAt: Date.now(), ...patch };
+  if (dmReply) msg.replyTo = { id: dmReply.id, text: String(dmReply.text || "").slice(0, 200), authorId: dmReply.authorId };
+  dmReply = null; const chip = el("dmReplyChip"); if (chip) chip.classList.add("hidden");
+  try { await addDoc(collection(db, "dms", fid, "messages"), msg); window.scrollTo(0, document.documentElement.scrollHeight); return true; }
+  catch (err) { toast(/permission/i.test(err.message) ? "Couldn't send. You may no longer be friends." : /exceeds|too large|size/i.test(err.message) ? "That's too big to send." : err.message); return false; }
+}
+let lastTypingPing = 0;
 function wireDm(fid) {
   const u = String(fid).split("_").find(x => x !== myUid());
   document.querySelectorAll("[data-viewprofile]").forEach(x => x.onclick = () => openProfileDialog(x.dataset.viewprofile));
@@ -3952,32 +4024,128 @@ function wireDm(fid) {
   const form = el("dmForm"), input = el("dmInput");
   if (form) {
     const grow = () => { input.style.height = "auto"; input.style.height = Math.min(140, input.scrollHeight) + "px"; };
-    input.oninput = grow; grow();
-    input.onkeydown = e => { if (e.key === "Enter" && !e.shiftKey && !IOS && !IS_ANDROID) { e.preventDefault(); form.requestSubmit(); } };
-    form.onsubmit = async e => {
-      e.preventDefault();
-      const text = input.value.trim(); if (!text) return;
-      input.value = ""; grow();
-      try { await addDoc(collection(db, "dms", fid, "messages"), { authorId: myUid(), authorName: S.profile.name || "", text, createdAt: Date.now() }); window.scrollTo(0, document.documentElement.scrollHeight); }
-      catch (err) { input.value = text; grow(); toast(/permission/i.test(err.message) ? "Couldn't send. You may no longer be friends." : err.message); }
+    input.oninput = () => {
+      grow();
+      // "typing…" for the other person: at most one write every 4 seconds, only once the conversation exists.
+      if (input.value.trim() && Date.now() - lastTypingPing > 4000 && S.dms.has(fid)) { lastTypingPing = Date.now(); updateDoc(doc(db, "dms", fid), { [`typing.${myUid()}`]: Date.now() }).catch(() => {}); }
     };
+    grow();
+    input.onkeydown = e => { if (e.key === "Enter" && !e.shiftKey && !IOS && !IS_ANDROID) { e.preventDefault(); form.requestSubmit(); } };
+    const submitText = async effect => {
+      const text = input.value.trim(); if (!text) return toast("Type a message first.");
+      input.value = ""; grow();
+      if (S.dms.has(fid)) updateDoc(doc(db, "dms", fid), { [`typing.${myUid()}`]: 0 }).catch(() => {});
+      const ok = await sendDm(fid, effect ? { text, effect } : { text });
+      if (!ok) { input.value = text; grow(); } else if (effect) burstEffect(effect);
+    };
+    form.onsubmit = e => { e.preventDefault(); submitText(null); };
+    el("dmFx").onclick = () => {
+      dialog(`<h3>Send with an effect</h3><div class="stack">${Object.entries(DM_EFFECTS).map(([k, v]) => `<button type="button" class="btn" data-fx="${k}">${v.em[0]} ${v.label}</button>`).join("")}</div>`, null, null);
+      document.querySelectorAll("[data-fx]").forEach(b => b.onclick = () => { closeDialog(); submitText(b.dataset.fx); });
+    };
+    el("dmPhoto").onclick = async () => {
+      const file = await pickFile(); if (!file) return; toast("Sending photo…");
+      try { await sendDm(fid, { text: "", photo: await compressImage(file, 1400, 0.8) }); } catch (e) { toast("Couldn't send that photo: " + e.message); }
+    };
+    if (el("dmGif")) el("dmGif").onclick = () => openGifPicker(null, gif => sendDm(fid, { text: "", gif }));
+    el("dmMic").onclick = () => startDmRec(fid);
+    el("dmReplyX").onclick = () => { dmReply = null; el("dmReplyChip").classList.add("hidden"); };
   }
   const list = el("dmList");
   if (list) list.onclick = e => {
+    const q = e.target.closest("[data-jumpmsg]"); if (q) { const t = list.querySelector(`[data-cmsg="${CSS.escape(q.dataset.jumpmsg)}"]`); if (t) { t.scrollIntoView({ block: "center" }); t.classList.add("focus-flash"); setTimeout(() => t.classList.remove("focus-flash"), 2400); } return; }
+    if (e.target.closest("a, audio")) return;
+    const img = e.target.closest("[data-dmimg]"); if (img) return lightbox(img.src);
     const m = e.target.closest("[data-dmmsg]"); if (!m || !dmSub || !dmSub.msgs) return;
-    const msg = dmSub.msgs.find(x => x.id === m.dataset.dmmsg); if (!msg) return;
-    if (msg.authorId === myUid()) { if (confirm("Delete this message for both of you?")) deleteDoc(doc(db, "dms", fid, "messages", msg.id)).catch(err => toast(err.message)); }
-    else dmReportDialog(fid, msg);
+    const msg = dmSub.msgs.find(x => x.id === m.dataset.dmmsg); if (msg) dmMessageSheet(fid, msg);
   };
-  el("dmMore").onclick = () => {
-    const f = S.friends.get(fid);
-    dialog(`<h3>${esc(personName(u))}</h3><div class="stack">
-      ${f && f.status === "accepted" ? `<button type="button" class="btn" id="dmUnfriend">Remove friend</button>` : ""}
-      <button type="button" class="btn danger-ghost" id="dmBlock">🚫 Block ${esc(first(personName(u)))}</button></div>
-      <p class="muted sm" style="margin:10px 0 0">Tap any of their messages to report it.</p>`, null, null);
-    if (el("dmUnfriend")) el("dmUnfriend").onclick = () => { if (confirm(`Remove ${first(personName(u))} as a friend? You won't be able to message each other.`)) { closeDialog(); dropFriendship(f, "Removed"); } };
-    el("dmBlock").onclick = () => { closeDialog(); blockUser(u, null, "user", null); };
+  el("dmSearchBtn").onclick = () => { dmSearchQ = dmSearchQ === null ? "" : null; render(); setTimeout(() => el("dmSearch") && el("dmSearch").focus(), 30); };
+  if (el("dmSearch")) { el("dmSearch").oninput = e => { dmSearchQ = e.target.value; paintDm(); }; el("dmSearchClose").onclick = () => { dmSearchQ = null; render(); }; }
+  el("dmMore").onclick = () => dmConversationSheet(fid, u);
+}
+// Tap a message: tapbacks, reply, copy, edit or unsend (yours), report (theirs).
+function dmMessageSheet(fid, msg) {
+  const me = myUid(), mine = msg.authorId === me, mineRx = (msg.reactions || {})[me] || "";
+  const canEdit = mine && msg.text && Date.now() - msg.createdAt < EDIT_WINDOW, canUnsend = mine && Date.now() - msg.createdAt < UNSEND_WINDOW;
+  const who = Object.entries(msg.reactions || {}).filter(([, e]) => e).map(([uid, e]) => `${esc(e)} ${esc(uid === me ? "You" : first(personName(uid)))}`).join(" · ");
+  dialog(`<div class="tapback-row">${DM_TAPBACKS.map(e => `<button type="button" class="tapback ${mineRx === e ? "on" : ""}" data-tb="${e}">${e}</button>`).join("")}<input class="react-any" id="tbAny" maxlength="8" placeholder="＋" aria-label="Any emoji"></div>
+    ${who ? `<p class="muted sm" style="margin:6px 0 0">${who}</p>` : ""}
+    <p class="muted sm" style="margin:8px 0 10px">${mine ? "You" : esc(first(personName(msg.authorId)))} · ${esc(new Date(msg.createdAt).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }))}${msg.editedAt ? " · Edited" : ""}</p>
+    <div class="stack">
+      <button type="button" class="btn" id="msReply">↩︎ Reply</button>
+      ${msg.text ? `<button type="button" class="btn" id="msCopy">Copy</button>` : ""}
+      ${canEdit ? `<button type="button" class="btn" id="msEdit">✏️ Edit</button>` : ""}
+      ${mine ? `<button type="button" class="btn danger-ghost" id="msUnsend">${canUnsend ? "Unsend" : "Delete for both of us"}</button>` : `<button type="button" class="btn danger-ghost" id="msReport">⚑ Report</button>`}
+      <button type="button" class="btn ghost" id="msHide">Delete for me</button>
+    </div>`, null, null);
+  const react = async e => {
+    closeDialog();
+    try { await updateDoc(doc(db, "dms", fid, "messages", msg.id), { [`reactions.${me}`]: mineRx === e ? deleteField() : e }); } catch (err) { toast(err.message); }
   };
+  document.querySelectorAll("[data-tb]").forEach(b => b.onclick = () => react(b.dataset.tb));
+  el("tbAny").oninput = e => { const v = e.target.value.trim(); if (v && /\p{Extended_Pictographic}/u.test(v)) react(v); };
+  el("msReply").onclick = () => {
+    closeDialog(); dmReply = { id: msg.id, text: msg.text || (msg.photo ? "📷 Photo" : msg.gif ? "GIF" : msg.audio ? "🎤 Voice message" : ""), authorId: msg.authorId };
+    const chip = el("dmReplyChip"); if (chip) { el("dmReplyWho").textContent = first(personName(msg.authorId)); el("dmReplyText").textContent = String(dmReply.text).slice(0, 60); chip.classList.remove("hidden"); el("dmInput").focus(); }
+  };
+  if (el("msCopy")) el("msCopy").onclick = () => { closeDialog(); navigator.clipboard.writeText(msg.text).then(() => toast("Copied")).catch(() => toast("Couldn't copy")); };
+  if (el("msEdit")) el("msEdit").onclick = () => {
+    dialog(`<h3>Edit message</h3><label class="field"><textarea id="msEditText" rows="3" maxlength="4000">${esc(msg.text)}</textarea></label><p class="muted sm">Shows “Edited” to both of you. You can edit for 15 minutes after sending.</p>`, "Save", async () => {
+      const t = el("msEditText").value.trim(); if (!t) return toast("A message can't be empty.");
+      try { await updateDoc(doc(db, "dms", fid, "messages", msg.id), { text: t, editedAt: Date.now() }); closeDialog(); } catch (err) { toast(/permission/i.test(err.message) ? "It's been more than 15 minutes, so it can't be edited." : err.message); }
+    });
+  };
+  if (el("msUnsend")) el("msUnsend").onclick = async () => { closeDialog(); try { await deleteDoc(doc(db, "dms", fid, "messages", msg.id)); } catch (err) { toast(err.message); } };
+  if (el("msReport")) el("msReport").onclick = () => { closeDialog(); dmReportDialog(fid, msg); };
+  el("msHide").onclick = async () => { closeDialog(); try { await updateDoc(doc(db, "users", myUid()), { hiddenIds: arrayUnion(msg.id) }); } catch (err) { toast(err.message); } };
+}
+// The ⋯ menu: pin, hide alerts, mark unread, photos, delete conversation, remove friend, block.
+function dmConversationSheet(fid, u) {
+  const f = S.friends.get(fid), p = S.profile;
+  const pinned = (p.pinnedDms || []).includes(fid), muted = (p.mutedDms || []).includes(fid);
+  const media = dmVisibleMsgs().filter(m => m.photo || m.gif);
+  dialog(`<h3>${esc(personName(u))}</h3><div class="stack">
+    <button type="button" class="btn" id="cvPin">${pinned ? "📌 Unpin" : "📌 Pin to top"}</button>
+    <button type="button" class="btn" id="cvMute">${muted ? "🔔 Show alerts" : "🔕 Hide alerts"}</button>
+    <button type="button" class="btn" id="cvUnread">Mark as unread</button>
+    ${media.length ? `<button type="button" class="btn" id="cvPhotos">🖼️ Photos (${media.length})</button>` : ""}
+    <button type="button" class="btn" id="cvDelete">Delete conversation</button>
+    ${f && f.status === "accepted" ? `<button type="button" class="btn" id="dmUnfriend">Remove friend</button>` : ""}
+    <button type="button" class="btn danger-ghost" id="dmBlock">🚫 Block ${esc(first(personName(u)))}</button></div>
+    <p class="muted sm" style="margin:10px 0 0">Tap any message to react, reply, or report it.</p>`, null, null);
+  const save = async (patch, msg) => { closeDialog(); try { await updateDoc(doc(db, "users", myUid()), patch); if (msg) toast(msg); } catch (err) { toast(err.message); } };
+  el("cvPin").onclick = () => save({ pinnedDms: pinned ? arrayRemove(fid) : arrayUnion(fid) }, pinned ? "Unpinned" : "Pinned to the top of Messages");
+  el("cvMute").onclick = () => save({ mutedDms: muted ? arrayRemove(fid) : arrayUnion(fid) }, muted ? "Alerts are back on" : "Alerts hidden for this conversation");
+  el("cvUnread").onclick = async () => { closeDialog(); const t = S.dms.get(fid); if (!t || !t.lastAt || t.lastBy === myUid()) return toast("Nothing from them to mark unread yet."); try { await updateDoc(doc(db, "dms", fid), { [`readAt.${myUid()}`]: t.lastAt - 1 }); go("#/messages"); } catch (err) { toast(err.message); } };
+  if (el("cvPhotos")) el("cvPhotos").onclick = () => { dialog(`<h3>Photos</h3><div class="dm-gallery">${media.map(m => `<img src="${esc(m.photo || m.gif)}" alt="" loading="lazy" data-gal>`).join("")}</div>`, null, null); document.querySelectorAll("[data-gal]").forEach(i => i.onclick = () => lightbox(i.src)); };
+  el("cvDelete").onclick = () => { if (!confirm(`Delete this conversation? It disappears for you only; ${first(personName(u))} keeps their copy.`)) return; save({ [`hiddenDms.${fid}`]: Date.now() }, "Conversation deleted").then(() => go("#/messages")); };
+  if (el("dmUnfriend")) el("dmUnfriend").onclick = () => { if (confirm(`Remove ${first(personName(u))} as a friend? You won't be able to message each other.`)) { closeDialog(); dropFriendship(f, "Removed"); } };
+  el("dmBlock").onclick = () => { closeDialog(); blockUser(u, null, "user", null); };
+}
+// Voice messages: tap 🎤 to record (up to a minute), then Send or Cancel. Stored with the message.
+let dmRec = null;
+function stopDmRec() { if (dmRec) { clearInterval(dmRec.timer); try { dmRec.rec.state !== "inactive" && dmRec.rec.stop(); } catch {} dmRec.stream.getTracks().forEach(t => t.stop()); dmRec = null; } }
+async function startDmRec(fid) {
+  if (dmRec) return;
+  if (!navigator.mediaDevices || !window.MediaRecorder) return toast("Voice messages need a newer app or browser.");
+  let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { return toast("Friendly needs microphone access for voice messages. You can allow it in Settings."); }
+  const type = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"].find(t => MediaRecorder.isTypeSupported(t)) || "";
+  const rec = new MediaRecorder(stream, type ? { mimeType: type, audioBitsPerSecond: 32000 } : { audioBitsPerSecond: 32000 });
+  const chunks = []; rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+  const started = Date.now(); let send = false;
+  dmRec = { rec, stream, timer: setInterval(() => { const s = Math.floor((Date.now() - started) / 1000); if (el("dmRecTime")) el("dmRecTime").textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); if (s >= 60) { send = true; stopDmRec(); } }, 250) };
+  rec.onstop = async () => {
+    el("dmRec") && el("dmRec").classList.add("hidden"); el("dmForm") && el("dmForm").classList.remove("hidden");
+    if (!send || !chunks.length) return;
+    const blob = new Blob(chunks, { type: rec.mimeType || type || "audio/webm" });
+    if (blob.size > 700000) return toast("That voice message is too long to send.");
+    const url = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
+    sendDm(fid, { text: "", audio: url, audioDur: Math.round((Date.now() - started) / 1000) });
+  };
+  rec.start(500);
+  el("dmRec").classList.remove("hidden"); el("dmForm").classList.add("hidden");
+  el("dmRecCancel").onclick = () => { send = false; stopDmRec(); };
+  el("dmRecSend").onclick = () => { send = true; stopDmRec(); };
 }
 function dmReportDialog(fid, msg) {
   dialog(`<h3>Report this message</h3>

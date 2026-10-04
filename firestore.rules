@@ -91,14 +91,23 @@ service cloud.firestore {
     match /dms/{fid} {
       allow read: if signedIn() && (uid() in fid.split('_') || uid() in resource.data.uids);
       allow update: if signedIn() && uid() in fid.split('_')
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readAt'])
-        && request.resource.data.readAt.diff(resource.data.get('readAt', {})).affectedKeys().hasOnly([uid()]);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readAt', 'typing'])
+        && request.resource.data.get('readAt', {}).diff(resource.data.get('readAt', {})).affectedKeys().hasOnly([uid()])
+        && request.resource.data.get('typing', {}).diff(resource.data.get('typing', {})).affectedKeys().hasOnly([uid()]);
       match /messages/{mid} {
         allow read: if signedIn() && uid() in fid.split('_');
         allow create: if signedIn() && uid() in fid.split('_') && request.resource.data.authorId == uid()
-          && request.resource.data.keys().hasOnly(['authorId', 'authorName', 'text', 'photo', 'createdAt'])
+          && request.resource.data.keys().hasOnly(['authorId', 'authorName', 'text', 'photo', 'gif', 'audio', 'audioDur', 'replyTo', 'effect', 'createdAt'])
           && (request.resource.data.get('text', '') is string && request.resource.data.get('text', '').size() <= 4000)
           && friendsNow(fid) && !blockedBy(otherOf(fid.split('_')));
+        // Tapbacks: either person sets or clears only their own. Edits: the author, within 15 minutes.
+        allow update: if signedIn() && uid() in fid.split('_') && (
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
+            && request.resource.data.get('reactions', {}).diff(resource.data.get('reactions', {})).affectedKeys().hasOnly([uid()]))
+          || (resource.data.authorId == uid()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'editedAt'])
+            && request.resource.data.text is string && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 4000
+            && request.time.toMillis() < resource.data.createdAt + 15 * 60 * 1000));
         allow delete: if signedIn() && (resource.data.authorId == uid() || isAdmin());
       }
     }
@@ -109,7 +118,7 @@ service cloud.firestore {
       allow create: if signedIn() && userId == uid() && !isDemoUser();
       allow update: if signedIn() && userId == uid()
         && (!isDemoUser() || request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['name', 'venmo', 'zelle', 'cashapp', 'payPref', 'city', 'photo', 'birthday', 'curateMiles', 'notifPrefs', 'activitySeenAt', 'hiddenIds', 'blockedUids', 'onboarded', 'peeked', 'badgeOk']));
+              .hasOnly(['name', 'venmo', 'zelle', 'cashapp', 'payPref', 'city', 'photo', 'birthday', 'curateMiles', 'notifPrefs', 'activitySeenAt', 'hiddenIds', 'blockedUids', 'onboarded', 'peeked', 'badgeOk', 'pinnedDms', 'mutedDms', 'hiddenDms']));
       allow delete: if signedIn() && userId == uid() && !isDemoUser();
     }
 

@@ -813,3 +813,51 @@ html{background:var(--bg)}
 .msg-search{margin:14px 0 0}
 .nm-results{max-height:46vh}
 .msg-head{flex-wrap:wrap;gap:10px}
+/* ---- iMessage-style chat ---- */
+.avatar.xl{width:58px;height:58px;font-size:21px}
+.dm-pins{display:flex;gap:14px;overflow-x:auto;padding:14px 2px 4px;scrollbar-width:none}
+.dm-pin{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;background:none;border:0;font:inherit;font-size:13px;color:var(--ink);cursor:pointer;min-width:66px}
+.dm-pin .dm-dot{position:absolute;top:0;right:6px;margin:0;border:2px solid var(--bg)}
+.dm-wrap{display:flex;flex-direction:column;max-width:80%}
+.dm-wrap.mine{align-self:flex-end;align-items:flex-end}
+.dm-wrap.theirs{align-self:flex-start;align-items:flex-start}
+.dm-wrap .dm-msg{max-width:100%;position:relative}
+.dm-msg.big{background:none!important;font-size:44px;line-height:1.1;padding:2px 0}
+.dm-msg.media{padding:4px;background:none!important}
+.dm-msg.media .dm-photo{margin:0;border-radius:16px;max-height:340px;object-fit:cover}
+.dm-msg a{color:inherit;text-decoration:underline}
+.dm-audio{max-width:240px;height:36px;display:block}
+.dm-quote{font:inherit;font-size:12px;color:var(--muted);background:var(--surface2);border:0;border-radius:12px;padding:5px 10px;margin:4px 0 -2px;max-width:100%;text-align:left;cursor:pointer;opacity:.9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dm-tapbacks{position:absolute;top:-14px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:1px 6px;font-size:13px;box-shadow:0 2px 6px rgba(0,0,0,.08);white-space:nowrap;color:var(--ink)}
+.dm-msg.mine .dm-tapbacks{left:-14px}
+.dm-msg.theirs .dm-tapbacks{right:-14px}
+.dm-tapbacks i{font-style:normal;font-size:11px;color:var(--muted);margin-left:2px}
+.dm-msg:has(.dm-tapbacks){margin-top:12px}
+.dm-edited,.dm-receipt{font-size:11px;color:var(--muted);margin:2px 6px 0}
+.dm-typing{display:flex;gap:4px;padding:12px 14px}
+.dm-typing i{width:7px;height:7px;border-radius:50%;background:var(--muted);opacity:.5;animation:typingDot 1.2s infinite}
+.dm-typing i:nth-child(2){animation-delay:.2s}.dm-typing i:nth-child(3){animation-delay:.4s}
+@keyframes typingDot{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-4px);opacity:.9}}
+.dm-searchbar{display:flex;gap:8px;align-items:center;margin:0 0 10px}
+.dm-searchbar .inv-search{margin:0}
+.dm-dock{position:fixed;left:0;right:0;bottom:0;z-index:30;background:var(--bg);border-top:1px solid var(--line);padding:0 max(16px,calc((100vw - 720px)/2)) env(safe-area-inset-bottom)}
+.dm-dock .dm-compose{position:static;border:0;padding:10px 0;background:none}
+.dm-tool{background:none;border:0;font-size:20px;padding:8px 4px;cursor:pointer;color:var(--ink);flex:none;font-weight:700}
+#dmGif.dm-tool{font-size:12px;border:1.5px solid currentColor;border-radius:6px;padding:2px 5px;margin:8px 2px}
+.dm-send{border-radius:50%!important;width:40px;height:40px;padding:0!important;flex:none}
+.dm-replychip{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);padding:8px 0 0}
+.dm-replychip span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dm-rec{display:flex;align-items:center;gap:10px;padding:12px 0}
+.dm-rec .muted{flex:1}
+.rec-dot{width:10px;height:10px;border-radius:50%;background:#E5484D;animation:typingDot 1s infinite}
+.tapback-row{display:flex;gap:6px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.tapback{font-size:24px;background:var(--surface2);border:2px solid transparent;border-radius:50%;width:46px;height:46px;cursor:pointer}
+.tapback.on{border-color:var(--accent);background:var(--surface)}
+.tapback-row .react-any{width:46px;height:46px;border-radius:50%;text-align:center;border:1px dashed var(--line);font-size:20px;background:var(--bg)}
+.dm-gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;max-height:60vh;overflow:auto}
+.dm-gallery img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;cursor:pointer}
+.fx-layer{position:fixed;inset:0;pointer-events:none;z-index:200;overflow:hidden}
+.fx-layer span{position:absolute;top:-40px;animation:fxFall 2.8s ease-in forwards}
+.fx-balloons span,.fx-love span{top:auto;bottom:-50px;animation-name:fxRise}
+@keyframes fxFall{to{transform:translateY(110vh) rotate(360deg)}}
+@keyframes fxRise{to{transform:translateY(-115vh)}}

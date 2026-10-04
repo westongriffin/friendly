@@ -30,6 +30,8 @@
 	<string>Friendly lets you take photos for your event covers and party photo wall.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>Friendly uses your contacts so you can quickly invite friends to your groups.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Friendly uses the microphone only when you record a voice message to send to a friend.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Friendly lets you add photos to your event covers and party photo wall.</string>
 	<key>UIApplicationSceneManifest</key>
