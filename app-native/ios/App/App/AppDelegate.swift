@@ -40,3 +40,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         return ApplicationDelegateProxy.shared.application(application, continue: userActivity, restorationHandler: restorationHandler)
     }
 }
+
+// The app's one screen: Capacitor's web view, plus the iOS edge swipe for Back.
+// The site is a single page that moves between screens with #/ links, and WebKit
+// keeps each of those in its back list, so the swipe walks back screen by screen.
+class FriendlyViewController: CAPBridgeViewController {
+    override func capacitorDidLoad() {
+        super.capacitorDidLoad()
+        webView?.allowsBackForwardNavigationGestures = true
+    }
+}
