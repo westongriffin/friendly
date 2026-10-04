@@ -140,6 +140,11 @@ async function checkForUpdate() {
   } catch {}
 }
 if (NATIVE) checkForUpdate();
+// The installed app's version. Features that need a newer native build (the microphone permission
+// arrived in iOS 1.0.3 / Android 1.0.4) stay hidden on older installs: touching the mic there crashes the app.
+let nativeVersion = NATIVE ? null : "web";
+if (NATIVE) (async () => { await null; await new Promise(r => setTimeout(r, 0)); try { const A = plugin("App"); nativeVersion = (A && A.getInfo && (await A.getInfo()).version) || "1.0.1"; } catch { nativeVersion = "1.0.1"; } try { if (S.route && S.route.name === "dm") render(); } catch {} })();
+const canRecordVoice = () => nativeVersion === "web" ? !!(navigator.mediaDevices && window.MediaRecorder) : !!nativeVersion && verCmp(nativeVersion, IS_ANDROID ? "1.0.4" : "1.0.3") >= 0;
 function updateBanner() {
   if (!updateAvail || updateDismissed) return "";
   return `<div class="card notif-card update-bar" id="updateBar" role="button"><span class="li ${window.Blip ? "blip-li" : ""}">${window.Blip ? window.Blip.svg({ mood: "party", size: 44 }) : "🎉"}</span><div style="flex:1;min-width:0"><b>Friendly just got better!</b><div class="muted sm">Version ${esc(updateAvail.store)} is ready. Tap to update.</div></div><button type="button" class="btn ghost small" id="updateLater" title="Not now">✕</button></div>`;
@@ -4002,7 +4007,7 @@ function dmBody(fid) {
       <form class="dm-compose" id="dmForm">
         <button type="button" class="dm-tool" id="dmPhoto" title="Photo" aria-label="Send a photo">📷</button>${giphyKey ? `<button type="button" class="dm-tool" id="dmGif" title="GIF" aria-label="Send a GIF">GIF</button>` : ""}
         <textarea id="dmInput" rows="1" maxlength="4000" placeholder="Message ${esc(first(personName(u)))}…" enterkeyhint="send"></textarea>
-        <button type="button" class="dm-tool" id="dmMic" title="Voice message" aria-label="Record a voice message">🎤</button>
+        ${canRecordVoice() ? `<button type="button" class="dm-tool" id="dmMic" title="Voice message" aria-label="Record a voice message">🎤</button>` : ""}
         <button type="button" class="dm-tool" id="dmFx" title="Send with an effect" aria-label="Send with an effect">✨</button>
         <button class="btn primary dm-send" id="dmSend" type="submit" aria-label="Send">➤</button>
       </form></div>`
@@ -4048,7 +4053,7 @@ function wireDm(fid) {
       try { await sendDm(fid, { text: "", photo: await compressImage(file, 1400, 0.8) }); } catch (e) { toast("Couldn't send that photo: " + e.message); }
     };
     if (el("dmGif")) el("dmGif").onclick = () => openGifPicker(null, gif => sendDm(fid, { text: "", gif }));
-    el("dmMic").onclick = () => startDmRec(fid);
+    if (el("dmMic")) el("dmMic").onclick = () => startDmRec(fid);
     el("dmReplyX").onclick = () => { dmReply = null; el("dmReplyChip").classList.add("hidden"); };
   }
   const list = el("dmList");
@@ -4126,7 +4131,7 @@ function dmConversationSheet(fid, u) {
 let dmRec = null;
 function stopDmRec() { if (dmRec) { clearInterval(dmRec.timer); try { dmRec.rec.state !== "inactive" && dmRec.rec.stop(); } catch {} dmRec.stream.getTracks().forEach(t => t.stop()); dmRec = null; } }
 async function startDmRec(fid) {
-  if (dmRec) return;
+  if (dmRec || !canRecordVoice()) return;
   if (!navigator.mediaDevices || !window.MediaRecorder) return toast("Voice messages need a newer app or browser.");
   let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { return toast("Friendly needs microphone access for voice messages. You can allow it in Settings."); }
   const type = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"].find(t => MediaRecorder.isTypeSupported(t)) || "";
