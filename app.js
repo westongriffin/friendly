@@ -3828,21 +3828,59 @@ function messagesBody() {
   const friends = acceptedFriends().filter(f => !blocked.has(otherIn(f)));
   const threads = friends.map(f => ({ f, t: S.dms.get(f.id) })).filter(x => x.t && x.t.lastAt).sort((a, b) => b.t.lastAt - a.t.lastAt);
   const quiet = friends.filter(f => !(S.dms.get(f.id) || {}).lastAt).sort((a, b) => personName(otherIn(a)).localeCompare(personName(otherIn(b))));
-  const row = (u, mid, right, go) => `<div class="member-row ${go ? "dm-row" : ""}" ${go ? `data-go="${go}" role="button"` : ""}>${avatar(u, "lg")}<div style="flex:1;min-width:0">${mid}</div>${right}</div>`;
+  const row = (u, mid, right, go, extra = "") => `<div class="member-row ${go ? "dm-row" : ""}" data-find="${esc((personName(u) + " " + extra).toLowerCase())}" ${go ? `data-go="${go}" role="button"` : ""}>${avatar(u, "lg")}<div style="flex:1;min-width:0">${mid}</div>${right}</div>`;
   return `
-  <div class="section-head"><h1 style="margin:0">Messages</h1><button class="btn primary small" id="addFriendsBtn">＋ Add friends</button></div>
+  <div class="section-head"><h1 style="margin:0">Messages</h1><button class="btn primary small" id="newMsgBtn">✏️ New</button></div>
+  ${friends.length || inc.length || out.length ? `<input type="search" class="inv-search msg-search" id="msgSearch" placeholder="Search friends and messages…" autocomplete="off" enterkeyhint="search">
+  <p class="muted sm hidden" id="msgNoHits" style="margin:6px 2px">No friends or messages match that.</p>` : ""}
   ${inc.length ? `<div class="section-head" style="margin-top:18px"><h2>Friend requests</h2></div>
     <div class="card" id="reqCard">${inc.map(f => { const u = otherIn(f); return row(u, `<b>${esc(personName(u))}</b><div class="muted sm">Wants to be friends</div>`, `<span class="btnrow" style="gap:6px"><button class="btn small primary" data-friendaccept="${f.id}">Accept</button><button class="btn ghost small" data-frienddecline="${f.id}">Decline</button></span>`); }).join("")}</div>` : `<div id="reqCard"></div>`}
   ${threads.length ? `<div class="card" style="margin-top:18px">${threads.map(({ f, t }) => { const u = otherIn(f); const unread = dmIsUnread(t);
-      return row(u, `<b>${esc(personName(u))}</b><div class="muted sm dm-last ${unread ? "unread" : ""}">${t.lastBy === me ? "You: " : ""}${esc(t.lastText || "")}</div>`, `<span class="muted sm">${ago(t.lastAt)}</span>${unread ? `<span class="dm-dot" aria-label="Unread"></span>` : ""}`, "#/m/" + f.id); }).join("")}</div>` : ""}
+      return row(u, `<b>${esc(personName(u))}</b><div class="muted sm dm-last ${unread ? "unread" : ""}">${t.lastBy === me ? "You: " : ""}${esc(t.lastText || "")}</div>`, `<span class="muted sm">${ago(t.lastAt)}</span>${unread ? `<span class="dm-dot" aria-label="Unread"></span>` : ""}`, "#/m/" + f.id, t.lastText || ""); }).join("")}</div>` : ""}
   ${quiet.length ? `<div class="section-head" style="margin-top:18px"><h2>Friends</h2></div>
     <div class="card">${quiet.map(f => { const u = otherIn(f); return row(u, `<b>${esc(personName(u))}</b>`, `<button class="btn small" data-go="#/m/${f.id}">Message</button>`); }).join("")}</div>` : ""}
   ${out.length ? `<div class="section-head" style="margin-top:18px"><h2>Waiting on</h2></div>
     <div class="card">${out.map(f => { const u = otherIn(f); return row(u, `<b>${esc(personName(u))}</b><div class="muted sm">Friend request sent</div>`, `<button class="btn ghost small" data-friendcancel="${f.id}">Cancel</button>`); }).join("")}</div>` : ""}
-  ${!friends.length && !inc.length && !out.length ? emptyState("💬", "No friends yet", "Add friends to message them one-on-one, even if you're not in a group together.", "happy") : ""}`;
+  ${!friends.length && !inc.length && !out.length ? emptyState("💬", "No friends yet", "Add friends to message them one-on-one, even if you're not in a group together.", "happy") + `<div class="btnrow" style="justify-content:center"><button class="btn primary" id="addFriendsBtn">＋ Add friends</button></div>` : ""}
+  ${friends.length || inc.length || out.length ? `<div class="btnrow" style="margin-top:18px"><button class="btn" id="addFriendsBtn">＋ Add friends</button></div>` : ""}`;
+}
+// Filter the inbox in place (no re-render), so typing never loses focus; re-applied after live refreshes.
+function filterMessages() {
+  const box = el("msgSearch"); if (!box) return;
+  const q = box.value.trim().toLowerCase(); let hits = 0;
+  document.querySelectorAll("#app [data-find]").forEach(r => { const on = !q || r.dataset.find.includes(q); r.classList.toggle("hidden", !on); if (on) hits++; });
+  // Hide a section's heading and card when nothing in it matches.
+  document.querySelectorAll("#app .card").forEach(c => { if (!c.querySelector("[data-find]")) return; const any = [...c.querySelectorAll("[data-find]")].some(r => !r.classList.contains("hidden")); c.classList.toggle("hidden", !any); const h = c.previousElementSibling; if (h && h.classList.contains("section-head")) h.classList.toggle("hidden", !any); });
+  el("msgNoHits").classList.toggle("hidden", !q || hits > 0);
+}
+// New message: search your friends and jump into the chat, or add someone new (contacts, phone, or people you know).
+function openNewMessageDialog() {
+  const friends = acceptedFriends().map(otherIn).filter(u => !(S.profile.blockedUids || []).includes(u));
+  const known = [...S.contacts.keys()].filter(u => u !== myUid() && !friendshipWith(u));
+  dialog(`<h3>New message</h3>
+    <input type="search" class="inv-search" id="nmSearch" placeholder="Search your friends…" autocomplete="off">
+    <div class="inv-results nm-results" id="nmResults"></div>
+    <button type="button" class="btn" id="nmAdd" style="width:100%">＋ Add a new friend from contacts</button>`, null, null);
+  const paint = () => {
+    const q = el("nmSearch").value.trim().toLowerCase(), m = u => !q || personName(u).toLowerCase().includes(q);
+    const fr = friends.filter(m).sort((a, b) => personName(a).localeCompare(personName(b)));
+    const kn = q ? known.filter(m).slice(0, 8) : [];
+    el("nmResults").innerHTML = (fr.map(u => `<div class="inv-hit" data-nmgo="${u}">${avatar(u)}<div style="flex:1;min-width:0"><b>${esc(personName(u))}</b></div><span class="add">Message</span></div>`).join("")
+      + (kn.length ? `<div class="muted sm" style="margin:8px 4px 2px">People you know</div>` + kn.map(u => `<div class="inv-hit" data-nmadd="${u}">${avatar(u)}<div style="flex:1;min-width:0"><b>${esc(personName(u))}</b><div class="muted sm">Not friends yet</div></div><span class="add">Add friend</span></div>`).join("") : ""))
+      || `<p class="muted sm" style="padding:8px 4px;margin:0">${friends.length ? "No friends match that. Add them below." : "No friends yet. Add one below to start messaging."}</p>`;
+  };
+  paint(); el("nmSearch").oninput = paint; setTimeout(() => el("nmSearch") && el("nmSearch").focus(), 50);
+  el("nmResults").onclick = async e => {
+    const go1 = e.target.closest("[data-nmgo]"), add = e.target.closest("[data-nmadd]");
+    if (go1) { closeDialog(); go("#/m/" + pairOf(go1.dataset.nmgo)); }
+    else if (add) { const u = add.dataset.nmadd; closeDialog(); await sendFriendRequest(u); }
+  };
+  el("nmAdd").onclick = () => { closeDialog(); openAddFriendsDialog(); };
 }
 function wireMessages() {
-  el("addFriendsBtn").onclick = openAddFriendsDialog;
+  document.querySelectorAll("#addFriendsBtn").forEach(b => b.onclick = openAddFriendsDialog);
+  el("newMsgBtn").onclick = openNewMessageDialog;
+  if (el("msgSearch")) { el("msgSearch").oninput = filterMessages; filterMessages(); }
   wireFriendButtons();
   document.querySelectorAll("[data-frienddecline]").forEach(b => b.onclick = () => { const f = S.friends.get(b.dataset.frienddecline); if (f) dropFriendship(f, "Request declined"); });
   document.querySelectorAll("[data-friendcancel]").forEach(b => b.onclick = () => { const f = S.friends.get(b.dataset.friendcancel); if (f) dropFriendship(f, "Request canceled"); });

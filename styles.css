@@ -810,3 +810,5 @@ html{background:var(--bg)}
 .dm-compose textarea{flex:1;resize:none;border:1px solid var(--line);border-radius:20px;padding:10px 14px;font:inherit;background:var(--surface);color:var(--ink);max-height:140px}
 .dm-compose .btn{border-radius:50%;width:44px;height:44px;padding:0;flex:none}
 [data-pf]{cursor:pointer}
+.msg-search{margin:14px 0 0}
+.nm-results{max-height:46vh}
