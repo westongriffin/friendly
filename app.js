@@ -652,7 +652,8 @@ const S = {
   contacts: new Map(),           // uid -> {name, venmo, phone}
   route: parseRoute(),
   subs: [], eventSubKey: "", commentUnsub: null, comments: [],
-  evSubs: [], photos: [], polls: [], songs: []
+  evSubs: [], photos: [], polls: [], songs: [],
+  friends: new Map(), dms: new Map()   // friendships/{a_b} and dms/{a_b} that include me
 };
 
 // A link can point inside a screen: #/e/<id>?to=<section id>&c=<message id> (see focusRoute).
@@ -670,6 +671,8 @@ function routeFromPath(h) {
   if (p[0] === "join") return { name: "join", id: p[1] };
   if (p[0] === "x") return { name: "expense", id: p[1] };
   if (p[0] === "activity") return { name: "activity" };
+  if (p[0] === "messages") return { name: "messages" };
+  if (p[0] === "m") return { name: "dm", id: p[1] };
   if (p[0] === "photos") return { name: "photos" };
   if (p[0] === "search") return { name: "search" };
   if (p[0] === "new") return { name: "new" };
@@ -786,6 +789,13 @@ function subscribeAll(u) {
     S.settlements = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); render();
   }));
 
+  // friends (requests both ways + accepted) and private conversations
+  add(on("friends", query(collection(db, "friendships"), where("uids", "array-contains", u.uid)), snap => {
+    S.friends = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); rebuildContacts(); render();
+  }));
+  add(on("dms", query(collection(db, "dms"), where("uids", "array-contains", u.uid)), snap => {
+    S.dms = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); render();
+  }));
   // activity feed (written by Cloud Functions for everything I'd be notified about)
   add(on("activity", query(collection(db, "activity"), where("uids", "array-contains", u.uid), orderBy("createdAt", "desc"), limit(60)), snap => {
     S.activity = snap.docs.map(d => ({ id: d.id, ...d.data() })); render();
@@ -834,6 +844,9 @@ function rebuildContacts() {
   if (S.user && S.profile) m.set(S.user.uid, { name: S.profile.name, venmo: S.profile.venmo, phone: S.profile.phone, zelle: S.profile.zelle || "", cashapp: S.profile.cashapp || "", payPref: S.profile.payPref || "", photo: S.profile.photo || "" });
   for (const g of S.groups.values())
     for (const [uid, info] of Object.entries(g.members || {})) if (!m.has(uid)) m.set(uid, info);
+  // Friends you don't share a group with are known by the name and photo their friendship carries.
+  for (const f of (S.friends || new Map()).values())
+    for (const [uid, info] of Object.entries(f.people || {})) if (!m.has(uid)) m.set(uid, { name: info.name, photo: info.photo || "" });
   S.contacts = m;
 }
 // Names come from shared groups (contacts); guests who joined an event by link
@@ -917,6 +930,7 @@ function renderNow() {
   const r = S.route;
   if (r.name === "event") return renderEventPage(root, r.id);
   cleanupEvent();
+  if (r.name !== "dm") stopDmSub();
   root.innerHTML = shell(routeBody(r));
   watchTabs();
   wireShell();
@@ -1143,7 +1157,7 @@ function shell(body) {
   ${isDemo() ? `<div class="demo-bar">${dot("happy", 26)}<span>Demo mode -- this is Riley, a shared public sandbox account. Explore freely; changes are visible to other visitors and reset nightly.</span></div>` : ""}
   <header class="topbar">
     <div class="brand has-dot"><span data-go="#/">Friend<span class="tilt">l</span>y</span><button type="button" class="brand-dot" id="brandDot" aria-label="A tip from Dot"></button></div>
-    <div class="topbar-right"><button class="bell" data-go="#/search" title="Search">🔍</button><button class="bell" data-go="#/activity" title="Activity">🔔${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ""}</button>
+    <div class="topbar-right"><button class="bell" data-go="#/search" title="Search">🔍</button><button class="bell" data-go="#/messages" title="Messages">💬${msgBadge() ? `<span class="badge">${msgBadge()}</span>` : ""}</button><button class="bell" data-go="#/activity" title="Activity">🔔${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ""}</button>
     <button class="me-chip" data-go="#/profile">${avatar(S.user.uid)}<span>${esc(first(p.name))}</span></button></div>
   </header>
   <div class="tabs-sentinel"></div>
@@ -1179,6 +1193,7 @@ function edgeMenu() {
   return { title: "What are we making?", items: [item("plan", "✨ Let me plan it. Just tell me.", "plan-btn"), item("night", "🌆 Build me a night out"), item("event", "🎉 An event"), item("meeting", "📅 A meeting"), item("expense", "💸 An expense"), item("ask", "💬 Ask me anything")] };
 }
 function edgeDotHtml() {
+  if (S.route.name === "dm") return "";   // the chat's message box owns the bottom of the screen
   const m = edgeMenu();
   if (!m) return window.Blip ? "" : `<div class="fab-scrim"></div><button class="fab" id="fabBtn" title="Create event">＋</button>`;
   return `<div class="fab-scrim"></div><div class="edge-dot" id="edgeDot" role="button" aria-label="Make something"><div class="edge-menu"><b>${m.title}</b>${m.items.join("")}</div><span class="edge-art">${dot("idle", 66)}</span></div>`;
@@ -1218,6 +1233,8 @@ function wireShell() {
   if (S.route.name === "curate") wireCurate();
   if (S.route.name === "expense") wireExpensePage();
   if (S.route.name === "activity") wireActivity();
+  if (S.route.name === "messages") wireMessages();
+  if (S.route.name === "dm") wireDm(S.route.id);
   if (S.route.name === "photos") wirePhotosPage();
   if (S.route.name === "search") wireSearch();
   if (S.route.name !== "activity") S._actOpenSeen = null;
@@ -1253,6 +1270,8 @@ function routeBody(r) {
   if (r.name === "curate") return curateBody();
   if (r.name === "expense") return expenseBody(r.id);
   if (r.name === "activity") return activityBody();
+  if (r.name === "messages") return messagesBody();
+  if (r.name === "dm") return dmBody(r.id);
   if (r.name === "photos") return photosPageBody();
   if (r.name === "search") return searchBody();
   if (r.name === "profile") return profileBody();
@@ -2356,12 +2375,15 @@ function openProfileDialog(uid) {
     ${avatar(uid, "xxl")}
     <h2 style="margin:12px 0 2px">${esc(info.name || "Friend")}</h2>
     ${info.birthday ? `<p class="muted sm" style="margin:0">🎂 ${esc(fmtDay({ date: info.birthday }))}</p>` : ""}
+    ${friendActions(uid) ? `<div class="btnrow" style="justify-content:center;margin-top:12px">${friendActions(uid)}</div>` : ""}
   </div>
   ${info.venmo || info.phone ? `<div class="form-card card" style="margin-top:14px">
     ${info.venmo ? `<div class="member-row"><span class="li">💸</span><div style="flex:1;min-width:0"><b>Venmo</b><div class="muted sm mono">${esc(info.venmo)}</div></div></div>` : ""}
     ${info.phone ? `<div class="member-row"><span class="li">📱</span><div style="flex:1;min-width:0"><b>Apple Cash</b><div class="muted sm mono">${esc(info.phone)}</div></div></div>` : ""}
   </div>` : `<p class="muted sm" style="text-align:center;margin-top:10px">No Venmo or Apple Cash on file yet.</p>`}`,
     null, null);
+  wireFriendButtons(el("appDialog") || document);
+  document.querySelectorAll("#appDialog [data-go]").forEach(b => b.onclick = () => { closeDialog(); go(b.dataset.go); });
 }
 function contactChecks(name, set) {
   const others = [...S.contacts.entries()].filter(([u]) => u !== myUid());
@@ -3649,6 +3671,7 @@ function wireProfile() {
       if (city) registerCity(city);
       // propagate name/contact into each group's denormalized members map
       for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}`]: { name, venmo, phone, zelle, cashapp, payPref, photo: S.profile.photo || "", birthday } }).catch(() => {});
+      for (const f of S.friends.values()) await updateDoc(doc(db, "friendships", f.id), { [`people.${myUid()}.name`]: name }).catch(() => {});
       toast("Profile saved");
     } catch (e) { toast(e.message); }
   };
@@ -3665,6 +3688,7 @@ function wireProfile() {
       const photo = await compressImage(cropped, 320, 0.82);
       await updateDoc(doc(db, "users", myUid()), { photo });
       for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}.photo`]: photo }).catch(() => {});
+      for (const f of S.friends.values()) await updateDoc(doc(db, "friendships", f.id), { [`people.${myUid()}.photo`]: photo }).catch(() => {});
       toast("Photo updated");
     } catch (e) { toast(e.message); }
   };
@@ -3708,6 +3732,218 @@ async function deleteAccount() {
   } catch (e) { toast(e.code === "auth/invalid-credential" || e.code === "auth/wrong-password" ? "That password didn't match." : e.message); }
 }
 
+// ---------- FRIENDS & PRIVATE MESSAGES ----------
+// Friends connect one-on-one (no shared group needed): friendships/{a_b} is "pending" until the
+// other person accepts. Accepted friends can message in dms/{a_b}/messages; the server keeps the
+// conversation's last message and read marks (onDmMessage) and pushes the other person.
+const pairOf = u => [myUid(), u].sort().join("_");
+const otherIn = f => ((f && f.uids) || String((f && f.id) || "").split("_")).find(x => x !== myUid());
+const friendshipWith = u => S.friends.get(pairOf(u));
+const isFriend = u => (friendshipWith(u) || {}).status === "accepted";
+const incomingRequests = () => [...S.friends.values()].filter(f => f.status === "pending" && f.requestedBy !== myUid());
+const outgoingRequests = () => [...S.friends.values()].filter(f => f.status === "pending" && f.requestedBy === myUid());
+const acceptedFriends = () => [...S.friends.values()].filter(f => f.status === "accepted");
+const dmIsUnread = t => !!(t && t.lastBy && t.lastBy !== myUid() && (t.lastAt || 0) > ((t.readAt || {})[myUid()] || 0));
+const dmUnread = () => [...S.dms.values()].filter(t => dmIsUnread(t) && !(S.profile.blockedUids || []).includes(otherIn(t))).length;
+const msgBadge = () => { try { return dmUnread() + incomingRequests().length; } catch { return 0; } };
+const personName = u => nameOf(u) !== "Someone" ? nameOf(u) : "Friend";
+
+async function sendFriendRequest(u) {
+  const f = friendshipWith(u);
+  if (f && f.status === "pending" && f.requestedBy === u) return acceptFriend(f);
+  if (f) return;
+  const me = myUid(), info = S.contacts.get(u) || {};
+  try {
+    await setDoc(doc(db, "friendships", pairOf(u)), { uids: [me, u].sort(), requestedBy: me, status: "pending", createdAt: Date.now(),
+      people: { [me]: { name: S.profile.name || "Friend", photo: S.profile.photo || "" }, [u]: { name: info.name || "Friend", photo: info.photo || "" } } });
+    toast(`Friend request sent to ${first(personName(u))}`, null, null, "happy");
+  } catch (e) { toast(/permission/i.test(e.message) ? "Couldn't send that request." : e.message); }
+}
+async function acceptFriend(f) {
+  try { await updateDoc(doc(db, "friendships", f.id), { status: "accepted", acceptedAt: Date.now() }); toast(`You and ${first(personName(otherIn(f)))} are friends now`, null, null, "party"); }
+  catch (e) { toast(e.message); }
+}
+async function dropFriendship(f, msg) { try { await deleteDoc(doc(db, "friendships", f.id)); if (msg) toast(msg); } catch (e) { toast(e.message); } }
+
+// Add friends: anyone you know from groups and events, contacts, or a phone number.
+function openAddFriendsDialog() {
+  const exclude = new Set([myUid(), ...[...S.friends.values()].map(otherIn)]);
+  pickPeopleDialog({
+    title: "Add friends",
+    blurb: "Friends can message each other one-on-one, even if you're not in a group together. They'll get a request to accept.",
+    exclude, submitLabel: "Send requests",
+    onSubmit: async (direct, texted) => {
+      for (const p of direct) await sendFriendRequest(p.uid);
+      closeDialog();
+      if (!texted.length) return;
+      // Numbers we don't recognize: the server looks them up. Anyone not on Friendly yet gets a text from you,
+      // and the request waits for them (it becomes real the moment they sign up with that number).
+      toast("Looking them up…", null, null, "thinking");
+      const results = await Promise.all(texted.map(async p => {
+        try {
+          const ref = await addDoc(collection(db, "friendRequests"), { from: myUid(), fromName: S.profile.name || "", phone: p.e164, createdAt: Date.now() });
+          const status = await new Promise(res => { const t = setTimeout(() => { un(); res("sent"); }, 9000); const un = onSnapshot(ref, d => { const st = d.exists() && d.data().status; if (st) { clearTimeout(t); un(); res(st); } }, () => { clearTimeout(t); res("sent"); }); });
+          return { ...p, status };
+        } catch { return { ...p, status: "error" }; }
+      }));
+      const notOn = results.filter(r => r.status === "notOnFriendly");
+      const sent = results.filter(r => ["sent", "accepted", "pending", "already"].includes(r.status)).length;
+      if (sent) toast(`${sent} friend request${sent === 1 ? "" : "s"} sent`, null, null, "happy");
+      if (notOn.length) {
+        const text = `Hey! I'm on Friendly, our crew's home base for plans and settling up. Add me there so we can message: https://officialfriendly.com (free). Sign up with this number and my friend request will be waiting.`;
+        setTimeout(() => { if (notOn.length === 1) location.href = smsLink([notOn[0].e164], text); else openTextInviteDialog(notOn, text); }, 500);
+      }
+    }
+  });
+}
+
+function friendActions(u) {
+  if (u === myUid() || isDemo() && !String(u).startsWith("demo-")) return "";
+  const f = friendshipWith(u);
+  if (f && f.status === "accepted") return `<button type="button" class="btn primary" data-go="#/m/${pairOf(u)}">💬 Message</button>`;
+  if (f && f.requestedBy === u) return `<button type="button" class="btn primary" data-friendaccept="${f.id}">✓ Accept friend request</button>`;
+  if (f) return `<button type="button" class="btn" disabled>Friend request sent</button>`;
+  return `<button type="button" class="btn" data-friendadd="${u}">＋ Add friend</button>`;
+}
+function wireFriendButtons(root = document) {
+  root.querySelectorAll("[data-friendadd]").forEach(b => b.onclick = async () => { b.disabled = true; await sendFriendRequest(b.dataset.friendadd); closeDialog(); });
+  root.querySelectorAll("[data-friendaccept]").forEach(b => b.onclick = async () => { const f = S.friends.get(b.dataset.friendaccept); if (f) { b.disabled = true; await acceptFriend(f); } closeDialog(); });
+}
+
+function messagesBody() {
+  const me = myUid(), blocked = new Set(S.profile.blockedUids || []);
+  const inc = incomingRequests().filter(f => !blocked.has(otherIn(f)));
+  const out = outgoingRequests();
+  const friends = acceptedFriends().filter(f => !blocked.has(otherIn(f)));
+  const threads = friends.map(f => ({ f, t: S.dms.get(f.id) })).filter(x => x.t && x.t.lastAt).sort((a, b) => b.t.lastAt - a.t.lastAt);
+  const quiet = friends.filter(f => !(S.dms.get(f.id) || {}).lastAt).sort((a, b) => personName(otherIn(a)).localeCompare(personName(otherIn(b))));
+  const row = (u, mid, right, go) => `<div class="member-row ${go ? "dm-row" : ""}" ${go ? `data-go="${go}" role="button"` : ""}>${avatar(u, "lg")}<div style="flex:1;min-width:0">${mid}</div>${right}</div>`;
+  return `
+  <div class="section-head"><h1 style="margin:0">Messages</h1><button class="btn primary small" id="addFriendsBtn">＋ Add friends</button></div>
+  ${inc.length ? `<div class="section-head" style="margin-top:18px"><h2>Friend requests</h2></div>
+    <div class="card" id="reqCard">${inc.map(f => { const u = otherIn(f); return row(u, `<b>${esc(personName(u))}</b><div class="muted sm">Wants to be friends</div>`, `<span class="btnrow" style="gap:6px"><button class="btn small primary" data-friendaccept="${f.id}">Accept</button><button class="btn ghost small" data-frienddecline="${f.id}">Decline</button></span>`); }).join("")}</div>` : `<div id="reqCard"></div>`}
+  ${threads.length ? `<div class="card" style="margin-top:18px">${threads.map(({ f, t }) => { const u = otherIn(f); const unread = dmIsUnread(t);
+      return row(u, `<b>${esc(personName(u))}</b><div class="muted sm dm-last ${unread ? "unread" : ""}">${t.lastBy === me ? "You: " : ""}${esc(t.lastText || "")}</div>`, `<span class="muted sm">${ago(t.lastAt)}</span>${unread ? `<span class="dm-dot" aria-label="Unread"></span>` : ""}`, "#/m/" + f.id); }).join("")}</div>` : ""}
+  ${quiet.length ? `<div class="section-head" style="margin-top:18px"><h2>Friends</h2></div>
+    <div class="card">${quiet.map(f => { const u = otherIn(f); return row(u, `<b>${esc(personName(u))}</b>`, `<button class="btn small" data-go="#/m/${f.id}">Message</button>`); }).join("")}</div>` : ""}
+  ${out.length ? `<div class="section-head" style="margin-top:18px"><h2>Waiting on</h2></div>
+    <div class="card">${out.map(f => { const u = otherIn(f); return row(u, `<b>${esc(personName(u))}</b><div class="muted sm">Friend request sent</div>`, `<button class="btn ghost small" data-friendcancel="${f.id}">Cancel</button>`); }).join("")}</div>` : ""}
+  ${!friends.length && !inc.length && !out.length ? emptyState("💬", "No friends yet", "Add friends to message them one-on-one, even if you're not in a group together.", "happy") : ""}`;
+}
+function wireMessages() {
+  el("addFriendsBtn").onclick = openAddFriendsDialog;
+  wireFriendButtons();
+  document.querySelectorAll("[data-frienddecline]").forEach(b => b.onclick = () => { const f = S.friends.get(b.dataset.frienddecline); if (f) dropFriendship(f, "Request declined"); });
+  document.querySelectorAll("[data-friendcancel]").forEach(b => b.onclick = () => { const f = S.friends.get(b.dataset.friendcancel); if (f) dropFriendship(f, "Request canceled"); });
+}
+
+// One conversation. Its messages stream in through their own listener (kept across re-renders,
+// stopped when you leave), so typing and scroll position survive every refresh of the page.
+let dmSub = null;   // { fid, unsub, msgs, first }
+function stopDmSub() { if (dmSub) { dmSub.unsub(); dmSub = null; } }
+function ensureDmSub(fid) {
+  if (dmSub && dmSub.fid === fid) return;
+  stopDmSub();
+  const sub = { fid, msgs: null, first: true, unsub: () => {} }; dmSub = sub;
+  sub.unsub = onSnapshot(query(collection(db, "dms", fid, "messages"), orderBy("createdAt", "desc"), limit(200)), snap => {
+    sub.msgs = snap.docs.map(d => ({ id: d.id, ...d.data() })).reverse();
+    paintDm(); markDmRead(fid);
+  }, err => { sub.msgs = []; paintDm(); console.warn("dm listener:", err.message); });
+}
+function markDmRead(fid) {
+  const t = S.dms.get(fid);
+  if (t && dmIsUnread(t) && document.visibilityState === "visible") updateDoc(doc(db, "dms", fid), { [`readAt.${myUid()}`]: Date.now() }).catch(() => {});
+}
+function dmListInner() {
+  const msgs = dmSub && dmSub.msgs; if (!msgs) return `<p class="muted sm" style="text-align:center">Loading…</p>`;
+  const blocked = new Set([...(S.profile.blockedUids || [])]), hidden = new Set(S.profile.hiddenIds || []);
+  const vis = msgs.filter(m => !blocked.has(m.authorId) && !hidden.has(m.id));
+  if (!vis.length) return `<div class="dm-empty">${window.Blip ? window.Blip.svg({ mood: "happy", size: 64 }) : "👋"}<p class="muted">Say hi! Only the two of you can see this conversation.</p></div>`;
+  let prev = null;
+  return vis.map(m => {
+    const mine = m.authorId === myUid();
+    const gap = !prev || m.createdAt - prev.createdAt > 15 * 60 * 1000;
+    const stamp = gap ? `<div class="dm-stamp">${esc(new Date(m.createdAt).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }))}</div>` : "";
+    prev = m;
+    return `${stamp}<div class="dm-msg ${mine ? "mine" : "theirs"}" data-cmsg="${esc(m.id)}" data-dmmsg="${esc(m.id)}">${m.photo ? `<img class="dm-photo" src="${esc(m.photo)}" alt="">` : ""}${m.text ? `<span>${renderText(m.text, [])}</span>` : ""}</div>`;
+  }).join("");
+}
+function paintDm() {
+  const box = el("dmList"); if (!box) return;
+  const nearBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 140;
+  box.innerHTML = dmListInner();
+  if (dmSub && (dmSub.first || nearBottom) && dmSub.msgs) {
+    const focusing = (S.route.q || {}).c;
+    if (!focusing) window.scrollTo(0, document.documentElement.scrollHeight);
+    dmSub.first = false;
+  }
+}
+function dmBody(fid) {
+  const parts = String(fid || "").split("_");
+  if (parts.length !== 2 || !parts.includes(myUid())) return `<div class="card empty">${dot("oops", 72)}<b>Conversation not found</b><button class="btn" data-go="#/messages">Back to Messages</button></div>`;
+  const u = parts.find(x => x !== myUid());
+  const f = S.friends.get(fid); const friends = f && f.status === "accepted";
+  const blocked = (S.profile.blockedUids || []).includes(u);
+  ensureDmSub(fid);
+  return `
+  <button class="link-back" data-go="#/messages">‹ Messages</button>
+  <div class="dm-head"><span class="member-click" data-viewprofile="${u}" style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;cursor:pointer">${avatar(u, "lg")}<b>${esc(personName(u))}</b></span>
+    <button type="button" class="btn ghost small" id="dmMore" title="More">⋯</button></div>
+  <div class="dm-list" id="dmList">${dmListInner()}</div>
+  ${blocked ? `<p class="muted sm dm-note">You blocked ${esc(first(personName(u)))}. Unblock them from your profile to message again.</p>`
+    : friends ? `<form class="dm-compose" id="dmForm"><textarea id="dmInput" rows="1" maxlength="4000" placeholder="Message ${esc(first(personName(u)))}…" enterkeyhint="send"></textarea><button class="btn primary" id="dmSend" type="submit" aria-label="Send">➤</button></form>`
+    : `<div class="card dm-note"><p class="muted sm" style="margin:0 0 8px">You're not friends with ${esc(first(personName(u)))} right now, so you can't send messages.</p>${friendActions(u)}</div>`}`;
+}
+function wireDm(fid) {
+  const u = String(fid).split("_").find(x => x !== myUid());
+  document.querySelectorAll("[data-viewprofile]").forEach(x => x.onclick = () => openProfileDialog(x.dataset.viewprofile));
+  wireFriendButtons();
+  paintDm(); markDmRead(fid);
+  const form = el("dmForm"), input = el("dmInput");
+  if (form) {
+    const grow = () => { input.style.height = "auto"; input.style.height = Math.min(140, input.scrollHeight) + "px"; };
+    input.oninput = grow; grow();
+    input.onkeydown = e => { if (e.key === "Enter" && !e.shiftKey && !IOS && !IS_ANDROID) { e.preventDefault(); form.requestSubmit(); } };
+    form.onsubmit = async e => {
+      e.preventDefault();
+      const text = input.value.trim(); if (!text) return;
+      input.value = ""; grow();
+      try { await addDoc(collection(db, "dms", fid, "messages"), { authorId: myUid(), authorName: S.profile.name || "", text, createdAt: Date.now() }); window.scrollTo(0, document.documentElement.scrollHeight); }
+      catch (err) { input.value = text; grow(); toast(/permission/i.test(err.message) ? "Couldn't send. You may no longer be friends." : err.message); }
+    };
+  }
+  const list = el("dmList");
+  if (list) list.onclick = e => {
+    const m = e.target.closest("[data-dmmsg]"); if (!m || !dmSub || !dmSub.msgs) return;
+    const msg = dmSub.msgs.find(x => x.id === m.dataset.dmmsg); if (!msg) return;
+    if (msg.authorId === myUid()) { if (confirm("Delete this message for both of you?")) deleteDoc(doc(db, "dms", fid, "messages", msg.id)).catch(err => toast(err.message)); }
+    else dmReportDialog(fid, msg);
+  };
+  el("dmMore").onclick = () => {
+    const f = S.friends.get(fid);
+    dialog(`<h3>${esc(personName(u))}</h3><div class="stack">
+      ${f && f.status === "accepted" ? `<button type="button" class="btn" id="dmUnfriend">Remove friend</button>` : ""}
+      <button type="button" class="btn danger-ghost" id="dmBlock">🚫 Block ${esc(first(personName(u)))}</button></div>
+      <p class="muted sm" style="margin:10px 0 0">Tap any of their messages to report it.</p>`, null, null);
+    if (el("dmUnfriend")) el("dmUnfriend").onclick = () => { if (confirm(`Remove ${first(personName(u))} as a friend? You won't be able to message each other.`)) { closeDialog(); dropFriendship(f, "Removed"); } };
+    el("dmBlock").onclick = () => { closeDialog(); blockUser(u, null, "user", null); };
+  };
+}
+function dmReportDialog(fid, msg) {
+  dialog(`<h3>Report this message</h3>
+    <p class="muted" style="margin-top:-6px">We review every report within 24 hours. Reported messages are hidden from you right away.</p>
+    <label class="field"><span>Reason</span><select id="rpReason">${REPORT_REASONS.map(r => `<option>${r}</option>`).join("")}</select></label>
+    <label class="cbox"><input type="checkbox" id="rpBlock"> Also block ${esc(first(personName(msg.authorId)))}</label>`,
+    "Report", async () => {
+      try {
+        await addDoc(collection(db, "reports"), { reporterId: myUid(), reporterName: S.profile.name, targetUid: msg.authorId, kind: "dm", path: `dms/${fid}/messages/${msg.id}`, snippet: String(msg.text || "(photo)").slice(0, 200), reason: el("rpReason").value, status: "open", createdAt: Date.now() });
+        const up = { hiddenIds: arrayUnion(msg.id) }; if (el("rpBlock").checked) up.blockedUids = arrayUnion(msg.authorId);
+        await updateDoc(doc(db, "users", myUid()), up);
+        closeDialog(); toast("Thanks. We'll review it within 24 hours.");
+      } catch (e) { toast(e.message); }
+    });
+}
+
 // ---------- APP ICON BADGE ----------
 // The red number on the app icon = the bell's unread count. Pushes set it from the server;
 // whenever the app is open it re-syncs, so reading something clears it. Only app builds
@@ -3716,7 +3952,7 @@ async function deleteAccount() {
 let lastBadge = -1;
 function syncBadge() {
   if (!S.user || !S.profile || !S.activity) return;
-  const n = Math.min(99, unreadCount()); if (n === lastBadge) return; lastBadge = n;
+  const n = Math.min(99, unreadCount() + dmUnread()); if (n === lastBadge) return; lastBadge = n;
   const B = NATIVE ? plugin("Badge") : null;
   if (B && B.set) {
     (n ? B.set({ count: n }) : B.clear()).catch(() => {});

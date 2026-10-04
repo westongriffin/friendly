@@ -46,14 +46,15 @@ function apnsAuth() {
   return apnsJwt.token;
 }
 // Sends one alert to each APNs token; resolves to the tokens Apple says are dead.
-function apnsSend(tokens, title, body, url) {
+// badgeOf(token) = the red number for that phone's app icon (the owner's unread Activity count).
+function apnsSend(tokens, title, body, url, badgeOf = () => undefined) {
   const auth = apnsAuth(); if (!auth || !tokens.length) return Promise.resolve([]);
   const http2 = require("http2");
   return new Promise(resolve => {
     const dead = []; let left = tokens.length;
     const client = http2.connect("https://api.push.apple.com");
     client.on("error", err => { logger.warn("apns connect: " + err.message); resolve(dead); });
-    const payload = JSON.stringify({ aps: { alert: { title, body }, sound: "default", "mutable-content": 0 }, url });
+    const payloadFor = t => { const b = badgeOf(t); return JSON.stringify({ aps: { alert: { title, body }, sound: "default", "mutable-content": 0, ...(b != null ? { badge: b } : {}) }, url }); };
     const finish = () => { if (--left === 0) { client.close(); resolve(dead); } };
     for (const t of tokens) {
       const req = client.request({ ":method": "POST", ":path": "/3/device/" + t, authorization: "bearer " + auth, "apns-topic": APNS_TOPIC, "apns-push-type": "alert", "apns-priority": "10", "content-type": "application/json" });
@@ -69,7 +70,7 @@ function apnsSend(tokens, title, body, url) {
         finish();
       });
       req.on("error", err => { logger.warn("apns req: " + err.message); finish(); });
-      req.end(payload);
+      req.end(payloadFor(t));
     }
   });
 }
@@ -880,14 +881,15 @@ const mentionNotify = (c, url, where) => (c.mentions && c.mentions.length) ? not
 // Which notifCategory toggle (profile > Notifications) a push type falls under.
 // Types with no entry here (money reminders, admin content reports) always send --
 // only the four categories the person can actually see and turn off are gated.
-const NOTIF_CATEGORY = { event: "invites", meeting: "invites", rsvp: "invites", nudge: "reminders", reminder: "reminders", mention: "chat", comment: "chat", birthday: "birthdays" };
+const NOTIF_CATEGORY = { event: "invites", meeting: "invites", rsvp: "invites", nudge: "reminders", reminder: "reminders", mention: "chat", comment: "chat", dm: "chat", friend: "invites", birthday: "birthdays" };
 // Every device for a set of users (native FCM tokens + web push subscriptions):
 // send, prune anything dead, and log the item to the Activity feed so it shows
 // in-app even for people who keep notifications (or this category) off.
 async function notify(uids, title, body, url = "/", extra = {}) {
   const ids = [...new Set(uids)].filter(Boolean);
   if (!ids.length) return;
-  await db.collection("activity").add({ uids: ids, title, body, url, type: extra.type || "", actorId: extra.actorId || "", createdAt: Date.now() })
+  // Private messages live in their own Messages inbox, so they skip the Activity feed.
+  if (!extra.skipActivity) await db.collection("activity").add({ uids: ids, title, body, url, type: extra.type || "", actorId: extra.actorId || "", createdAt: Date.now() })
     .catch(err => logger.warn("activity: " + err.message));
   const category = NOTIF_CATEGORY[extra.type];
   const snaps = await db.getAll(...ids.map(id => db.doc("users/" + id)));
@@ -897,14 +899,36 @@ async function notify(uids, title, body, url = "/", extra = {}) {
     (s.get("pushTokens") || []).forEach(t => { (isApnsToken(t) ? apns : tokens).push(t); tokenOwner[t] = s.id; });
     (s.get("webPush") || []).forEach(sub => subs.push({ sub, uid: s.id }));
   });
+  // App icon badge = unread Activity (newer than the last time they opened Activity), the same
+  // number as the bell in the app. Counted only for people with a phone to send to.
+  const badge = {};
+  // Items they already opened (users.peeked, written by the app) don't count, same as the bell.
+  // Phones get a badge only once their app can clear it (users.badgeOk, iOS 1.0.3+ / Android 1.0.4+).
+  await Promise.all(snaps.filter(s => (s.get("badgeOk") && (s.get("pushTokens") || []).length) || (s.get("webPush") || []).length).map(async s => {
+    try {
+      const q = await db.collection("activity").where("uids", "array-contains", s.id).where("createdAt", ">", Number(s.get("activitySeenAt") || 0)).orderBy("createdAt", "desc").limit(100).get();
+      const peeked = s.get("peeked") || {};
+      const key = url => { const t = String(url || ""); const i = t.indexOf("#"); return (i < 0 ? "" : t.slice(i).split("?")[0]).replace(/^#\//, "").replace(/[^A-Za-z0-9_-]/g, "_"); };
+      const acts = q.docs.filter(d => { const a = d.data(); const k = key(a.url); return !(k && (peeked[k] || 0) >= a.createdAt); }).length;
+      // Plus private conversations with something new from the other person (the Messages count in the app).
+      const threads = await db.collection("dms").where("uids", "array-contains", s.id).get();
+      const dms = threads.docs.filter(d => { const t = d.data(); return t.lastBy && t.lastBy !== s.id && (t.lastAt || 0) > ((t.readAt || {})[s.id] || 0); }).length;
+      badge[s.id] = Math.min(99, acts + dms);
+    } catch (err) { logger.warn("badge count: " + err.message); }
+  }));
+  const badgeOk = new Set(snaps.filter(s => s.get("badgeOk")).map(s => s.id));
+  const badgeOf = t => badgeOk.has(tokenOwner[t]) ? badge[tokenOwner[t]] : undefined;
   const jobs = [];
-  if (apns.length) jobs.push(apnsSend(apns, title, body, url).then(async dead => {
+  if (apns.length) jobs.push(apnsSend(apns, title, body, url, badgeOf).then(async dead => {
     const byUser = {}; dead.forEach(t => { (byUser[tokenOwner[t]] = byUser[tokenOwner[t]] || []).push(t); });
     await Promise.all(Object.entries(byUser).map(([uid, ts]) => db.doc("users/" + uid).update({ pushTokens: FieldValue.arrayRemove(...ts) }).catch(() => {})));
   }));
-  if (tokens.length) jobs.push(getMessaging().sendEachForMulticast({
-    tokens, notification: { title, body }, data: { url }, apns: { payload: { aps: { sound: "default" } } }
-  }).then(async res => {
+  if (tokens.length) jobs.push(getMessaging().sendEach(tokens.map(token => {
+    const b = badgeOf(token);
+    return { token, notification: { title, body }, data: { url, ...(b != null ? { badge: String(b) } : {}) },
+      android: { notification: b != null ? { notificationCount: b } : {} },
+      apns: { payload: { aps: { sound: "default", ...(b != null ? { badge: b } : {}) } } } };
+  })).then(async res => {
     const dead = [];
     res.responses.forEach((r, i) => { if (!r.success) { const c = r.error && r.error.code; if (c === "messaging/registration-token-not-registered" || c === "messaging/invalid-argument") dead.push(tokens[i]); } });
     const byUser = {}; dead.forEach(t => { (byUser[tokenOwner[t]] = byUser[tokenOwner[t]] || []).push(t); });
@@ -912,8 +936,7 @@ async function notify(uids, title, body, url = "/", extra = {}) {
   }).catch(err => logger.warn("fcm: " + err.message)));
   if (subs.length && VAPID_PRIVATE.value()) {
     webpush.setVapidDetails("mailto:wes@wes-griffin.com", VAPID_PUBLIC, VAPID_PRIVATE.value());
-    const payload = JSON.stringify({ title, body, url });
-    jobs.push(...subs.map(({ sub, uid }) => webpush.sendNotification(sub, payload).catch(err => {
+    jobs.push(...subs.map(({ sub, uid }) => webpush.sendNotification(sub, JSON.stringify({ title, body, url, badge: badge[uid] })).catch(err => {
       // 404/410 = the browser dropped the subscription; forget it.
       if (err.statusCode === 404 || err.statusCode === 410) return db.doc("users/" + uid).update({ webPush: FieldValue.arrayRemove(sub) }).catch(() => {});
       logger.warn("webpush " + err.statusCode + ": " + String(err.message).slice(0, 120));
@@ -954,6 +977,7 @@ exports.onEventDeleted = onDocumentDeleted({ document: "events/{id}", ...MAIL },
 const toE164 = p => { const d = String(p || "").trim(); if (!d) return ""; const n = d.replace(/\D/g, ""); if (d.startsWith("+")) return "+" + n; if (n.length === 10) return "+1" + n; if (n.length === 11 && n[0] === "1") return "+" + n; return n ? "+" + n : ""; };
 async function scrubUid(uid, replacement) {
   const nu = replacement && replacement.uid;
+  for (const c of ["friendships", "dms"]) { const q = await db.collection(c).where("uids", "array-contains", uid).get(); for (const d of q.docs) await d.ref.delete().catch(() => {}); }
   const groups = await db.collection("groups").where("memberUids", "array-contains", uid).get();
   for (const g of groups.docs) {
     const d = g.data(); const up = {};
@@ -1118,7 +1142,7 @@ exports.onNudge = onDocumentCreated({ document: "nudges/{id}", ...PUSH }, async 
   if (n.by !== ev.hostId && !(ev.cohostUids || []).includes(n.by)) return;
   const targets = (ev.invitedUids || []).filter(u => u !== ev.hostId && !(ev.rsvps || {})[u]);
   const nm = await names([n.by]);
-  await notify(targets, firstName(nm[n.by]) + " is waiting on your RSVP", (ev.emoji || "📅") + " " + ev.title, "/#/e/" + n.eventId, { type: "nudge", actorId: n.by });
+  await notify(targets, firstName(nm[n.by]) + " is waiting on your RSVP", (ev.emoji || "📅") + " " + ev.title, "/#/e/" + n.eventId + "?to=rsvpCard", { type: "nudge", actorId: n.by });
   await e.data.ref.update({ sent: targets.length, at: Date.now() });
 });
 
@@ -1129,8 +1153,8 @@ exports.onComment = onDocumentCreated({ document: "events/{id}/comments/{cid}", 
   const ev = (await db.doc("events/" + e.params.id).get()).data(); if (!ev) return;
   await notify((ev.invitedUids || []).filter(u => u !== c.authorId),
     firstName(c.authorName) + " on " + ev.title, commentPreview(c),
-    "/#/e/" + e.params.id, { type: "comment", actorId: c.authorId });
-  await mentionNotify(c, "/#/e/" + e.params.id, ev.title);
+    "/#/e/" + e.params.id + "?to=wall&c=" + e.params.cid, { type: "comment", actorId: c.authorId });
+  await mentionNotify(c, "/#/e/" + e.params.id + "?to=wall&c=" + e.params.cid, ev.title);
 });
 
 // Group chat message -> tell the other members.
@@ -1139,8 +1163,8 @@ exports.onGroupComment = onDocumentCreated({ document: "groups/{gid}/comments/{c
   const g = (await db.doc("groups/" + e.params.gid).get()).data(); if (!g) return;
   await notify((g.memberUids || []).filter(u => u !== c.authorId),
     firstName(c.authorName) + " in " + g.name, commentPreview(c),
-    "/#/g/" + e.params.gid, { type: "comment", actorId: c.authorId });
-  await mentionNotify(c, "/#/g/" + e.params.gid, g.name);
+    "/#/g/" + e.params.gid + "?to=wall&c=" + e.params.cid, { type: "comment", actorId: c.authorId });
+  await mentionNotify(c, "/#/g/" + e.params.gid + "?to=wall&c=" + e.params.cid, g.name);
 });
 
 // Expense discussion -> tell the people involved.
@@ -1149,8 +1173,8 @@ exports.onExpenseComment = onDocumentCreated({ document: "expenses/{xid}/comment
   const x = (await db.doc("expenses/" + e.params.xid).get()).data(); if (!x) return;
   await notify((x.involved || []).filter(u => u !== c.authorId),
     firstName(c.authorName) + " on " + (x.desc || "an expense"), commentPreview(c),
-    "/#/x/" + e.params.xid, { type: "comment", actorId: c.authorId });
-  await mentionNotify(c, "/#/x/" + e.params.xid, x.desc || "an expense");
+    "/#/x/" + e.params.xid + "?to=wall&c=" + e.params.cid, { type: "comment", actorId: c.authorId });
+  await mentionNotify(c, "/#/x/" + e.params.xid + "?to=wall&c=" + e.params.cid, x.desc || "an expense");
 });
 
 // Content reported -> tell the moderators (we promise a 24-hour review).
@@ -1160,7 +1184,7 @@ exports.onReport = onDocumentCreated({ document: "reports/{id}", ...PUSH }, asyn
   const r = e.data && e.data.data(); if (!r) return;
   // Child safety reports jump the queue: an urgent title so they're handled first (see child-safety.html).
   const urgent = /child safety/i.test(r.reason || "");
-  await notify(ADMIN_UIDS, urgent ? "URGENT child safety report" : "Content reported: " + (r.reason || "review needed"), String(r.snippet || r.kind || "").slice(0, 120), "/#/profile");
+  await notify(ADMIN_UIDS, urgent ? "URGENT child safety report" : "Content reported: " + (r.reason || "review needed"), String(r.snippet || r.kind || "").slice(0, 120), "/#/profile?to=reportsCard");
 });
 
 // A phone invite for someone who is already a member/guest (the host typed or
@@ -1201,6 +1225,9 @@ async function claimPhoneInvites(uid, phone, name) {
     }
     await d.ref.update(up).then(() => n++).catch(err => logger.warn("claimPhoneInvites " + d.id + ": " + err.message));
   }
+  // Friend requests sent to this number before they joined: now a real request they can accept.
+  const frs = await db.collection("friendRequests").where("phone", "==", phone).where("status", "==", "notOnFriendly").get();
+  for (const r of frs.docs) { await makeFriendRequest(r.get("from"), uid, r.get("fromName"), name).catch(() => {}); await r.ref.update({ status: "sent", toUid: uid }).catch(() => {}); }
   // Groups: a pending phone invite for someone who is already a member is stale. (A real
   // pending group invite stays, so they still get to accept or decline it.)
   const gs = await db.collection("groups").where("invitedPhones", "array-contains", phone).get();
@@ -1214,6 +1241,55 @@ exports.onUserPhone = onDocumentWritten({ document: "users/{uid}" }, async e => 
   const n = await claimPhoneInvites(e.params.uid, after.phoneE164, after.name);
   if (n) logger.info(`onUserPhone: linked ${n} texted event invite(s) to ${e.params.uid}`);
 });
+// ---------- Friends & private messages ----------
+// friendships/{a_b} (uids sorted) = a request (status "pending", requestedBy) or a friendship
+// ("accepted"). dms/{a_b} is the conversation (written here from each message) and
+// dms/{a_b}/messages the messages. Only accepted friends can message (firestore.rules).
+const pairId = (a, b) => [a, b].sort().join("_");
+async function makeFriendRequest(from, to, fromName, toName) {
+  if (!from || !to || from === to) return "self";
+  const [fu, tu] = await db.getAll(db.doc("users/" + from), db.doc("users/" + to));
+  if (!tu.exists) return "missing";
+  if ((tu.get("blockedUids") || []).includes(from) || (fu.get("blockedUids") || []).includes(to)) return "blocked";
+  const ref = db.doc("friendships/" + pairId(from, to)); const cur = await ref.get();
+  const people = { [from]: { name: fromName || fu.get("name") || "Friend", photo: fu.get("photo") || "" }, [to]: { name: toName || tu.get("name") || "Friend", photo: tu.get("photo") || "" } };
+  if (cur.exists) {
+    const d = cur.data();
+    if (d.status === "accepted") return "already";
+    if (d.requestedBy === to) { await ref.update({ status: "accepted", acceptedAt: Date.now() }); return "accepted"; }   // they'd asked too
+    return "pending";
+  }
+  await ref.set({ uids: [from, to].sort(), requestedBy: from, status: "pending", people, createdAt: Date.now() });
+  return "sent";
+}
+// Someone typed or picked a phone number: find the account behind it (only the server can look
+// numbers up). Not on Friendly yet: the request waits and becomes real when they join.
+exports.onFriendRequest = onDocumentCreated({ document: "friendRequests/{id}" }, async e => {
+  const r = e.data && e.data.data(); if (!r || !r.from || !r.phone) return;
+  const q = await db.collection("users").where("phoneE164", "==", r.phone).limit(1).get();
+  if (q.empty) { await e.data.ref.update({ status: "notOnFriendly" }); return; }
+  const res = await makeFriendRequest(r.from, q.docs[0].id, r.fromName, "");
+  await e.data.ref.update({ status: res, toUid: q.docs[0].id });
+});
+exports.onFriendship = onDocumentWritten({ document: "friendships/{fid}", ...PUSH }, async e => {
+  const before = e.data.before.exists ? e.data.before.data() : null, after = e.data.after.exists ? e.data.after.data() : null;
+  if (!after) return;
+  const by = after.requestedBy, other = (after.uids || []).find(u => u !== by);
+  const nm = u => firstName(((after.people || {})[u] || {}).name || "Someone");
+  if (!before && after.status === "pending")
+    await notify([other], nm(by) + " wants to be friends on Friendly", "Accept to message each other.", "/#/messages?to=reqCard", { type: "friend", actorId: by });
+  else if (after.status === "accepted" && (!before || before.status !== "accepted"))
+    await notify([by], nm(other) + " accepted your friend request", "Say hi! 👋", "/#/m/" + e.params.fid, { type: "friend", actorId: other });
+});
+exports.onDmMessage = onDocumentCreated({ document: "dms/{fid}/messages/{mid}", ...PUSH }, async e => {
+  const m = e.data && e.data.data(); if (!m) return;
+  const uids = e.params.fid.split("_"); const other = uids.find(u => u !== m.authorId);
+  if (!other || !uids.includes(m.authorId)) return;
+  const preview = m.text ? String(m.text).slice(0, 140) : m.photo ? "📷 Photo" : "New message";
+  await db.doc("dms/" + e.params.fid).set({ uids, lastText: preview, lastAt: m.createdAt || Date.now(), lastBy: m.authorId, readAt: { [m.authorId]: m.createdAt || Date.now() } }, { merge: true });
+  await notify([other], m.authorName || "New message", preview, "/#/m/" + e.params.fid + "?c=" + e.params.mid, { type: "dm", actorId: m.authorId, skipActivity: true });
+});
+
 exports.onGroupUpdated = onDocumentUpdated({ document: "groups/{gid}" }, async e => {
   const before = e.data.before.data(), after = e.data.after.data();
   await dropRedundantPhoneInvites(e.data.after.ref, before, after, after.memberUids || []);
@@ -1232,15 +1308,15 @@ exports.onRsvp = onDocumentUpdated({ document: "events/{id}", ...MAIL }, async e
     // A host or co-host answered for this guest: tell the guest who did it, not the host.
     const nm = await names([setNow.by]);
     const word = { going: after.kind === "meeting" ? "accepted" : "going", maybe: "maybe", no: after.kind === "meeting" ? "declined" : "can't go" }[a[changed]] || a[changed];
-    await notify([changed], `${firstName(nm[setNow.by])} marked you as ${word}`, after.title + ". Tap to change it.", "/#/e/" + id, { type: "rsvp", actorId: setNow.by });
+    await notify([changed], `${firstName(nm[setNow.by])} marked you as ${word}`, after.title + ". Tap to change it.", "/#/e/" + id + "?to=rsvpCard", { type: "rsvp", actorId: setNow.by });
   } else if (changed) {
     // The guest answered themselves: drop any old "marked by the host" note.
     if (sbA[changed]) await e.data.after.ref.update({ ["rsvpSetBy." + changed]: FieldValue.delete() }).catch(() => {});
     const nm = await names([changed]);
     const word = { going: "is going to", maybe: "might come to", no: "can't make", waitlist: "joined the waitlist for", pending: "requested to join" }[a[changed]] || "updated";
-    await notify([after.hostId], firstName(nm[changed]) + " " + word, after.title, "/#/e/" + id, { type: "rsvp", actorId: changed });
+    await notify([after.hostId], firstName(nm[changed]) + " " + word, after.title, "/#/e/" + id + "?to=guestCard", { type: "rsvp", actorId: changed });
     if (a[changed] === "going" && (b[changed] === "waitlist" || b[changed] === "pending"))
-      await notify([changed], "You're in! " + after.title, b[changed] === "waitlist" ? "A spot opened up and it's yours." : "The host approved you.", "/#/e/" + id, { type: "rsvp" });
+      await notify([changed], "You're in! " + after.title, b[changed] === "waitlist" ? "A spot opened up and it's yours." : "The host approved you.", "/#/e/" + id + "?to=rsvpCard", { type: "rsvp" });
   }
   await dropRedundantPhoneInvites(e.data.after.ref, before, after, after.invitedUids || []);
   const added = (after.invitedUids || []).filter(u => !(before.invitedUids || []).includes(u));
@@ -1249,7 +1325,7 @@ exports.onRsvp = onDocumentUpdated({ document: "events/{id}", ...MAIL }, async e
   const linkJoins = added.filter(u => (after.joinedVia || {})[u] === "link" && u !== after.hostId);
   if (linkJoins.length) {
     const nm = await names(linkJoins);
-    for (const u of linkJoins) await notify([after.hostId, ...(after.cohostUids || [])].filter(h => h !== u), firstName(nm[u]) + " joined via your link", after.title, "/#/e/" + id, { type: "rsvp", actorId: u });
+    for (const u of linkJoins) await notify([after.hostId, ...(after.cohostUids || [])].filter(h => h !== u), firstName(nm[u]) + " joined via your link", after.title, "/#/e/" + id + "?to=guestCard", { type: "rsvp", actorId: u });
   }
   // Edits to the essentials -> bump the sequence once and re-send invites.
   const essentials = ["title", "date", "time", "endTime", "location", "notes"];
@@ -1270,7 +1346,7 @@ exports.dailyReminders = onSchedule({ schedule: "0 9 * * *", timeZone: "America/
   for (const doc of snap.docs) {
     const ev = doc.data();
     const going = (ev.invitedUids || []).filter(u => ["going", "maybe"].includes((ev.rsvps || {})[u]));
-    await notify(going, "Today: " + ev.title, (ev.time ? "Starts " + ev.time + ". " : "") + (ev.location || "See you there!"), "/#/e/" + doc.id, { type: "reminder" });
+    await notify(going, "Today: " + ev.title, (ev.time ? "Starts " + ev.time + ". " : "") + (ev.location || "See you there!"), "/#/e/" + doc.id + "?to=dayCard", { type: "reminder" });
   }
   logger.info("Sent reminders for " + snap.size + " events");
 
@@ -1283,7 +1359,7 @@ exports.dailyReminders = onSchedule({ schedule: "0 9 * * *", timeZone: "America/
     for (const [uid, info] of Object.entries(members)) {
       if (!info.birthday || !String(info.birthday).endsWith(mmdd)) continue;
       const others = (data.memberUids || []).filter(u => u !== uid); if (!others.length) continue;
-      await notify(others, firstName(info.name || "A friend") + "'s birthday is a month away 🎂", "Plan something for " + (data.name || "the group") + " before the date fills up.", "/#/g/" + g.id, { type: "birthday", actorId: uid }); bdays++;
+      await notify(others, firstName(info.name || "A friend") + "'s birthday is a month away 🎂", "Plan something for " + (data.name || "the group") + " before the date fills up.", "/#/g/" + g.id + "?to=bdayCard", { type: "birthday", actorId: uid }); bdays++;
     }
   }
   if (bdays) logger.info("Birthday heads-ups sent: " + bdays);

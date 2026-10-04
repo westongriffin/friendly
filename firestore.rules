@@ -54,13 +54,62 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/groups/$(gid)).data.memberUids;
     }
 
+    // ---- Friends & private messages ----
+    // friendships/{a_b}: uids sorted, id = uids joined by "_". A request is "pending" until the
+    // other person accepts; either person can delete it (decline, cancel, or unfriend).
+    function otherOf(pair) { return pair[0] == uid() ? pair[1] : pair[0]; }
+    function blockedBy(other) {
+      return uid() in get(/databases/$(database)/documents/users/$(other)).data.get('blockedUids', []);
+    }
+    match /friendships/{fid} {
+      allow read: if signedIn() && uid() in resource.data.uids;
+      allow create: if signedIn()
+        && request.resource.data.uids.size() == 2 && request.resource.data.uids[0] < request.resource.data.uids[1]
+        && fid == request.resource.data.uids[0] + '_' + request.resource.data.uids[1]
+        && uid() in request.resource.data.uids && request.resource.data.requestedBy == uid()
+        && request.resource.data.status == 'pending'
+        && !blockedBy(otherOf(request.resource.data.uids))
+        && (!isDemoUser() || request.resource.data.uids.hasOnly(demoUids()));
+      allow update: if signedIn() && uid() in resource.data.uids
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'acceptedAt', 'people'])
+        && request.resource.data.get('people', {}).diff(resource.data.get('people', {})).affectedKeys().hasOnly([uid()])
+        && (request.resource.data.status == resource.data.status
+            || (resource.data.status == 'pending' && request.resource.data.status == 'accepted' && uid() != resource.data.requestedBy));
+      allow delete: if signedIn() && uid() in resource.data.uids;
+    }
+    // A friend request by phone number: the server finds the account (onFriendRequest).
+    match /friendRequests/{rid} {
+      allow create: if signedIn() && !isDemoUser() && request.resource.data.from == uid()
+        && request.resource.data.keys().hasOnly(['from', 'fromName', 'phone', 'createdAt']);
+      allow read, delete: if signedIn() && resource.data.from == uid();
+    }
+    // dms/{a_b}: the conversation (last message, read marks), written by onDmMessage; each person
+    // may only move their own read mark. Messages need an accepted friendship and no block.
+    function friendsNow(fid) {
+      return get(/databases/$(database)/documents/friendships/$(fid)).data.status == 'accepted';
+    }
+    match /dms/{fid} {
+      allow read: if signedIn() && (uid() in fid.split('_') || uid() in resource.data.uids);
+      allow update: if signedIn() && uid() in fid.split('_')
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readAt'])
+        && request.resource.data.readAt.diff(resource.data.get('readAt', {})).affectedKeys().hasOnly([uid()]);
+      match /messages/{mid} {
+        allow read: if signedIn() && uid() in fid.split('_');
+        allow create: if signedIn() && uid() in fid.split('_') && request.resource.data.authorId == uid()
+          && request.resource.data.keys().hasOnly(['authorId', 'authorName', 'text', 'photo', 'createdAt'])
+          && (request.resource.data.get('text', '') is string && request.resource.data.get('text', '').size() <= 4000)
+          && friendsNow(fid) && !blockedBy(otherOf(fid.split('_')));
+        allow delete: if signedIn() && (resource.data.authorId == uid() || isAdmin());
+      }
+    }
+
     // ---- Users: each profile is private to its owner ----
     match /users/{userId} {
       allow read: if signedIn() && userId == uid();
       allow create: if signedIn() && userId == uid() && !isDemoUser();
       allow update: if signedIn() && userId == uid()
         && (!isDemoUser() || request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['name', 'venmo', 'zelle', 'cashapp', 'payPref', 'city', 'photo', 'birthday', 'curateMiles', 'notifPrefs', 'activitySeenAt', 'hiddenIds', 'blockedUids', 'onboarded']));
+              .hasOnly(['name', 'venmo', 'zelle', 'cashapp', 'payPref', 'city', 'photo', 'birthday', 'curateMiles', 'notifPrefs', 'activitySeenAt', 'hiddenIds', 'blockedUids', 'onboarded', 'peeked', 'badgeOk']));
       allow delete: if signedIn() && userId == uid() && !isDemoUser();
     }
 
