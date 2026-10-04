@@ -809,3 +809,4 @@ html{background:var(--bg)}
 .dm-compose{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;gap:8px;align-items:flex-end;padding:10px max(16px,calc((100vw - 720px)/2)) calc(10px + env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--line)}
 .dm-compose textarea{flex:1;resize:none;border:1px solid var(--line);border-radius:20px;padding:10px 14px;font:inherit;background:var(--surface);color:var(--ink);max-height:140px}
 .dm-compose .btn{border-radius:50%;width:44px;height:44px;padding:0;flex:none}
+[data-pf]{cursor:pointer}

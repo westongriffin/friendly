@@ -1283,7 +1283,7 @@ exports.onFriendship = onDocumentWritten({ document: "friendships/{fid}", ...PUS
   const nm = u => firstName(((after.people || {})[u] || {}).name || "Someone");
   if (!before && after.status === "pending")
     await notify([other], nm(by) + " wants to be friends on Friendly", "Accept to message each other.", "/#/messages?to=reqCard", { type: "friend", actorId: by });
-  else if (after.status === "accepted" && (!before || before.status !== "accepted"))
+  else if (after.status === "accepted" && (!before || before.status !== "accepted") && after.via !== "group")
     await notify([by], nm(other) + " accepted your friend request", "Say hi! 👋", "/#/m/" + e.params.fid, { type: "friend", actorId: other });
 });
 exports.onDmMessage = onDocumentCreated({ document: "dms/{fid}/messages/{mid}", ...PUSH }, async e => {
@@ -1295,9 +1295,37 @@ exports.onDmMessage = onDocumentCreated({ document: "dms/{fid}/messages/{mid}", 
   await notify([other], m.authorName || "New message", preview, "/#/m/" + e.params.fid + "?c=" + e.params.mid, { type: "dm", actorId: m.authorId, skipActivity: true });
 });
 
+// People who share a group are friends automatically (so they can message each other). Runs
+// only for members who just joined, so removing a friend you share a group with sticks, and
+// never between people where either one blocked the other.
+async function groupFriends(g, newcomers) {
+  const members = [...new Set(g.memberUids || [])]; if (members.length < 2 || !newcomers.length) return 0;
+  const people = u => ({ name: ((g.members || {})[u] || {}).name || "Friend", photo: ((g.members || {})[u] || {}).photo || "" });
+  const snaps = await db.getAll(...members.map(u => db.doc("users/" + u)));
+  const blocked = {}; snaps.forEach(sn => { blocked[sn.id] = new Set((sn.exists && sn.get("blockedUids")) || []); });
+  let n = 0; const done = new Set();
+  for (const a of newcomers) for (const b of members) {
+    if (a === b) continue;
+    const id = pairId(a, b); if (done.has(id)) continue; done.add(id);
+    if ((blocked[a] || new Set()).has(b) || (blocked[b] || new Set()).has(a)) continue;
+    const ref = db.doc("friendships/" + id);
+    await db.runTransaction(async tx => {
+      const cur = await tx.get(ref);
+      if (!cur.exists) { tx.set(ref, { uids: [a, b].sort(), requestedBy: a, status: "accepted", via: "group", people: { [a]: people(a), [b]: people(b) }, createdAt: Date.now(), acceptedAt: Date.now() }); n++; }
+      else if (cur.get("status") === "pending") { tx.update(ref, { status: "accepted", acceptedAt: Date.now(), via: "group" }); n++; }
+    }).catch(err => logger.warn("groupFriends " + id + ": " + err.message));
+  }
+  return n;
+}
+exports.onGroupCreated = onDocumentCreated({ document: "groups/{gid}" }, async e => {
+  const g = e.data && e.data.data(); if (!g) return;
+  await groupFriends(g, g.memberUids || []);
+});
 exports.onGroupUpdated = onDocumentUpdated({ document: "groups/{gid}" }, async e => {
   const before = e.data.before.data(), after = e.data.after.data();
   await dropRedundantPhoneInvites(e.data.after.ref, before, after, after.memberUids || []);
+  const joined = (after.memberUids || []).filter(u => !(before.memberUids || []).includes(u));
+  if (joined.length) await groupFriends(after, joined);
 });
 
 // Event updated: RSVP changes tell the host (and promote waitlisters), edits

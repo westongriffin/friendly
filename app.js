@@ -854,7 +854,17 @@ function rebuildContacts() {
 // are only known by the names the event carries (see noteNames).
 const nameHint = uid => (S.nameHints && S.nameHints.get(uid)) || "";
 const nameOf = uid => (S.contacts.get(uid) || {}).name || nameHint(uid) || "Someone";
-function avatar(uid, cls = "") { const info = S.contacts.get(uid) || {}; const name = info.name || nameHint(uid); if (info.photo) return `<span class="avatar ${cls} has-img"><img src="${esc(info.photo)}" alt=""></span>`; return `<span class="avatar ${cls}" style="background:${colorFor(uid)}">${esc(initials(name || "?"))}</span>`; }
+// data-pf: tapping anyone's picture opens their profile (see the capture listener below).
+function avatar(uid, cls = "") { const info = S.contacts.get(uid) || {}; const name = info.name || nameHint(uid); const pf = uid ? ` data-pf="${esc(uid)}"` : ""; if (info.photo) return `<span class="avatar ${cls} has-img"${pf}><img src="${esc(info.photo)}" alt=""></span>`; return `<span class="avatar ${cls}" style="background:${colorFor(uid)}"${pf}>${esc(initials(name || "?"))}</span>`; }
+// Any profile picture opens that person's profile (with Add friend / Accept / Message), including event
+// guests you don't share a group with. Runs in the capture phase so a tap on a picture inside a row
+// that links elsewhere opens the profile instead. Skipped inside pickers, dialogs, and your own chip.
+document.addEventListener("click", e => {
+  const a = e.target.closest && e.target.closest("[data-pf]"); if (!a || !S.user) return;
+  if (a.closest("#appDialog, .inv-hit, label.cbox, .me-chip, .topbar, [data-choose], .tour-card, .mini-guests, .dm-row")) return;
+  const uid = a.dataset.pf; if (!uid || uid === S.user.uid) return;
+  e.preventDefault(); e.stopPropagation(); openProfileDialog(uid);
+}, true);
 
 // ---------- render root ----------
 // Every live listener re-renders by replacing innerHTML, which would drop
@@ -2371,7 +2381,7 @@ function openCustomThemeDialog() {
 // no extra permission check needed beyond "we have their info to show at all".
 function openProfileDialog(uid) {
   if (uid === myUid()) return go("#/profile");
-  const info = S.contacts.get(uid); if (!info) return;
+  const info = S.contacts.get(uid) || { name: nameHint(uid) || "Friend" };
   dialog(`<div style="text-align:center">
     ${avatar(uid, "xxl")}
     <h2 style="margin:12px 0 2px">${esc(info.name || "Friend")}</h2>
@@ -2381,7 +2391,7 @@ function openProfileDialog(uid) {
   ${info.venmo || info.phone ? `<div class="form-card card" style="margin-top:14px">
     ${info.venmo ? `<div class="member-row"><span class="li">💸</span><div style="flex:1;min-width:0"><b>Venmo</b><div class="muted sm mono">${esc(info.venmo)}</div></div></div>` : ""}
     ${info.phone ? `<div class="member-row"><span class="li">📱</span><div style="flex:1;min-width:0"><b>Apple Cash</b><div class="muted sm mono">${esc(info.phone)}</div></div></div>` : ""}
-  </div>` : `<p class="muted sm" style="text-align:center;margin-top:10px">No Venmo or Apple Cash on file yet.</p>`}`,
+  </div>` : S.contacts.has(uid) ? `<p class="muted sm" style="text-align:center;margin-top:10px">No Venmo or Apple Cash on file yet.</p>` : ""}`,
     null, null);
   wireFriendButtons(el("appDialog") || document);
   document.querySelectorAll("#appDialog [data-go]").forEach(b => b.onclick = () => { closeDialog(); go(b.dataset.go); });
@@ -3753,7 +3763,7 @@ async function sendFriendRequest(u) {
   const f = friendshipWith(u);
   if (f && f.status === "pending" && f.requestedBy === u) return acceptFriend(f);
   if (f) return;
-  const me = myUid(), info = S.contacts.get(u) || {};
+  const me = myUid(), info = S.contacts.get(u) || { name: nameHint(u) };
   try {
     await setDoc(doc(db, "friendships", pairOf(u)), { uids: [me, u].sort(), requestedBy: me, status: "pending", createdAt: Date.now(),
       people: { [me]: { name: S.profile.name || "Friend", photo: S.profile.photo || "" }, [u]: { name: info.name || "Friend", photo: info.photo || "" } } });
