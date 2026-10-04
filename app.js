@@ -3830,7 +3830,7 @@ function messagesBody() {
   const quiet = friends.filter(f => !(S.dms.get(f.id) || {}).lastAt).sort((a, b) => personName(otherIn(a)).localeCompare(personName(otherIn(b))));
   const row = (u, mid, right, go, extra = "") => `<div class="member-row ${go ? "dm-row" : ""}" data-find="${esc((personName(u) + " " + extra).toLowerCase())}" ${go ? `data-go="${go}" role="button"` : ""}>${avatar(u, "lg")}<div style="flex:1;min-width:0">${mid}</div>${right}</div>`;
   return `
-  <div class="section-head"><h1 style="margin:0">Messages</h1><button class="btn primary small" id="newMsgBtn">✏️ New</button></div>
+  <div class="section-head msg-head"><h1 style="margin:0">Messages</h1><span class="btnrow" style="gap:8px;margin:0"><button class="btn small" id="addFriendsBtn">＋ Add friends</button><button class="btn primary small" id="newMsgBtn">✏️ New</button></span></div>
   ${friends.length || inc.length || out.length ? `<input type="search" class="inv-search msg-search" id="msgSearch" placeholder="Search friends and messages…" autocomplete="off" enterkeyhint="search">
   <p class="muted sm hidden" id="msgNoHits" style="margin:6px 2px">No friends or messages match that.</p>` : ""}
   ${inc.length ? `<div class="section-head" style="margin-top:18px"><h2>Friend requests</h2></div>
@@ -3841,8 +3841,7 @@ function messagesBody() {
     <div class="card">${quiet.map(f => { const u = otherIn(f); return row(u, `<b>${esc(personName(u))}</b>`, `<button class="btn small" data-go="#/m/${f.id}">Message</button>`); }).join("")}</div>` : ""}
   ${out.length ? `<div class="section-head" style="margin-top:18px"><h2>Waiting on</h2></div>
     <div class="card">${out.map(f => { const u = otherIn(f); return row(u, `<b>${esc(personName(u))}</b><div class="muted sm">Friend request sent</div>`, `<button class="btn ghost small" data-friendcancel="${f.id}">Cancel</button>`); }).join("")}</div>` : ""}
-  ${!friends.length && !inc.length && !out.length ? emptyState("💬", "No friends yet", "Add friends to message them one-on-one, even if you're not in a group together.", "happy") + `<div class="btnrow" style="justify-content:center"><button class="btn primary" id="addFriendsBtn">＋ Add friends</button></div>` : ""}
-  ${friends.length || inc.length || out.length ? `<div class="btnrow" style="margin-top:18px"><button class="btn" id="addFriendsBtn">＋ Add friends</button></div>` : ""}`;
+  ${!friends.length && !inc.length && !out.length ? emptyState("💬", "No friends yet", "Add friends to message them one-on-one, even if you're not in a group together.", "happy") : ""}`;
 }
 // Filter the inbox in place (no re-render), so typing never loses focus; re-applied after live refreshes.
 function filterMessages() {

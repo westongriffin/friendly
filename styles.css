@@ -812,3 +812,4 @@ html{background:var(--bg)}
 [data-pf]{cursor:pointer}
 .msg-search{margin:14px 0 0}
 .nm-results{max-height:46vh}
+.msg-head{flex-wrap:wrap;gap:10px}
