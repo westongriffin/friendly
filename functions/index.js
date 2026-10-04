@@ -1106,6 +1106,11 @@ async function seedDemoData() {
   }
   const act = await db.collection("activity").where("uids", "array-contains-any", demoUids).get();
   for (const d of act.docs) await d.ref.delete().catch(() => {});
+  // Friendships and private conversations visitors made between the demo people.
+  for (const col of ["friendships", "dms"]) {
+    const snap = await db.collection(col).where("uids", "array-contains-any", demoUids).get();
+    for (const d of snap.docs) await db.recursiveDelete(d.ref).catch(() => {});
+  }
 }
 // Cheap brake on the public token endpoint: a few instances, a per-instance
 // per-minute budget, and one token per IP per 10 seconds.
