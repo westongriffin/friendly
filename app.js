@@ -1535,7 +1535,7 @@ function openGroupDialog() {
 // number only, to be added to a pending-invite list and texted a join link).
 // Phone number is the one thing every contact reliably has, and the one thing
 // the join/auto-add mechanisms actually match on.
-function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pendingPhones = new Map(), submitLabel = "Add & send", onSubmit }) {
+function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pendingPhones = new Map(), submitLabel = "Add & send", knownLabel = "On Friendly · added right away", phoneLabel = "Gets a text with the join link", onSubmit }) {
   const me = myUid(); const picked = [];   // { name, phone, e164, uid|null }
   const nativeContacts = plugin("Contacts");
   const webPicker = !nativeContacts && ("contacts" in navigator && "ContactsManager" in window);
@@ -1556,7 +1556,7 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
     if (excludeKeys.size) { const k = await phoneKey(e164); if (excludeKeys.has(k)) return say(`${first(excludeKeys.get(k) || "") || "They"} is already on the list.`); }
     const hit = byPhone(e164); picked.push({ name: name || (hit ? hit[1].name : "") || "", phone, e164, uid: hit ? hit[0] : null }); renderPicked();
   };
-  const renderPicked = () => { const box = el("invChosen"); if (box) box.innerHTML = picked.map((p, i) => `<div class="inv-hit"><div style="flex:1;min-width:0"><b>${esc(p.name || p.e164)}</b><div class="muted sm">${p.uid ? "On Friendly · added right away" : "Gets a text with the join link"}${p.e164 ? " · " + esc(p.e164) : ""}</div></div><button type="button" class="btn ghost small" data-unpick="${i}">✕</button></div>`).join("") || `<p class="muted sm">Nobody picked yet.</p>`; box.querySelectorAll("[data-unpick]").forEach(b => b.onclick = () => { picked.splice(+b.dataset.unpick, 1); renderPicked(); }); };
+  const renderPicked = () => { const box = el("invChosen"); if (box) box.innerHTML = picked.map((p, i) => `<div class="inv-hit"><div style="flex:1;min-width:0"><b>${esc(p.name || p.e164)}</b><div class="muted sm">${p.uid ? knownLabel : phoneLabel}${p.e164 ? " · " + esc(p.e164) : ""}</div></div><button type="button" class="btn ghost small" data-unpick="${i}">✕</button></div>`).join("") || `<p class="muted sm">Nobody picked yet.</p>`; box.querySelectorAll("[data-unpick]").forEach(b => b.onclick = () => { picked.splice(+b.dataset.unpick, 1); renderPicked(); }); };
   dialog(`<h3>${esc(title)}</h3>
     <p class="muted" style="margin-top:-6px">${esc(blurb)}</p>
     ${isDemo() ? `<p class="muted sm">Inviting by phone number is off in the demo, so it never texts a real person -- add Jordan or Casey below instead.</p>` : nativeContacts || webPicker ? `<button type="button" class="btn primary" id="invPick" style="width:100%">📇 Choose from contacts</button>` : `<p class="muted sm">Picking from your address book works in the Friendly iPhone app. Here, type a name and number:</p>`}
@@ -3772,7 +3772,7 @@ function openAddFriendsDialog() {
   pickPeopleDialog({
     title: "Add friends",
     blurb: "Friends can message each other one-on-one, even if you're not in a group together. They'll get a request to accept.",
-    exclude, submitLabel: "Send requests",
+    exclude, submitLabel: "Send requests", knownLabel: "On Friendly · gets a friend request", phoneLabel: "We'll find them, or you can text an invite",
     onSubmit: async (direct, texted) => {
       for (const p of direct) await sendFriendRequest(p.uid);
       closeDialog();
@@ -3842,6 +3842,8 @@ function wireMessages() {
 // stopped when you leave), so typing and scroll position survive every refresh of the page.
 let dmSub = null;   // { fid, unsub, msgs, first }
 function stopDmSub() { if (dmSub) { dmSub.unsub(); dmSub = null; } }
+// Coming back to an open conversation (app reopened, tab refocused) counts as reading it.
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && S.user && S.route.name === "dm" && S.msgsReady) markDmRead(S.route.id); });
 function ensureDmSub(fid) {
   if (dmSub && dmSub.fid === fid) return;
   stopDmSub();
