@@ -791,6 +791,7 @@ function subscribeAll(u) {
 
   // friends (requests both ways + accepted) and private conversations
   add(on("friends", query(collection(db, "friendships"), where("uids", "array-contains", u.uid)), snap => {
+    S.msgsReady = true;   // Messages appear only once the server side (rules) answers; until then nothing half-works
     S.friends = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); rebuildContacts(); render();
   }));
   add(on("dms", query(collection(db, "dms"), where("uids", "array-contains", u.uid)), snap => {
@@ -1157,7 +1158,7 @@ function shell(body) {
   ${isDemo() ? `<div class="demo-bar">${dot("happy", 26)}<span>Demo mode -- this is Riley, a shared public sandbox account. Explore freely; changes are visible to other visitors and reset nightly.</span></div>` : ""}
   <header class="topbar">
     <div class="brand has-dot"><span data-go="#/">Friend<span class="tilt">l</span>y</span><button type="button" class="brand-dot" id="brandDot" aria-label="A tip from Dot"></button></div>
-    <div class="topbar-right"><button class="bell" data-go="#/search" title="Search">🔍</button><button class="bell" data-go="#/messages" title="Messages">💬${msgBadge() ? `<span class="badge">${msgBadge()}</span>` : ""}</button><button class="bell" data-go="#/activity" title="Activity">🔔${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ""}</button>
+    <div class="topbar-right"><button class="bell" data-go="#/search" title="Search">🔍</button>${S.msgsReady ? `<button class="bell" data-go="#/messages" title="Messages">💬${msgBadge() ? `<span class="badge">${msgBadge()}</span>` : ""}</button>` : ""}<button class="bell" data-go="#/activity" title="Activity">🔔${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ""}</button>
     <button class="me-chip" data-go="#/profile">${avatar(S.user.uid)}<span>${esc(first(p.name))}</span></button></div>
   </header>
   <div class="tabs-sentinel"></div>
@@ -1233,8 +1234,8 @@ function wireShell() {
   if (S.route.name === "curate") wireCurate();
   if (S.route.name === "expense") wireExpensePage();
   if (S.route.name === "activity") wireActivity();
-  if (S.route.name === "messages") wireMessages();
-  if (S.route.name === "dm") wireDm(S.route.id);
+  if (S.route.name === "messages" && S.msgsReady) wireMessages();
+  if (S.route.name === "dm" && S.msgsReady) wireDm(S.route.id);
   if (S.route.name === "photos") wirePhotosPage();
   if (S.route.name === "search") wireSearch();
   if (S.route.name !== "activity") S._actOpenSeen = null;
@@ -1270,8 +1271,8 @@ function routeBody(r) {
   if (r.name === "curate") return curateBody();
   if (r.name === "expense") return expenseBody(r.id);
   if (r.name === "activity") return activityBody();
-  if (r.name === "messages") return messagesBody();
-  if (r.name === "dm") return dmBody(r.id);
+  if (r.name === "messages" && S.msgsReady) return messagesBody();
+  if (r.name === "dm" && S.msgsReady) return dmBody(r.id);
   if (r.name === "photos") return photosPageBody();
   if (r.name === "search") return searchBody();
   if (r.name === "profile") return profileBody();
@@ -3798,7 +3799,7 @@ function openAddFriendsDialog() {
 }
 
 function friendActions(u) {
-  if (u === myUid() || isDemo() && !String(u).startsWith("demo-")) return "";
+  if (!S.msgsReady || u === myUid() || isDemo() && !String(u).startsWith("demo-")) return "";
   const f = friendshipWith(u);
   if (f && f.status === "accepted") return `<button type="button" class="btn primary" data-go="#/m/${pairOf(u)}">💬 Message</button>`;
   if (f && f.requestedBy === u) return `<button type="button" class="btn primary" data-friendaccept="${f.id}">✓ Accept friend request</button>`;
