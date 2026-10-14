@@ -15,6 +15,7 @@ import {
 import { firebaseConfig, mapsKey, adminUids, vapidPublicKey, giphyKey } from "./firebase-config.js";
 import { THEMES, themeOf, applyTheme, startParticles, DEFAULT_THEME, CUSTOM_FONTS, CUSTOM_PARTICLES, makeCustomTheme } from "./themes.js";
 
+const APP_V = (() => { try { return new URL(import.meta.url).searchParams.get("v") || "dev"; } catch { return "?"; } })();
 const fb = initializeApp(firebaseConfig);
 const auth = getAuth(fb);
 // Keep a copy of the account's data on the device, so the app opens from it instantly and
@@ -1602,7 +1603,7 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
     const hit = byPhone(e164); picked.push({ name: name || (hit ? hit[1].name : "") || "", phone, e164, uid: hit ? hit[0] : null }); renderPicked();
   };
   const renderPicked = () => { const box = el("invChosen"); if (box) box.innerHTML = picked.map((p, i) => `<div class="inv-hit"><div style="flex:1;min-width:0"><b>${esc(p.name || p.e164)}</b><div class="muted sm">${p.uid ? knownLabel : phoneLabel}${p.e164 ? " · " + esc(p.e164) : ""}</div></div><button type="button" class="btn ghost small" data-unpick="${i}">✕</button></div>`).join("") || `<p class="muted sm">Nobody picked yet.</p>`; box.querySelectorAll("[data-unpick]").forEach(b => b.onclick = () => { picked.splice(+b.dataset.unpick, 1); renderPicked(); }); };
-  dialog(`<h3>${esc(title)}</h3>
+  dialog(`<h3>${esc(title)}${isAdmin() ? ` <span class="muted sm" id="invBuild">· ${typeof APP_V !== "undefined" ? APP_V : "?"}</span>` : ""}</h3>
     <p class="muted" style="margin-top:-6px">${esc(blurb)}</p>
     ${isDemo() ? `<p class="muted sm">Inviting by phone number is off in the demo, so it never texts a real person -- add Jordan or Casey below instead.</p>` : nativeContacts || webPicker ? `<button type="button" class="btn primary" id="invPick" style="width:100%">📇 Choose from contacts</button>` : `<p class="muted sm">Picking from your address book works in the Friendly iPhone app. Here, type a name and number:</p>`}
     ${isDemo() ? "" : `<div class="two" style="margin-top:10px"><label class="field"><span>Name</span><input id="invName" placeholder="Jo Park" maxlength="40" autocomplete="off"></label><label class="field"><span>Phone</span><input id="invPhone" inputmode="tel" placeholder="+1 555 123 4567" autocomplete="off"></label></div>
