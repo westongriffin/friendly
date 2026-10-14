@@ -464,7 +464,16 @@ function parseAmount(v) { const n = Number(String(v).replace(/[$,\s]/g, "")); re
 // Downscale + JPEG-compress any image (File/Blob/URL) to a self-contained data
 // URL that fits comfortably in a Firestore doc. Covers store at ~1000px,
 // photo-wall shots at ~900px. Keeps the app on the free plan (no Storage).
-function loadImg(src) { return new Promise((res, rej) => { const i = new Image(); i.crossOrigin = "anonymous"; i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
+function loadImg(src) { return new Promise((res, rej) => { const i = new Image(); i.crossOrigin = "anonymous"; i.onload = () => res(i); i.onerror = () => rej(new Error("this photo couldn't be opened")); i.src = src; }); }
+// A picked photo opens straight from the file (object URL). Reading it as one base64 string first made a
+// 24–48 MP iPhone photo into 30 MB+ of text, which the iPhone app's web view could choke on.
+async function loadPicked(file) {
+  if (typeof file === "string") return loadImg(file);
+  const url = URL.createObjectURL(file);
+  try { const img = await loadImg(url); if (img.decode) await img.decode().catch(() => {}); return img; }
+  catch (e) { try { return await loadImg(await blobToURL(file)); } catch { throw e; } }   // last resort: the old way
+  finally { setTimeout(() => URL.revokeObjectURL(url), 30000); }
+}
 function blobToURL(b) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(b); }); }
 // Crop dialog: drag to pan, slider to zoom, "cover" fit so there's never empty
 // space around the frame. Defaults to a square/circular profile-photo crop;
@@ -473,7 +482,7 @@ function blobToURL(b) { return new Promise((res, rej) => { const r = new FileRea
 function openCropDialog(file, opts = {}) {
   const { shape = "circle", ratio = 1, outW = 600, outH = 600, title = "Crop your photo", quality = 0.92 } = opts;
   return new Promise(async resolve => {
-    let img; try { img = await loadImg(await blobToURL(file)); } catch { toast("Couldn't read that image."); return resolve(null); }
+    let img; try { img = await loadPicked(file); } catch (e) { toast("Couldn't read that image: " + e.message); return resolve(null); }
     const W = 280, H = Math.round(280 / ratio);
     dialog(`<h3>${esc(title)}</h3>
       <p class="muted" style="margin-top:-6px">Drag to reposition, use the slider to zoom.</p>
@@ -509,7 +518,7 @@ function openCropDialog(file, opts = {}) {
   });
 }
 async function compressImage(src, maxDim = 1400, quality = 0.8, maxBytes = 720000) {
-  const img = await loadImg(typeof src === "string" ? src : await blobToURL(src));
+  const img = await loadPicked(src);
   let w = img.width, h = img.height;
   const scale = Math.min(1, maxDim / Math.max(w, h)); const tw = Math.max(1, Math.round(w * scale)), th = Math.max(1, Math.round(h * scale));
   // Shrink by halves first: one big jump from a 12MP photo to a small canvas
@@ -2600,7 +2609,7 @@ function wireCover() {
     const f = await pickFile(); if (!f) return;
     const cropped = await openCropDialog(f, { shape: "rect", ratio: 16 / 9, outW: 1280, outH: 720, title: "Crop your cover photo" }); if (!cropped) return;
     el("coverDrop").textContent = "Processing…";
-    try { compose.cover = await compressImage(cropped, 1600, 0.82); refreshCoverUI(); } catch { toast("Couldn't read that image."); el("coverDrop").textContent = "📷 Tap to upload a photo"; }
+    try { compose.cover = await compressImage(cropped, 1600, 0.82); refreshCoverUI(); } catch (e) { toast("Couldn't read that image: " + e.message); el("coverDrop").textContent = "📷 Tap to upload a photo"; }
   };
   if (el("aiGo")) el("aiGo").onclick = async () => {
     const p = el("aiPrompt").value.trim(); if (!p) return toast("Describe the vibe first.");
