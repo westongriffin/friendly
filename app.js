@@ -4780,12 +4780,30 @@ function dialog(inner, okLabel, onOk) {
   d.className = "app-dialog"; d.id = "appDialog";
   d.innerHTML = `<form method="dialog" class="dlg-inner">${inner}
     <div class="dlg-actions">${okLabel ? `<button type="button" class="btn" id="dlgCancel">Cancel</button><button type="button" class="btn primary" id="dlgOk">${esc(okLabel)}</button>` : `<button type="button" class="btn primary" id="dlgCancel">Close</button>`}</div></form>`;
+  lockScroll();
   document.body.appendChild(d); d.showModal();
   el("dlgCancel").onclick = closeDialog;
   if (el("dlgOk")) el("dlgOk").onclick = onOk;
-  d.addEventListener("close", () => d.remove());
+  d.addEventListener("close", () => { d.remove(); if (!el("appDialog")) unlockScroll(); });
 }
-function closeDialog() { const d = el("appDialog"); if (d) { d.close(); d.remove(); } }
+function closeDialog() { const d = el("appDialog"); if (d) { d.close(); d.remove(); } unlockScroll(); }
+// While a dialog is open the page underneath is pinned in place (body fixed at the scrolled offset) and put
+// back on close. In the iPhone app, a modal dialog opened over a page scrolled far down stopped receiving
+// taps at all (Add people on the long New event form); with the page pinned at the top it hit-tests right.
+let lockedY = null;
+function lockScroll() {
+  if (lockedY !== null) return;
+  lockedY = window.scrollY || 0;
+  const b = document.body.style;
+  b.position = "fixed"; b.top = -lockedY + "px"; b.left = "0"; b.right = "0"; b.width = "100%";
+}
+function unlockScroll() {
+  if (lockedY === null) return;
+  const y = lockedY; lockedY = null;
+  const b = document.body.style;
+  b.position = ""; b.top = ""; b.left = ""; b.right = ""; b.width = "";
+  window.scrollTo(0, y);
+}
 window.closeDialog = closeDialog;
 
 // register service worker
