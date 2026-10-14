@@ -1640,20 +1640,26 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
     });
   };
   const bookNote = t => { const n = el("invNote"); if (n) { n.textContent = t; n.hidden = !t; } };
+  // Admin-only step log (bugs/, diag: true, no push) while we chase a freeze on real phones.
+  const t0 = Date.now(); const trace = m => { try { if (isAdmin()) addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `[contacts ${Date.now() - t0}ms] ${m}`, route: location.hash, version: APP_V + " / " + (nativeVersion || ""), platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now() }).catch(() => {}); } catch {} };
   async function openBook() {
     const C = nativeContacts;
-    let perm = null; try { perm = await C.checkPermissions(); if (perm && perm.contacts !== "granted" && perm.contacts !== "limited") perm = await C.requestPermissions(); } catch {}
+    trace("openBook; getContacts=" + typeof C.getContacts + " checkPermissions=" + typeof C.checkPermissions);
+    let perm = null; try { perm = await C.checkPermissions(); trace("check -> " + JSON.stringify(perm)); if (perm && perm.contacts !== "granted" && perm.contacts !== "limited") { perm = await C.requestPermissions(); trace("request -> " + JSON.stringify(perm)); } } catch (e) { trace("perm error: " + (e && e.message)); }
     if (!perm || (perm.contacts !== "granted" && perm.contacts !== "limited")) return false;
     el("invPick").textContent = "Loading your contacts…"; el("invPick").disabled = true;
+    trace("getContacts start");
     const r = await C.getContacts({ projection: { name: true, phones: true } });
+    trace("getContacts done: " + ((r && r.contacts) || []).length + " contacts");
     const seen = new Set();
     book = ((r && r.contacts) || []).map(c => { const phone = phoneOfContact(c); return { name: nameOfContact(c).trim(), phone, e164: toE164(phone) }; })
       .filter(c => c.e164 && !seen.has(c.e164) && seen.add(c.e164)).sort((a, b) => (a.name || "~").localeCompare(b.name || "~"));
     el("invPick").outerHTML = `<div class="book"><input type="search" class="inv-search" id="invBookQ" placeholder="Search your contacts…" autocomplete="off"><div class="book-list" id="invBook"></div></div>`;
     el("invBookQ").oninput = e => paintBook(e.target.value);
-    paintBook(""); return true;
+    paintBook(""); trace("list shown: " + book.length); return true;
   }
   if (el("invPick")) el("invPick").onclick = async () => {
+    trace("tap; native=" + !!nativeContacts);
     bookNote("");
     try {
       if (nativeContacts) {
@@ -1665,7 +1671,7 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
         const notes = []; await addPicked(nameOfContact(c), phoneOfContact(c), notes); if (notes.length) bookNote(notes.join(" "));
       }
       else { const rows = await navigator.contacts.select(["name", "tel"], { multiple: true }); const notes = []; for (const r of rows) await addPicked((r.name || [])[0] || "", (r.tel || [])[0] || "", notes); if (notes.length) bookNote(notes.join(" ")); }
-    } catch (e) { const m = String((e && e.message) || e || ""); if (el("invPick")) { el("invPick").disabled = false; el("invPick").textContent = "📇 Choose from contacts"; } bookNote(/cancel/i.test(m) || !m ? "" : "Couldn't read your contacts: " + m); }
+    } catch (e) { const m = String((e && e.message) || e || ""); trace("error: " + m); if (el("invPick")) { el("invPick").disabled = false; el("invPick").textContent = "📇 Choose from contacts"; } bookNote(/cancel/i.test(m) || !m ? "" : "Couldn't read your contacts: " + m); }
   };
   if (el("invSearch")) {
     const renderResults = q => { const ql = q.toLowerCase(); const hits = known.filter(([u, i]) => !picked.some(p => p.uid === u) && (i.name || "").toLowerCase().includes(ql)); el("invResults").innerHTML = hits.slice(0, 8).map(([u, i]) => `<div class="inv-hit" data-choose="${u}">${avatar(u)}<div><b>${esc(i.name || "Friend")}</b></div><span class="add">Add</span></div>`).join("") || `<p class="muted sm">No one else to add.</p>`; };

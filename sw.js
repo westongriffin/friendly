@@ -3,7 +3,7 @@
 // network-first with a short timeout (fresh when online, instant from the copy on a dead or crawling
 // connection); the versioned Firebase SDK and font files never change, so they're cache-first.
 // Bump CACHE on deploy.
-const CACHE = "friendly-fb-v175";
+const CACHE = "friendly-fb-v176";
 const SHELL = [
   "./", "./index.html", "./styles.css", "./app.js", "./blip.js", "./themes.js", "./version.json",
   "./firebase-config.js", "./manifest.webmanifest",
@@ -34,9 +34,20 @@ function fresh(req, ms) {
     return hit || net;   // nothing saved yet: keep waiting on the network after all
   });
 }
+// A versioned file (app.js?v=176) never changes, so that exact URL is served from the cache when we have it,
+// else from the network (saved under both its full URL and its path). Only with no network at all does an
+// older copy stand in. The page and version.json stay network-first, so an update shows up on the next open.
+function versioned(req) {
+  const url = new URL(req.url);
+  return caches.match(url.href).then(hit => hit || fetch(req).then(res => {
+    if (res.ok) { const a = res.clone(), b = res.clone(); caches.open(CACHE).then(c => { c.put(url.href, a); c.put(keyOf(url), b); }); }
+    return res;
+  }).catch(() => caches.match(keyOf(url)).then(old => old || Response.error())));
+}
 self.addEventListener("fetch", e => {
   if (e.request.method !== "GET") return;
   const url = new URL(e.request.url);
+  if (url.origin === location.origin && url.searchParams.has("v")) { e.respondWith(versioned(e.request)); return; }
   if (url.origin === location.origin) { e.respondWith(fresh(e.request, url.pathname.endsWith("version.json") ? 2500 : 4000)); return; }
   if (IMMUTABLE.test(url.href)) {
     e.respondWith(caches.match(url.href).then(hit => hit || fetch(e.request).then(res => { if (res.ok || res.type === "opaque") { const copy = res.clone(); caches.open(CACHE).then(c => c.put(url.href, copy)); } return res; })));
