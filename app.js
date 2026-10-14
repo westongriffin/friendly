@@ -67,7 +67,7 @@ if (/^[A-Za-z0-9_-]{8,64}$/.test(RESET_PARAMS.get("g") || "")) history.replaceSt
 const APP_STORE_URL = "https://apps.apple.com/app/id6810875052";
 const IS_ANDROID = /Android/i.test(navigator.userAgent);
 // Flip PLAY_LIVE to true once the Google Play listing is published; until then Android phones use the website.
-const PLAY_LIVE = false, PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.officialfriendly.app";
+const PLAY_LIVE = true, PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.officialfriendly.app";
 // The public demo (?demo=1 from wes-griffin.com) stays on the web on phones too.
 const BLOCKED_MOBILE_WEB = !NATIVE && !RESET_OOB && !RESET_PARAMS.get("demo") && (/iPhone|iPad|iPod/i.test(navigator.userAgent) || (IS_ANDROID && PLAY_LIVE));
 // iOS slides the page up behind a dialog to make room for the keyboard and leaves it there afterwards.
