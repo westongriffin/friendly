@@ -893,3 +893,12 @@ html{background:var(--bg)}
 @keyframes blip-beret{0%,100%{transform:rotate(0)}50%{transform:rotate(-6deg)}}
 .blip-painter.idle{animation:blip-sway 2.6s ease-in-out infinite;transform-origin:50% 90%}
 .host-plus{margin-top:14px}
+/* Add people › Choose from contacts: the address book as a searchable checklist */
+.book .inv-search{margin:0 0 6px}
+.book-list{max-height:38vh;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:4px}
+.book-row{display:flex;align-items:center;gap:12px;padding:8px 8px;border-radius:10px;cursor:pointer}
+.book-row:active{background:var(--surface2)}
+.book-row input{width:22px;height:22px;flex:none;accent-color:var(--accent)}
+.book-name{display:flex;flex-direction:column;min-width:0}
+.book-name b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.book-on{color:var(--good);font-weight:600}

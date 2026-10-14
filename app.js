@@ -15,11 +15,6 @@ import {
 import { firebaseConfig, mapsKey, adminUids, vapidPublicKey, giphyKey } from "./firebase-config.js";
 import { THEMES, themeOf, applyTheme, startParticles, DEFAULT_THEME, CUSTOM_FONTS, CUSTOM_PARTICLES, makeCustomTheme } from "./themes.js";
 
-// TEMP diagnostics (admins only): record JS errors and a trace to bugs/ with status "diag".
-window.__diag = (text) => { try { if (!(window.__isAdminNow && window.__isAdminNow())) return; window.__diagQ = (window.__diagQ || []).concat(String(text).slice(0, 500)); } catch {} };
-window.addEventListener("error", e => window.__diag("error: " + (e.message || "") + " @" + (e.filename || "").split("/").pop() + ":" + e.lineno));
-window.addEventListener("unhandledrejection", e => window.__diag("rejection: " + ((e.reason && (e.reason.message || e.reason)) || "")));
-["pointerdown", "pointerup", "touchend", "click"].forEach(t => document.addEventListener(t, e => { const d = e.target && e.target.closest && e.target.closest("#appDialog"); if (d) window.__diag(t + " on " + (e.target.id || e.target.tagName) + (e.target.closest("#invPick") ? " [in invPick]" : "") + " defaultPrevented=" + e.defaultPrevented); }, true));
 const APP_V = (() => { try { return new URL(import.meta.url).searchParams.get("v") || "dev"; } catch { return "?"; } })();
 const fb = initializeApp(firebaseConfig);
 const auth = getAuth(fb);
@@ -1608,11 +1603,12 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
     const hit = byPhone(e164); picked.push({ name: name || (hit ? hit[1].name : "") || "", phone, e164, uid: hit ? hit[0] : null }); renderPicked();
   };
   const renderPicked = () => { const box = el("invChosen"); if (box) box.innerHTML = picked.map((p, i) => `<div class="inv-hit"><div style="flex:1;min-width:0"><b>${esc(p.name || p.e164)}</b><div class="muted sm">${p.uid ? knownLabel : phoneLabel}${p.e164 ? " · " + esc(p.e164) : ""}</div></div><button type="button" class="btn ghost small" data-unpick="${i}">✕</button></div>`).join("") || `<p class="muted sm">Nobody picked yet.</p>`; box.querySelectorAll("[data-unpick]").forEach(b => b.onclick = () => { picked.splice(+b.dataset.unpick, 1); renderPicked(); }); };
-  dialog(`<h3>${esc(title)}${isAdmin() ? ` <span class="muted sm" id="invBuild">· ${typeof APP_V !== "undefined" ? APP_V : "?"}</span>` : ""}</h3>
+  dialog(`<h3>${esc(title)}</h3>
     <p class="muted" style="margin-top:-6px">${esc(blurb)}</p>
     ${isDemo() ? `<p class="muted sm">Inviting by phone number is off in the demo, so it never texts a real person -- add Jordan or Casey below instead.</p>` : nativeContacts || webPicker ? `<button type="button" class="btn primary" id="invPick" style="width:100%">📇 Choose from contacts</button>` : `<p class="muted sm">Picking from your address book works in the Friendly iPhone app. Here, type a name and number:</p>`}
     ${isDemo() ? "" : `<div class="two" style="margin-top:10px"><label class="field"><span>Name</span><input id="invName" placeholder="Jo Park" maxlength="40" autocomplete="off"></label><label class="field"><span>Phone</span><input id="invPhone" inputmode="tel" placeholder="+1 555 123 4567" autocomplete="off"></label></div>
     <button type="button" class="btn small" id="invAddManual">＋ Add to the list</button>`}
+    <p class="muted sm" id="invNote" hidden style="margin:8px 0 0;color:var(--bad)"></p>
     <div class="inv-chosen" id="invChosen" style="margin-top:12px"></div>
     ${known.length ? `<details class="adv" style="margin-top:12px"><summary>Friends from your other groups</summary><input class="inv-search" id="invSearch" placeholder="Search by name…" autocomplete="off" style="margin-top:8px"><div class="inv-results" id="invResults"></div></details>` : ""}`,
     submitLabel, async () => {
@@ -1621,39 +1617,55 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
       await onSubmit(direct, texted);
     });
   renderPicked();
-  window.__diag("dialog wired; invPick count=" + document.querySelectorAll("#invPick").length + " native=" + !!nativeContacts);
   if (el("invAddManual")) el("invAddManual").onclick = () => { addPicked(el("invName").value.trim(), el("invPhone").value.trim()); el("invName").value = ""; el("invPhone").value = ""; };
+  // "Choose from contacts": your address book as a searchable checklist right here in the dialog (check as many
+  // as you like). It reads the contacts on the phone only to show this list; nothing is uploaded except the
+  // people you pick. Apple's own picker sheet froze the iPhone app in multi-select mode, so it's only the
+  // fallback now (one at a time) for when contacts access is declined.
+  const nameOfContact = c => c.name ? (c.name.display || [c.name.given, c.name.family].filter(Boolean).join(" ")) : (c.displayName || "");
+  const phoneOfContact = c => { const raw = (c.phones || c.phoneNumbers || []).map(p => (p && p.number) || (typeof p === "string" ? p : "")).filter(Boolean); return raw.find(p => toE164(p)) || raw[0] || ""; };
+  const knownE164 = new Map([...S.contacts.entries()].filter(([u, i]) => u !== me && i.phone).map(([u, i]) => [toE164(i.phone), u]));
+  let book = null;
+  const paintBook = q => {
+    const box = el("invBook"); if (!box || !book) return;
+    const ql = String(q || "").toLowerCase().trim(), digits = ql.replace(/\D/g, "");
+    const hits = book.filter(c => !ql || c.name.toLowerCase().includes(ql) || (digits.length >= 3 && c.e164.includes(digits))).slice(0, 250);
+    box.innerHTML = hits.length ? hits.map(c => { const on = picked.some(p => p.e164 === c.e164), friendly = knownE164.has(c.e164);
+      return `<label class="book-row"><input type="checkbox" data-book="${esc(c.e164)}" ${on ? "checked" : ""}><span class="book-name"><b>${esc(c.name || c.phone)}</b><span class="muted sm">${esc(c.phone)}${friendly ? ` · <span class="book-on">On Friendly</span>` : ""}</span></span></label>`; }).join("")
+      : `<p class="muted sm" style="padding:8px 4px;margin:0">${book.length ? "Nobody by that name." : "No contacts with phone numbers."}</p>`;
+    box.querySelectorAll("[data-book]").forEach(cb => cb.onchange = async () => {
+      const c = book.find(x => x.e164 === cb.dataset.book); if (!c) return;
+      if (cb.checked) { const notes = []; await addPicked(c.name, c.phone, notes); if (notes.length) { cb.checked = false; bookNote(notes[0]); } }
+      else { const i = picked.findIndex(p => p.e164 === c.e164); if (i >= 0) { picked.splice(i, 1); renderPicked(); } }
+    });
+  };
+  const bookNote = t => { const n = el("invNote"); if (n) { n.textContent = t; n.hidden = !t; } };
+  async function openBook() {
+    const C = nativeContacts;
+    let perm = null; try { perm = await C.checkPermissions(); if (perm && perm.contacts !== "granted" && perm.contacts !== "limited") perm = await C.requestPermissions(); } catch {}
+    if (!perm || (perm.contacts !== "granted" && perm.contacts !== "limited")) return false;
+    el("invPick").textContent = "Loading your contacts…"; el("invPick").disabled = true;
+    const r = await C.getContacts({ projection: { name: true, phones: true } });
+    const seen = new Set();
+    book = ((r && r.contacts) || []).map(c => { const phone = phoneOfContact(c); return { name: nameOfContact(c).trim(), phone, e164: toE164(phone) }; })
+      .filter(c => c.e164 && !seen.has(c.e164) && seen.add(c.e164)).sort((a, b) => (a.name || "~").localeCompare(b.name || "~"));
+    el("invPick").outerHTML = `<div class="book"><input type="search" class="inv-search" id="invBookQ" placeholder="Search your contacts…" autocomplete="off"><div class="book-list" id="invBook"></div></div>`;
+    el("invBookQ").oninput = e => paintBook(e.target.value);
+    paintBook(""); return true;
+  }
   if (el("invPick")) el("invPick").onclick = async () => {
-    const diag = t => { window.__diag("contacts: " + t); if (isAdmin() && el("invPick")) el("invPick").textContent = t; };
-    diag("tap · " + (nativeContacts ? ["pickContacts", "pickContact"].map(m => m + "=" + typeof nativeContacts[m]).join(" ") : "no plugin"));
-    console.log("[contacts] tap; plugin:", !!nativeContacts);
+    bookNote("");
     try {
       if (nativeContacts) {
-        const projection = { name: true, emails: true, phones: true };
-        // App builds from 1.0.3 have pickContacts (check several, tap Done); older installs pick one at a time.
-        let list;
-        try {
-          const r = await nativeContacts.pickContacts({ projection });
-          list = (r && r.contacts) || [];
-          if (!list.length) return;   // cancelled, or nobody checked
-        } catch (e) {
-          if (!/not implemented|unimplemented|not a function/i.test(String((e && (e.code || e.message)) || e))) throw e;
-          const r = await nativeContacts.pickContact({ projection });
-          const c = (r && (r.contact || (r.contacts && r.contacts[0]))) || (r && r.name ? r : null);
-          if (!c) return toast("No contact came back from the picker.");
-          list = [c];
-        }
-        const skipped = [];
-        for (const c of list) {
-          const nm = c.name ? (c.name.display || [c.name.given, c.name.family].filter(Boolean).join(" ")) : (c.displayName || "");
-          const rawPhones = (c.phones || c.phoneNumbers || []).map(p => (p && p.number) || (typeof p === "string" ? p : "")).filter(Boolean);
-          const phone = rawPhones.find(p => toE164(p)) || rawPhones[0] || "";
-          await addPicked(nm, phone, skipped);
-        }
-        if (skipped.length) toast(skipped.length === 1 ? skipped[0] : `Skipped ${skipped.length}: ` + skipped.map(m => m.replace(/\.$/, "")).join("; ") + ".", null, null, "thinking");
+        if (nativeContacts.getContacts && await openBook()) return;
+        // No contacts access: Apple's picker, one person at a time.
+        const r = await nativeContacts.pickContact({ projection: { name: true, emails: true, phones: true } });
+        const c = (r && (r.contact || (r.contacts && r.contacts[0]))) || (r && r.name ? r : null);
+        if (!c) return bookNote("No contact came back from the picker.");
+        const notes = []; await addPicked(nameOfContact(c), phoneOfContact(c), notes); if (notes.length) bookNote(notes.join(" "));
       }
-      else { const rows = await navigator.contacts.select(["name", "tel"], { multiple: true }); const skipped = []; for (const r of rows) await addPicked((r.name || [])[0] || "", (r.tel || [])[0] || "", skipped); if (skipped.length) toast(skipped.length === 1 ? skipped[0] : `Skipped ${skipped.length}: ` + skipped.map(m => m.replace(/\.$/, "")).join("; ") + ".", null, null, "thinking"); }
-    } catch (e) { const m = String((e && e.message) || e || ""); console.log("[contacts] failed:", m, e && e.code); if (isAdmin() && el("invPick")) el("invPick").textContent = "ERR " + m.slice(0, 80); toast(/cancel/i.test(m) || !m ? "Contact picking was cancelled." : "Couldn't read that contact: " + m); }
+      else { const rows = await navigator.contacts.select(["name", "tel"], { multiple: true }); const notes = []; for (const r of rows) await addPicked((r.name || [])[0] || "", (r.tel || [])[0] || "", notes); if (notes.length) bookNote(notes.join(" ")); }
+    } catch (e) { const m = String((e && e.message) || e || ""); if (el("invPick")) { el("invPick").disabled = false; el("invPick").textContent = "📇 Choose from contacts"; } bookNote(/cancel/i.test(m) || !m ? "" : "Couldn't read your contacts: " + m); }
   };
   if (el("invSearch")) {
     const renderResults = q => { const ql = q.toLowerCase(); const hits = known.filter(([u, i]) => !picked.some(p => p.uid === u) && (i.name || "").toLowerCase().includes(ql)); el("invResults").innerHTML = hits.slice(0, 8).map(([u, i]) => `<div class="inv-hit" data-choose="${u}">${avatar(u)}<div><b>${esc(i.name || "Friend")}</b></div><span class="add">Add</span></div>`).join("") || `<p class="muted sm">No one else to add.</p>`; };
@@ -4345,8 +4357,6 @@ function dmReportDialog(fid, msg) {
     });
 }
 
-window.__isAdminNow = () => { try { return !!(S.user && isAdmin()); } catch { return false; } };
-setInterval(() => { const q = window.__diagQ; if (!q || !q.length || !S.user) return; window.__diagQ = []; addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: q.join("\n"), route: location.hash, version: APP_V + " / " + (nativeVersion || ""), platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now() }).catch(() => {}); }, 3000);
 // ---------- BUG REPORTS: shake the phone (or Profile › Report a bug) ----------
 // Reports go to bugs/{id} with where you were and what app version; admins get a push and a queue on Profile.
 const shakeNeedsPermission = () => typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function";
