@@ -1312,12 +1312,13 @@ function routeBody(r) {
 // ---------- helpers for events visibility/counts ----------
 const myUid = () => S.user.uid;
 const phoneStatus = (ev, p) => ((ev.phoneRsvps || {})[p] || {}).status || "";
+const phonePlus = (ev, p) => Number(((ev.phoneRsvps || {})[p] || {}).plus) || 0;
 // Texted invitees a host has answered for sit in the guest list with everyone else; the "Not on Friendly yet" card keeps only the unanswered.
 const phonesWith = (ev, k) => (ev.invitedPhones || []).filter(p => phoneStatus(ev, p) === k);
 const unansweredPhones = ev => (ev.invitedPhones || []).filter(p => !phoneStatus(ev, p));
 const phoneName = (ev, p) => (ev.invitedPhoneNames || {})[p] || p;
 function phoneChip(ev, p, manage) {
-  return `<span class="guest-chip texted" title="${esc(p)} · not on Friendly yet"><span style="display:inline-flex;align-items:center;gap:4px"><span class="avatar texted-av">💬</span>${esc(first(phoneName(ev, p)))}</span><i class="texted-tag">by text</i>
+  return `<span class="guest-chip texted" title="${esc(p)} · not on Friendly yet"><span style="display:inline-flex;align-items:center;gap:4px"><span class="avatar texted-av">💬</span>${esc(first(phoneName(ev, p)))}</span>${phonePlus(ev, p) ? `<i class="plusone">+${phonePlus(ev, p)}</i>` : ""}<i class="texted-tag">by text</i>
     ${manage ? `<button class="approve setrsvp" data-setphone="${esc(p)}" title="Mark their RSVP" aria-label="Mark ${esc(first(phoneName(ev, p)))}'s RSVP">✎</button><button class="approve remove" data-uninvitephone="${esc(p)}" title="Remove">✕</button>` : ""}</span>`;
 }
 // +1s: events allow them unless the host turned it off; meetings only when the host turned it on.
@@ -1325,7 +1326,7 @@ const plusAllowed = ev => ev.kind === "meeting" ? ev.allowPlus === true : ev.all
 const plusFields = (pre, on, max) => `<div class="plus-opts"><label class="switch"><input type="checkbox" id="${pre}PlusOn" ${on ? "checked" : ""}><span>Guests can bring a +1</span></label>
   <label class="field ${on ? "" : "hidden"}" id="${pre}PlusMaxWrap" style="margin-top:6px"><span>How many each</span><select id="${pre}PlusMax">${[[1, "1 guest"], [2, "Up to 2"], [3, "Up to 3"], [0, "No limit"]].map(([v, l]) => `<option value="${v}" ${Number(max || 0) === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>`;
 const wirePlusFields = pre => { const c = el(pre + "PlusOn"); if (c) c.onchange = () => { el(pre + "PlusMaxWrap").classList.toggle("hidden", !c.checked); if (pre === "c") compose.plusOn = c.checked; }; const m = el(pre + "PlusMax"); if (m && pre === "c") m.onchange = () => { compose.plusMax = Number(m.value) || 0; }; };
-function goingCount(ev) { return (ev.invitedUids || []).reduce((t, u) => (ev.rsvps || {})[u] === "going" ? t + 1 + (((ev.plusOnes || {})[u]) || 0) : t, 0) + (ev.invitedPhones || []).filter(p => phoneStatus(ev, p) === "going").length; }
+function goingCount(ev) { return (ev.invitedUids || []).reduce((t, u) => (ev.rsvps || {})[u] === "going" ? t + 1 + (((ev.plusOnes || {})[u]) || 0) : t, 0) + (ev.invitedPhones || []).filter(p => phoneStatus(ev, p) === "going").reduce((t, p) => t + 1 + phonePlus(ev, p), 0); }
 function isFull(ev) { return ev.capacity > 0 && goingCount(ev) >= ev.capacity; }
 function canManage(ev) { if (ev._manage != null) return ev._manage; return ev.hostId === myUid() || (ev.cohostUids || []).includes(myUid()); }
 // An event belongs on a group's page when it was planned for that group, or when every member
@@ -2761,7 +2762,7 @@ function eventInner(ev) {
     if (!g[k].length && !ph.length) return "";
     const label = { going: "Going", maybe: "Maybe", waitlist: "Waitlist", pending: "Awaiting approval", no: "Can't make it", none: "Invited" }[k];
     // Heads, not invites: each guest's +1s count toward their group (Going 3 = Sam, Alex, and Alex's +1).
-    const heads = g[k].length + ph.length + g[k].reduce((t, u) => t + (((ev.plusOnes || {})[u]) || 0), 0);
+    const heads = g[k].length + ph.length + g[k].reduce((t, u) => t + (((ev.plusOnes || {})[u]) || 0), 0) + ph.reduce((t, p) => t + phonePlus(ev, p), 0);
     return `<div class="guest-group"><div class="guest-label">${label} · ${heads}</div><div class="guest-chips">${ph.map(p => phoneChip(ev, p, manage)).join("")}${g[k].map(u => `
       <span class="guest-chip"><span data-viewprofile="${u}" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px">${avatar(u)}${esc(first(nameOf(u)))}</span>${(ev.plusOnes || {})[u] ? (() => {
         const n = ev.plusOnes[u]; const raw = (ev.plusNames || {})[u]; const names = (Array.isArray(raw) ? raw : (raw ? [raw] : [])).filter(Boolean);
@@ -3320,7 +3321,20 @@ function openSetRsvpDialog(ev, uid, phone) {
   const cur = phone ? phoneStatus(ev, phone) : ((ev.rsvps || {})[uid] || ""), nm = phone ? (first((ev.invitedPhoneNames || {})[phone] || "") || phone) : first(nameOf(uid));
   const opts = meeting ? [["going", "✓ Accepted"], ["maybe", "Maybe"], ["no", "Declined"], ["", "No answer"]] : [["going", "✓ Going"], ["maybe", "Maybe"], ["no", "Can't go"], ["", "No answer"]];
   dialog(`<h3>Mark ${esc(nm)}'s RSVP</h3><p class="muted" style="margin-top:-6px">${phone ? `Use this when ${esc(nm)} told you in person or by text. When they join Friendly, their answer comes with them and they can change it.` : `Use this when ${esc(nm)} told you in person or by text. They'll get a note that you marked it, and they can change it anytime.`}</p>
-    <div class="stack set-rsvp">${opts.map(([v, l]) => `<button type="button" class="btn ${cur === v ? "primary" : ""}" data-pick="${v}">${l}${cur === v ? " · current" : ""}</button>`).join("")}</div>`, null, null);
+    <div class="stack set-rsvp">${opts.map(([v, l]) => `<button type="button" class="btn ${cur === v ? "primary" : ""}" data-pick="${v}">${l}${cur === v ? " · current" : ""}</button>`).join("")}</div>
+    ${plusAllowed(ev) || (phone ? phonePlus(ev, phone) : ((ev.plusOnes || {})[uid] || 0)) ? `<div class="plus host-plus"><span>${esc(nm)} is bringing</span><button type="button" data-hplus="-1">−</button><b id="hPlusN">+${phone ? phonePlus(ev, phone) : ((ev.plusOnes || {})[uid] || 0)}</b><button type="button" data-hplus="1">＋</button></div>
+    <p class="muted sm" style="margin:4px 0 0">You can add +1s for them${ev.plusMax ? `, past the ${ev.plusMax}-guest limit if you need to` : ""}. Saves right away.</p>` : ""}`, null, null);
+  // Hosts set a guest's +1s directly (texted guests keep theirs with their answer and bring them along when they join).
+  let plusN = phone ? phonePlus(ev, phone) : ((ev.plusOnes || {})[uid] || 0);
+  document.querySelectorAll("[data-hplus]").forEach(b => b.onclick = async () => {
+    const n = Math.max(0, plusN + Number(b.dataset.hplus)); if (n === plusN) return;
+    const prev = plusN; plusN = n; el("hPlusN").textContent = "+" + n;
+    const entry = (ev.phoneRsvps || {})[phone];
+    const up = phone ? (entry ? { [`phoneRsvps.${phone}.plus`]: n } : { [`phoneRsvps.${phone}`]: { status: "going", by: myUid(), at: Date.now(), plus: n } })
+      : { [`plusOnes.${uid}`]: n };
+    try { await updateDoc(doc(db, "events", ev.id), up); if (phone && !entry) toast(`${nm} is marked going with +${n}.`, null, null, "happy"); }
+    catch (e) { plusN = prev; if (el("hPlusN")) el("hPlusN").textContent = "+" + prev; toast(e.message); }
+  });
   document.querySelectorAll(".set-rsvp [data-pick]").forEach(b => b.onclick = async () => {
     const v = b.dataset.pick; closeDialog();
     if (v === (cur || "")) return;
@@ -3452,7 +3466,7 @@ async function joinViaLink(ev, btn) {
     await updateDoc(doc(db, "events", ev.id), patch);
     // A host already marked this number (they told the host by text or in person): bring that answer along.
     const pre = myPhone && (ev.phoneRsvps || {})[myPhone];
-    if (pre && pre.status) { await updateDoc(doc(db, "events", ev.id), { [`rsvps.${myUid()}`]: pre.status }).catch(() => {}); toast(`You're in, marked ${{ going: "going", maybe: "maybe", no: "can't go" }[pre.status] || pre.status}. Change it below anytime.`); }
+    if (pre && pre.status) { await updateDoc(doc(db, "events", ev.id), { [`rsvps.${myUid()}`]: pre.status }).catch(() => {}); if (Number(pre.plus) > 0) await updateDoc(doc(db, "events", ev.id), { [`plusOnes.${myUid()}`]: Number(pre.plus) }).catch(() => {}); toast(`You're in, marked ${{ going: "going", maybe: "maybe", no: "can't go" }[pre.status] || pre.status}. Change it below anytime.`); }
     else toast("You're on the list! RSVP below.");
   }
   catch (e) { if (btn) { btn.disabled = false; btn.textContent = "Join this event"; } toast("Couldn't join: " + e.message); }
@@ -4418,7 +4432,7 @@ function wireActivity() {
 function meetingBody(ev) {
   const me = myUid(); const myR = (ev.rsvps || {})[me]; const invited = (ev.invitedUids || []).includes(me); const manage = canManage(ev);
   const g = statusGroups(ev);
-  const row = (label, uids, phones = []) => uids.length || phones.length ? `<div class="muted sm" style="margin:8px 0 4px;font-weight:600">${label} · ${uids.length + phones.length}</div>${phones.map(p => `<div class="member-row" style="padding:6px 0"><span style="display:flex;align-items:center;gap:8px;flex:1;min-width:0"><span class="avatar sm texted-av">💬</span><span>${esc(phoneName(ev, p))} <span class="muted sm">· by text, not on Friendly yet</span></span></span>${manage ? `<button class="btn ghost small" data-setphone="${esc(p)}" title="Mark their answer">✎ Set</button><button class="btn ghost small" data-uninvitephone="${esc(p)}" title="Remove">✕</button>` : ""}</div>`).join("")}${uids.map(u => `<div class="member-row" style="padding:6px 0"><span data-viewprofile="${u}" style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;cursor:pointer">${avatar(u, "sm")}<span>${esc(nameOf(u))}${u === ev.hostId ? " · organizer" : ""}${(ev.plusOnes || {})[u] ? ` <i class="plusone">+${ev.plusOnes[u]}</i>` : ""}</span></span>${manage && u !== me && u !== ev.hostId ? `<button class="btn ghost small" data-setrsvp="${u}" title="Mark their answer">✎ Set</button><button class="btn ghost small" data-removeguest="${u}" title="Remove from invite list">✕</button>` : ""}</div>`).join("")}` : "";
+  const row = (label, uids, phones = []) => uids.length || phones.length ? `<div class="muted sm" style="margin:8px 0 4px;font-weight:600">${label} · ${uids.length + phones.length + uids.reduce((t, u) => t + (((ev.plusOnes || {})[u]) || 0), 0) + phones.reduce((t, p) => t + phonePlus(ev, p), 0)}</div>${phones.map(p => `<div class="member-row" style="padding:6px 0"><span style="display:flex;align-items:center;gap:8px;flex:1;min-width:0"><span class="avatar sm texted-av">💬</span><span>${esc(phoneName(ev, p))}${phonePlus(ev, p) ? ` <i class="plusone">+${phonePlus(ev, p)}</i>` : ""} <span class="muted sm">· by text, not on Friendly yet</span></span></span>${manage ? `<button class="btn ghost small" data-setphone="${esc(p)}" title="Mark their answer">✎ Set</button><button class="btn ghost small" data-uninvitephone="${esc(p)}" title="Remove">✕</button>` : ""}</div>`).join("")}${uids.map(u => `<div class="member-row" style="padding:6px 0"><span data-viewprofile="${u}" style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;cursor:pointer">${avatar(u, "sm")}<span>${esc(nameOf(u))}${u === ev.hostId ? " · organizer" : ""}${(ev.plusOnes || {})[u] ? ` <i class="plusone">+${ev.plusOnes[u]}</i>` : ""}</span></span>${manage && u !== me && u !== ev.hostId ? `<button class="btn ghost small" data-setrsvp="${u}" title="Mark their answer">✎ Set</button><button class="btn ghost small" data-removeguest="${u}" title="Remove from invite list">✕</button>` : ""}</div>`).join("")}` : "";
   return `
   <button class="link-back" data-go="#/">‹ Back</button>
   <div class="group-hero"><span class="li" style="width:52px;height:52px;font-size:24px">📅</span>

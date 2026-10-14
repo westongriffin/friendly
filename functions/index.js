@@ -1275,6 +1275,7 @@ async function claimPhoneInvites(uid, phone, name) {
       up["phoneKeys." + uid] = phoneKeyOf(phone);
       const pre = (ev.phoneRsvps || {})[phone];
       if (pre && pre.status && !(ev.rsvps || {})[uid]) { up["rsvps." + uid] = pre.status; up["rsvpSetBy." + uid] = { by: pre.by || ev.hostId, at: pre.at || Date.now() }; }
+      if (pre && Number(pre.plus) > 0 && !(ev.plusOnes || {})[uid]) up["plusOnes." + uid] = Number(pre.plus);
     }
     await d.ref.update(up).then(() => n++).catch(err => logger.warn("claimPhoneInvites " + d.id + ": " + err.message));
   }
