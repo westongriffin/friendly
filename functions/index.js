@@ -1249,8 +1249,9 @@ async function dropRedundantPhoneInvites(ref, before, after, memberUids) {
   if (!fresh.length) return;
   const drop = [];
   for (const p of fresh) {
-    const q = await db.collection("users").where("phoneE164", "==", p).limit(1).get();
-    if (!q.empty && memberUids.includes(q.docs[0].id)) drop.push(p);
+    // Every account with this number counts (a stray or duplicate sign-up with the same number can sit first).
+    const q = await db.collection("users").where("phoneE164", "==", p).get();
+    if (q.docs.some(d => memberUids.includes(d.id))) drop.push(p);
   }
   if (!drop.length) return;
   const up = { invitedPhones: FieldValue.arrayRemove(...drop) };
