@@ -80,5 +80,12 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>WKAppBoundDomains</key>
+	<array>
+		<string>officialfriendly.com</string>
+		<string>maps.google.com</string>
+		<string>www.google.com</string>
+		<string>google.com</string>
+	</array>
 </dict>
 </plist>

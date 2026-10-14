@@ -505,6 +505,23 @@ Make the three genuinely different from each other (different neighborhoods or k
   if (!nights.length) throw new Error("nothing found");
   return nights;
 }
+// Browse ideas: single things to do (not a sequenced night), by category or anything typed
+// ("book a massage", "pottery class"). Real places from search, each one turnable into a plan.
+async function buildIdeas(d) {
+  const city = sv(d.city, 60); if (city.length < 2) throw new Error("no city");
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(d.today || "") ? d.today : new Date().toISOString().slice(0, 10);
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(d.from || "") ? d.from : today, to = /^\d{4}-\d{2}-\d{2}$/.test(d.to || "") ? d.to : from;
+  const what = d.free ? `exactly what they asked for: "${sv(d.free, 200)}"` : `the category "${sv(d.category, 40) || "anything fun"}"`;
+  const avoid = Array.isArray(d.avoid) && d.avoid.length ? ` Don't repeat any of these: ${d.avoid.slice(0, 24).map(x => sv(x, 60)).join("; ")}.` : "";
+  const prompt = `You are Dot, the helper in Friendly, an app friends use to plan things together. Find 6 different individual things to do ${nearArea(city, d.miles)} between ${from} and ${to} (today is ${today}, ${sv(d.weekday, 10)}) for ${what}. Use search to find real, current options: specific venues, shows, classes, spots, or services. For something like booking a massage, list real spas or studios and how to book. Each idea is ONE activity, not a night with several stops. Mix well-known and hidden-gem picks.${avoid}
+Reply with ONLY a JSON array of objects with these keys: "emoji" (one emoji), "title" (short and specific, under 60 characters), "place" (venue or business name), "area" (neighborhood or city), "date" (YYYY-MM-DD if it is a dated event in that window, else ""), "time" (24-hour HH:MM if dated, else ""), "price" (like "$25", "Free", or "$$"), "blurb" (one friendly sentence, Oxford comma, no em-dashes), "url" (the official page if you found one, else "").`;
+  const raw = await askGroundedReliably(prompt, 2500, d.onPhase, "ideas");
+  return raw.map(x => ({
+    emoji: clip(x.emoji, 4) || "✨", title: clip(x.title, 70), place: clip(x.place, 80), area: clip(x.area, 60),
+    date: /^\d{4}-\d{2}-\d{2}$/.test(x.date || "") ? x.date : "", time: /^\d{2}:\d{2}$/.test(x.time || "") ? x.time : "",
+    price: clip(x.price, 20), blurb: clip(x.blurb, 200), url: isUrl(x.url) ? String(x.url).slice(0, 300) : ""
+  })).filter(x => x.title).slice(0, 6);
+}
 // Each night gets a small painted cover made from its own scene (the ballgame and the tacos, not a stock palette).
 // Runs after curated/{city} changes; covers are keyed by title+date so unchanged nights keep theirs across rebuilds.
 exports.onCuratedWritten = onDocumentWritten({ document: "curated/{cityKey}", region: "us-central1", timeoutSeconds: 540, memory: "1GiB" }, async e => {
@@ -557,10 +574,11 @@ exports.onPlanRequest = onDocumentCreated({ document: "planRequests/{id}", regio
     const data = d.mode === "expense" ? await draftExpense(d) : d.mode === "edit" ? await draftEdit(d) : d.mode === "ask" ? await answerQuestion(d)
       : d.mode === "curate-city" ? { nights: await buildAndCacheCity(sv(d.city, 60), sv(d.tz, 40), d.today, d.weekday, phase => ref.update({ phase }).catch(() => {}), d.miles) }
       : d.mode === "night" ? { nights: await buildNight({ ...d, onPhase: phase => ref.update({ phase }).catch(() => {}) }) }
+      : d.mode === "ideas" ? { ideas: await buildIdeas({ ...d, onPhase: phase => ref.update({ phase }).catch(() => {}) }) }
       : await draftPlan(d);
     await ref.update({ status: "done", data });
   }
-  catch (err) { logger.error("plan draft failed (" + (d.mode || "event") + "): " + err.message); await ref.update({ status: "error", error: (d.mode === "curate-city" || d.mode === "night") ? err.message.slice(0, 120) : "couldn't work that out" }); }
+  catch (err) { logger.error("plan draft failed (" + (d.mode || "event") + "): " + err.message); await ref.update({ status: "error", error: (d.mode === "curate-city" || d.mode === "night" || d.mode === "ideas") ? err.message.slice(0, 120) : "couldn't work that out" }); }
 });
 
 // ---- Email calendar invites (iMIP over Resend) ----
@@ -846,29 +864,53 @@ exports.requestPasswordReset = onRequest({ region: "us-central1", invoker: "publ
 // Calendar subscription: /cal?u=<uid>&t=<token> is a live .ics feed of every
 // event the user is invited to (subscribe once in iPhone/Google Calendar).
 // The token lives on the user's profile; the app makes it on first use.
+// Calendar feed (?u=&t=) and single-event download (?u=&t=&e=). Times go out in UTC ("Z"), converted
+// from the wall-clock time in the event's own time zone (ev.tz, set when it was made; older events
+// are Central), so every calendar app shows the right moment wherever the guest is.
+const DEFAULT_TZ = "America/Chicago";
+function tzOffsetMs(utcMs, tz) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(new Date(utcMs)).map(x => [x.type, x.value]));
+  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute, +p.second) - utcMs;
+}
+function zonedUtc(date, mins, tz) {
+  const [y, m, d] = date.split("-").map(Number);
+  const wall = Date.UTC(y, m - 1, d, 0, 0) + mins * 60000;
+  let utc = wall - tzOffsetMs(wall, tz); utc = wall - tzOffsetMs(utc, tz);   // second pass settles DST edges
+  return new Date(utc).toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+}
+function icsEvent(id, ev, u, stamp) {
+  const my = (ev.rsvps || {})[u] || "no answer yet";
+  let tz = ev.tz || DEFAULT_TZ; try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); } catch { tz = DEFAULT_TZ; }
+  let dt;
+  if (!ev.time) dt = `DTSTART;VALUE=DATE:${ev.date.replace(/-/g, "")}\r\nDTEND;VALUE=DATE:${nextDay(ev.date).replace(/-/g, "")}`;
+  else { const s0 = minutes(ev.time); let e = ev.endTime ? minutes(ev.endTime) : s0 + 120; if (e <= s0) e = e + 1440 > s0 + 1440 ? s0 + 120 : e + 1440; dt = `DTSTART:${zonedUtc(ev.date, s0, tz)}\r\nDTEND:${zonedUtc(ev.date, e, tz)}`; }
+  return ["BEGIN:VEVENT", "UID:" + id + "@officialfriendly.com", "DTSTAMP:" + stamp, dt,
+    "SUMMARY:" + icsEsc((ev.kind === "meeting" ? "" : (ev.emoji ? ev.emoji + " " : "")) + ev.title),
+    ev.location ? "LOCATION:" + icsEsc(ev.location) : null,
+    "DESCRIPTION:" + icsEsc("Your RSVP: " + my + (ev.hostName ? "\nHost: " + ev.hostName : "") + (stopsText(ev) ? "\n\n" + stopsText(ev).trim() : "") + (ev.notes ? "\n\n" + ev.notes : "") + "\n\n" + SITE + "/#/e/" + id),
+    "URL:" + SITE + "/#/e/" + id, "STATUS:" + (my === "no" ? "CANCELLED" : "CONFIRMED"), "END:VEVENT"];
+}
 exports.cal = onRequest({ region: "us-central1", invoker: "public", memory: "256MiB" }, async (req, res) => {
-  const u = String(req.query.u || ""), t = String(req.query.t || "");
-  if (!/^[A-Za-z0-9]{10,64}$/.test(u) || !/^[a-f0-9]{24,64}$/i.test(t)) { res.status(400).send("bad request"); return; }
+  const u = String(req.query.u || ""), t = String(req.query.t || ""), e = String(req.query.e || "");
+  if (!/^[A-Za-z0-9-]{6,64}$/.test(u) || !/^[a-f0-9]{24,64}$/i.test(t) || (e && !/^[A-Za-z0-9_-]{4,80}$/.test(e))) { res.status(400).send("bad request"); return; }
   const user = await db.doc("users/" + u).get();
-  if (!user.exists || user.get("calToken") !== t) { res.status(403).send("forbidden"); return; }
-  const snap = await db.collection("events").where("invitedUids", "array-contains", u).get();
+  // The full feed needs Calendar sync's token; one event also accepts the add-to-calendar token.
+  const okToken = user.exists && (user.get("calToken") === t || (e && user.get("icsToken") === t));
+  if (!okToken) { res.status(403).send("forbidden"); return; }
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
-  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Friendly//officialfriendly.com//EN", "CALSCALE:GREGORIAN", "METHOD:PUBLISH", "X-WR-CALNAME:Friendly", "X-WR-TIMEZONE:America/Chicago", "REFRESH-INTERVAL;VALUE=DURATION:PT1H", "X-PUBLISHED-TTL:PT1H"];
-  snap.forEach(d => {
-    const ev = d.data(); if (!ev.date || !ev.title) return;
-    const my = (ev.rsvps || {})[u] || "no answer yet";
-    const ymd = ev.date.replace(/-/g, "");
-    let dt;
-    if (!ev.time) dt = `DTSTART;VALUE=DATE:${ymd}\r\nDTEND;VALUE=DATE:${nextDay(ev.date).replace(/-/g, "")}`;
-    else { const s = minutes(ev.time); let e = ev.endTime ? minutes(ev.endTime) : s + 120; if (e <= s) e = s + 120; dt = `DTSTART:${ymd}T${hhmm(s)}\r\nDTEND:${e >= 1440 ? nextDay(ev.date).replace(/-/g, "") : ymd}T${hhmm(e % 1440)}`; }
-    lines.push("BEGIN:VEVENT", "UID:" + d.id + "@officialfriendly.com", "DTSTAMP:" + stamp, dt,
-      "SUMMARY:" + icsEsc((ev.kind === "meeting" ? "" : (ev.emoji ? ev.emoji + " " : "")) + ev.title),
-      ev.location ? "LOCATION:" + icsEsc(ev.location) : null,
-      "DESCRIPTION:" + icsEsc("Your RSVP: " + my + (ev.hostName ? "\nHost: " + ev.hostName : "") + (stopsText(ev) ? "\n\n" + stopsText(ev).trim() : "") + (ev.notes ? "\n\n" + ev.notes : "") + "\n\n" + SITE + "/#/e/" + d.id),
-      "URL:" + SITE + "/#/e/" + d.id, "STATUS:" + (my === "no" ? "CANCELLED" : "CONFIRMED"), "END:VEVENT");
-  });
+  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Friendly//officialfriendly.com//EN", "CALSCALE:GREGORIAN", "METHOD:PUBLISH"];
+  if (e) {
+    const d = await db.doc("events/" + e).get(); const ev = d.exists && d.data();
+    if (!ev || !(ev.invitedUids || []).includes(u) || !ev.date || !ev.title) { res.status(404).send("not found"); return; }
+    lines.push(...icsEvent(d.id, ev, u, stamp));
+  } else {
+    lines.push("X-WR-CALNAME:Friendly", "REFRESH-INTERVAL;VALUE=DURATION:PT1H", "X-PUBLISHED-TTL:PT1H");
+    const snap = await db.collection("events").where("invitedUids", "array-contains", u).get();
+    snap.forEach(d => { const ev = d.data(); if (ev.date && ev.title) lines.push(...icsEvent(d.id, ev, u, stamp)); });
+  }
   lines.push("END:VCALENDAR");
-  res.set("Cache-Control", "private, max-age=300"); res.set("Content-Disposition", 'inline; filename="friendly.ics"');
+  res.set("Cache-Control", "private, max-age=300");
+  res.set("Content-Disposition", e ? 'inline; filename="event.ics"' : 'inline; filename="friendly.ics"');
   res.type("text/calendar; charset=utf-8").send(lines.filter(Boolean).map(icsFold).join("\r\n") + "\r\n");
 });
 
@@ -1193,6 +1235,11 @@ exports.onReport = onDocumentCreated({ document: "reports/{id}", ...PUSH }, asyn
   await notify(ADMIN_UIDS, urgent ? "URGENT child safety report" : "Content reported: " + (r.reason || "review needed"), String(r.snippet || r.kind || "").slice(0, 120), "/#/profile?to=reportsCard");
 });
 
+// Bug report (shake or Profile › Report a bug) -> push the admins.
+exports.onBug = onDocumentCreated({ document: "bugs/{id}", ...PUSH }, async e => {
+  const b = e.data && e.data.data(); if (!b) return;
+  await notify(ADMIN_UIDS, "🐞 Bug report from " + firstName(b.name), String(b.text || "").slice(0, 120), "/#/profile?to=bugsCard", { type: "bug" });
+});
 // A phone invite for someone who is already a member/guest (the host typed or
 // picked a number the picker couldn't recognize) is redundant: drop it so no
 // permanent "Hasn't joined yet" row lingers. Server-side because only the Admin

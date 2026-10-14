@@ -4,11 +4,13 @@
   "webDir": "public",
   "server": {
     "url": "https://officialfriendly.com",
-    "cleartext": false
+    "cleartext": false,
+    "errorPath": "offline.html"
   },
   "ios": {
     "contentInset": "never",
-    "backgroundColor": "#BFE7C6"
+    "backgroundColor": "#BFE7C6",
+    "limitsNavigationsToAppBoundDomains": true
   },
   "plugins": {
     "PushNotifications": {

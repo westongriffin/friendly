@@ -27,6 +27,12 @@ service cloud.firestore {
       allow create: if signedIn() && request.resource.data.by == uid();
     }
 
+    // ---- Bug reports (shake to report / Profile › Report a bug): file your own; admins read and close ----
+    match /bugs/{bugId} {
+      allow create: if signedIn() && request.resource.data.uid == uid() && request.resource.data.status == "open";
+      allow read, update, delete: if isAdmin();
+    }
+
     // ---- Reports: anyone signed in can file one; only admins see them ----
     match /reports/{reportId} {
       allow create: if signedIn() && request.resource.data.reporterId == uid()
@@ -118,8 +124,12 @@ service cloud.firestore {
       allow create: if signedIn() && userId == uid() && !isDemoUser();
       allow update: if signedIn() && userId == uid()
         && (!isDemoUser() || request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['name', 'venmo', 'zelle', 'cashapp', 'payPref', 'city', 'photo', 'birthday', 'curateMiles', 'notifPrefs', 'activitySeenAt', 'hiddenIds', 'blockedUids', 'onboarded', 'peeked', 'badgeOk', 'pinnedDms', 'mutedDms', 'hiddenDms']));
+              .hasOnly(['name', 'venmo', 'zelle', 'cashapp', 'payPref', 'city', 'photo', 'birthday', 'curateMiles', 'notifPrefs', 'activitySeenAt', 'hiddenIds', 'blockedUids', 'onboarded', 'peeked', 'badgeOk', 'pinnedDms', 'mutedDms', 'hiddenDms', 'icsToken']));
       allow delete: if signedIn() && userId == uid() && !isDemoUser();
+      // Event drafts saved on purpose ("Save as draft"); private to their owner.
+      match /drafts/{draftId} {
+        allow read, write: if signedIn() && userId == uid();
+      }
     }
 
     // ---- Groups ----

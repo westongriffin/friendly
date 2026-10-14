@@ -25,6 +25,8 @@
       case "thinking": return `<g class="look">${eye(cx - 12, 2.5, -4.5, 5.4)}${eye(cx + 12, 2.5, -4.5, 5.4)}</g>` + purse;
       case "oops": return eye(cx - 12, 0, 0, 6.6) + eye(cx + 12, 0, 0, 6.6) + `<circle cx="${cx}" cy="${cy + 12}" r="3.2" fill="none" stroke="${INK}" stroke-width="2.6"/><path class="sweat" d="M${cx + 30} ${cy - 14} q4 6 0 10 q-4 -4 0 -10z" fill="#3B82F6"/>`;
       case "party": return eye(cx - 12, 0, -1, 6.6) + eye(cx + 12, 0, -1, 6.6) + grin(cx, cy + 7, 13, 18) + `<path d="M${cx - 7} ${cy + 13} Q${cx} ${cy + 19} ${cx + 7} ${cy + 13}" fill="${CORAL}"/>`;
+      // Painter: eyes on the brush, tip of the tongue out in concentration.
+      case "painter": return eye(cx - 12, 3, 1, 5.4) + eye(cx + 12, 3, 1, 5.4) + stroke(`M${cx - 5} ${cy + 10} Q${cx} ${cy + 13} ${cx + 5} ${cy + 10}`, 2.6) + `<ellipse cx="${cx + 3}" cy="${cy + 13.5}" rx="2.6" ry="2.2" fill="${CORAL}"/>`;
       case "sleepy": return stroke(`M${cx - 16} ${y + 1} h8`, 3.4) + stroke(`M${cx + 8} ${y + 1} h8`, 3.4) + stroke(`M${cx - 5} ${cy + 10} Q${cx} ${cy + 13} ${cx + 5} ${cy + 10}`) + `<g class="zz" font-family="Bricolage Grotesque,system-ui" font-weight="700" fill="${INK}"><text x="${cx + 30}" y="${cy - 26}" font-size="14">z</text><text x="${cx + 40}" y="${cy - 38}" font-size="10">z</text></g>`;
       default: return eye(cx - 12) + eye(cx + 12) + stroke(`M${cx - 7} ${cy + 10} Q${cx} ${cy + 15} ${cx + 7} ${cy + 10}`);
     }
@@ -39,7 +41,11 @@
     const body = `<path transform="translate(${cx} ${cy}) scale(4.2)" d="${SHAPES.pebble}" fill="${SUN}"/>
       <ellipse cx="${cx - 17}" cy="${cy - 21}" rx="9" ry="5" fill="#fff" opacity=".45" transform="rotate(-35 ${cx - 17} ${cy - 21})"/>
       <circle cx="${cx - 23}" cy="${cy + 8}" r="5.2" fill="${CORAL}" opacity="${glow}"/><circle cx="${cx + 23}" cy="${cy + 8}" r="5.2" fill="${CORAL}" opacity="${glow}"/>`;
-    return `<svg viewBox="-4 -8 128 132" width="${size}" height="${size}" class="blip ${still ? "" : "idle"} blip-${mood}" aria-hidden="true">${mood === "party" ? confetti(cx, cy) : ""}<g transform="${mood === "thinking" ? `rotate(-7 ${cx} ${cy + 42})` : ""}"><g class="body">${body}${hand}${face(mood, cx, cy)}</g></g></svg>`;
+    // Painter (the AI is making something): a coral beret, a brush in hand that dabs, and splashes of paint.
+    const beret = mood === "painter" ? `<g class="beret"><ellipse cx="${cx - 4}" cy="${cy - 40}" rx="26" ry="9" fill="${CORAL}" transform="rotate(-12 ${cx - 4} ${cy - 40})"/><circle cx="${cx - 6}" cy="${cy - 50}" r="3.5" fill="${CORAL}"/></g>` : "";
+    const brush = mood === "painter" ? `<g class="brush" style="transform-origin:${cx + 36}px ${cy + 10}px"><path d="M${cx + 36} ${cy + 10} L${cx + 52} ${cy - 18}" stroke="#8B5A2B" stroke-width="5" stroke-linecap="round"/><path d="M${cx + 50} ${cy - 15} L${cx + 56} ${cy - 26}" stroke="#E8DCC8" stroke-width="6" stroke-linecap="round"/><circle cx="${cx + 57}" cy="${cy - 28}" r="3.6" fill="#3B82F6"/></g>
+      <g class="dabs"><circle cx="${cx + 44}" cy="${cy - 40}" r="4" fill="#3B82F6"/><circle cx="${cx + 56}" cy="${cy - 44}" r="3" fill="#25A56A"/><circle cx="${cx + 50}" cy="${cy - 52}" r="3.4" fill="${CORAL}"/></g>` : "";
+    return `<svg viewBox="-4 -8 128 132" width="${size}" height="${size}" class="blip ${still ? "" : "idle"} blip-${mood}" aria-hidden="true">${mood === "party" ? confetti(cx, cy) : ""}<g transform="${mood === "thinking" ? `rotate(-7 ${cx} ${cy + 42})` : ""}"><g class="body">${body}${hand}${face(mood, cx, cy)}${beret}</g>${brush}</g></svg>`;
   }
 
   // The app header's logo, as markup: "Friend" + tilted coral "l" + "y" in one span, the yellow dot beside it,

@@ -677,6 +677,7 @@ function routeFromPath(h) {
   if (p[0] === "x") return { name: "expense", id: p[1] };
   if (p[0] === "activity") return { name: "activity" };
   if (p[0] === "messages") return { name: "messages" };
+  if (p[0] === "drafts") return { name: "drafts" };
   if (p[0] === "m") return { name: "dm", id: p[1] };
   if (p[0] === "photos") return { name: "photos" };
   if (p[0] === "search") return { name: "search" };
@@ -794,6 +795,10 @@ function subscribeAll(u) {
     S.settlements = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); render();
   }));
 
+  // saved event drafts (users/{uid}/drafts), newest first
+  add(on("drafts", query(collection(db, "users", u.uid, "drafts"), orderBy("updatedAt", "desc"), limit(50)), snap => {
+    S.drafts = snap.docs.map(d => ({ id: d.id, ...d.data() })); render();
+  }));
   // friends (requests both ways + accepted) and private conversations
   add(on("friends", query(collection(db, "friendships"), where("uids", "array-contains", u.uid)), snap => {
     S.msgsReady = true;   // Messages appear only once the server side (rules) answers; until then nothing half-works
@@ -890,7 +895,14 @@ function withInputKept(fn) {
   n.focus({ preventScroll: true });
   try { if (snap.s != null) n.setSelectionRange(snap.s, snap.e); } catch {}
 }
-function render() { withInputKept(renderNow); try { syncBadge(); } catch {} }
+function render() { withInputKept(renderNow); restoreKept(); try { syncBadge(); } catch {} }
+// Forms marked data-keep (sign-up details, profile) hold what you typed even when something else
+// redraws the screen, like adding a photo (it saves at once, and the redraw used to empty every field).
+const keptInputs = new Map();
+document.addEventListener("input", e => { const t = e.target; if (t && t.id && t.closest && t.closest("[data-keep]")) keptInputs.set(t.id, t.type === "checkbox" ? t.checked : t.value); }, true);
+document.addEventListener("change", e => { const t = e.target; if (t && t.id && t.closest && t.closest("[data-keep]")) keptInputs.set(t.id, t.type === "checkbox" ? t.checked : t.value); }, true);
+window.addEventListener("hashchange", () => keptInputs.clear());
+function restoreKept() { for (const [id, v] of keptInputs) { const n = document.getElementById(id); if (!n || !n.closest("[data-keep]")) continue; if (n.type === "checkbox") n.checked = !!v; else if (n.value !== v) n.value = v; } }
 // The loading screen: the wordmark flows into Blip (blip.js), then Blip idles until the app is ready.
 let splashStop = null;
 function splashInner(msg) { return window.Blip ? `<svg class="splash-blip"></svg><div class="splash-say" aria-hidden="true"><b>Hi, I'm Dot!</b> Let's get everyone together.</div>` : `<div class="brand splash-brand">Friend<span class="tilt">l</span>y</div>`; }
@@ -963,7 +975,7 @@ function onboardingBody() {
       ${window.Blip ? `<div class="dot-say">${dot("happy", 60)}<div class="say-bubble">Hi ${esc(first(p.name))}, I'm Dot. Let's finish setting up your profile. After that I'll be up in the logo if you ever want a tip.</div></div>` : `<p class="auth-lede">Welcome, ${esc(p.name)}! Let's finish setting up your profile.</p>`}
       <p class="pic-cta">✨ Select a profile pic! ✨</p>
       <button type="button" class="avatar-edit pulse" id="obPhotoBtn" title="Add a photo" style="margin:0 auto 14px;display:block">${avatar(myUid(), "xxl")}<span class="cam">📷</span></button>
-      <form id="onboardForm" class="stack">
+      <form id="onboardForm" class="stack" data-keep>
         <label class="field"><span>Email <span class="muted">for calendar invites</span></span>
           <input id="obEmail" type="email" placeholder="sam@example.com" autocomplete="email"></label>
         <label class="field"><span>Venmo</span>
@@ -992,6 +1004,7 @@ function wireOnboarding() {
     let payPref = (el("obPayPref") || {}).value || ""; if (payPref && !{ venmo, apple, zelle, cashapp }[payPref]) payPref = "";
     try {
       await updateDoc(doc(db, "users", myUid()), { email: email.toLowerCase(), venmo, zelle, cashapp, payPref, phone: apple, phoneE164: toE164(apple) || myPhoneE164(), ...(birthday ? { birthday } : {}), onboarded: true });
+      keptInputs.clear();
     } catch (e) { toast(e.message); }
   };
   el("onboardForm").onsubmit = e => { e.preventDefault(); finish(); };
@@ -1027,9 +1040,9 @@ function renderAuth(root) {
         <label class="field ${authMode === "in" ? "hidden" : ""}" id="nameField"><span>Your name</span>
           <input id="aName" maxlength="40" placeholder="Sam Rivera" autocomplete="name"></label>
         <label class="field"><span id="aPhoneLabel">Phone number</span>
-          <input id="aPhone" name="username" type="tel" required inputmode="tel" placeholder="+1 555 123 4567" autocomplete="username"></label>
+          <input id="aPhone" name="username" type="tel" required inputmode="tel" placeholder="+1 555 123 4567" autocomplete="${authMode === "in" ? "username" : "tel"}"></label>
         <label class="field"><span>Password</span>
-          <input id="aPass" name="password" type="password" required minlength="6" placeholder="At least 6 characters" autocomplete="${authMode === "in" ? "current-password" : "new-password"}"></label>
+          <input id="aPass" name="password" type="password" required minlength="6" placeholder="At least 6 characters" autocomplete="${authMode === "in" ? "current-password" : "new-password"}" ${authMode === "in" ? "" : `passwordrules="minlength: 10; required: lower; required: upper; required: digit; allowed: [-().&@?'#,/&quot;+];"`}></label>
         <button class="btn primary lg" type="submit">${authMode === "in" ? "Sign in" : "Create account"}</button>
         ${authMode === "up" ? `<label class="cbox terms-box" for="aTerms"><input type="checkbox" id="aTerms"><span class="sm">I agree to the <a href="./terms.html" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">Terms of Use</a> and <a href="./privacy.html" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">Privacy Policy</a>. No harassment or objectionable content; accounts that post it are removed.</span></label>` : ""}
       </form>
@@ -1249,6 +1262,7 @@ function wireShell() {
   if (S.route.name === "curate") wireCurate();
   if (S.route.name === "expense") wireExpensePage();
   if (S.route.name === "activity") wireActivity();
+  if (S.route.name === "drafts") wireDrafts();
   if (S.route.name === "messages" && S.msgsReady) wireMessages();
   if (S.route.name === "dm" && S.msgsReady) wireDm(S.route.id);
   if (S.route.name === "photos") wirePhotosPage();
@@ -1286,6 +1300,7 @@ function routeBody(r) {
   if (r.name === "curate") return curateBody();
   if (r.name === "expense") return expenseBody(r.id);
   if (r.name === "activity") return activityBody();
+  if (r.name === "drafts") return draftsBody();
   if (r.name === "messages" && S.msgsReady) return messagesBody();
   if (r.name === "dm" && S.msgsReady) return dmBody(r.id);
   if (r.name === "photos") return photosPageBody();
@@ -1305,6 +1320,11 @@ function phoneChip(ev, p, manage) {
   return `<span class="guest-chip texted" title="${esc(p)} · not on Friendly yet"><span style="display:inline-flex;align-items:center;gap:4px"><span class="avatar texted-av">💬</span>${esc(first(phoneName(ev, p)))}</span><i class="texted-tag">by text</i>
     ${manage ? `<button class="approve setrsvp" data-setphone="${esc(p)}" title="Mark their RSVP" aria-label="Mark ${esc(first(phoneName(ev, p)))}'s RSVP">✎</button><button class="approve remove" data-uninvitephone="${esc(p)}" title="Remove">✕</button>` : ""}</span>`;
 }
+// +1s: events allow them unless the host turned it off; meetings only when the host turned it on.
+const plusAllowed = ev => ev.kind === "meeting" ? ev.allowPlus === true : ev.allowPlus !== false;
+const plusFields = (pre, on, max) => `<div class="plus-opts"><label class="switch"><input type="checkbox" id="${pre}PlusOn" ${on ? "checked" : ""}><span>Guests can bring a +1</span></label>
+  <label class="field ${on ? "" : "hidden"}" id="${pre}PlusMaxWrap" style="margin-top:6px"><span>How many each</span><select id="${pre}PlusMax">${[[1, "1 guest"], [2, "Up to 2"], [3, "Up to 3"], [0, "No limit"]].map(([v, l]) => `<option value="${v}" ${Number(max || 0) === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>`;
+const wirePlusFields = pre => { const c = el(pre + "PlusOn"); if (c) c.onchange = () => { el(pre + "PlusMaxWrap").classList.toggle("hidden", !c.checked); if (pre === "c") compose.plusOn = c.checked; }; const m = el(pre + "PlusMax"); if (m && pre === "c") m.onchange = () => { compose.plusMax = Number(m.value) || 0; }; };
 function goingCount(ev) { return (ev.invitedUids || []).reduce((t, u) => (ev.rsvps || {})[u] === "going" ? t + 1 + (((ev.plusOnes || {})[u]) || 0) : t, 0) + (ev.invitedPhones || []).filter(p => phoneStatus(ev, p) === "going").length; }
 function isFull(ev) { return ev.capacity > 0 && goingCount(ev) >= ev.capacity; }
 function canManage(ev) { if (ev._manage != null) return ev._manage; return ev.hostId === myUid() || (ev.cohostUids || []).includes(myUid()); }
@@ -1376,7 +1396,7 @@ function homeBody() {
   ${todayCards}
   ${needIdeaCard(upcoming)}
   ${birthdayCard()}
-  <div class="section-head"><h2>${homeView === "calendar" ? "Calendar" : "Upcoming"}</h2><span class="btnrow" style="gap:8px"><button class="btn small" id="viewToggle" title="Switch view">${homeView === "calendar" ? "🗂 Cards" : "📅 Calendar"}</button><button class="btn primary small" data-go="#/new">＋ New event</button></span></div>
+  <div class="section-head"><h2>${homeView === "calendar" ? "Calendar" : "Upcoming"}</h2><span class="btnrow" style="gap:8px"><button class="btn small" id="viewToggle" title="Switch view">${homeView === "calendar" ? "🗂 Cards" : "📅 Calendar"}</button>${(S.drafts || []).length ? `<button class="btn small" data-go="#/drafts" title="Saved drafts">📝 Drafts (${S.drafts.length})</button>` : ""}<button class="btn primary small" data-go="#/new">＋ New event</button></span></div>
   ${filterBar}
   ${homeView === "calendar" ? calendarBody([...upcoming, ...past]) : `<div class="ev-grid">${upcoming.length ? upcoming.map(eventCard).join("") : emptyState("🗓️", "No plans yet", "Create your first event: pick a theme and invite the crew.", "sleepy") + (window.Blip && !isDemo() ? `<div style="text-align:center;margin:-6px 0 14px"><button type="button" class="btn tell-dot inline" id="homeTell">${dot("happy", 26)} Or just tell Dot the plan</button></div>` : "")}</div>
   ${past.length ? `<div class="section-head" style="margin-top:26px"><h2>Past</h2></div><div class="ev-grid dim">${past.map(eventCard).join("")}</div>` : ""}`}`;
@@ -1728,7 +1748,7 @@ async function leaveGroup(g) {
 const compose = { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji",
   title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false,
   questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "" };
-function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", repeat: "", stops: [], _restored: false, _fromDraft: false, _plan: null }); }
+function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", repeat: "", stops: [], _restored: false, _fromDraft: false, _plan: null, _draftId: null, plusOn: null, plusMax: 0, bring: [], bringOn: true, carOn: true, drive: false, seats: 3 }); }
 // ---- "Let me plan it": say the plan, Dot drafts it, you review it in the composer. Nothing is created or sent until you tap Create.
 function planContext(text, mode, ctx) {
   const d = new Date(), pad = n => String(n).padStart(2, "0");
@@ -1842,6 +1862,12 @@ function mergeNightStops(n) {
   for (const x of n.stops || []) { const prev = out[out.length - 1]; if (prev && sameVenue(prev.name, x.name)) { if (x.note && !(prev.note || "").includes(x.note)) prev.note = ((prev.note || "") + " " + x.note).trim(); if (!prev.url && x.url) prev.url = x.url; continue; } out.push({ ...x }); }
   return { ...n, stops: out };
 }
+// Nights you built (and ideas you saved) stay on this device for two weeks, newest first.
+const builtStore = () => { try { return JSON.parse(localStorage.getItem("friendlyBuilt") || "[]"); } catch { return []; } };
+function rememberBuilt(nights) {
+  try { const keep = [...nights.map(n => ({ ...n, _at: Date.now() })), ...builtStore()].filter(n => Date.now() - (n._at || 0) < 14 * 864e5 && (!n.date || n.date >= todayStr())).slice(0, 30); localStorage.setItem("friendlyBuilt", JSON.stringify(keep)); } catch {}
+}
+const savedIdeas = () => { try { return JSON.parse(localStorage.getItem("friendlyIdeas") || "[]"); } catch { return []; } };
 function nightCardHtml(n, id) {
   n = mergeNightStops(n);
   S._nightById = S._nightById || {}; S._nightById[id] = n;
@@ -1923,16 +1949,77 @@ function curateBody() {
   const phaseText = { starting: "Warming up", searching: "Searching what's on and pairing places to eat", sorting: "Sorting the good ones" }[S._curPhase] || "Looking around";
   const lead = !d && !S._curError ? `Give me a minute. ${phaseText} within ${myMiles()} miles of ${city}…` : S._curError ? "I couldn't look around just now (" + S._curError + "). Try again in a bit." : shown.length ? (filtered.length ? CURATE_LEADS[curFilter] : "Nothing tagged for that yet, so here's everything I found.") : "Nothing yet. Build your own and I'll go looking.";
   return `<div class="section-head"><h2>${CURATE_LABEL}</h2></div>
-  <div class="cur-where"><button type="button" class="btn small cur-city" id="curCityBtn">📍 <span>${esc(city)}</span></button>${milesSelect("curMiles")}<button type="button" class="btn primary small" id="curBuild">✨ Build me a night</button></div>
+  <div class="cur-where"><button type="button" class="btn small cur-city" id="curCityBtn">📍 <span>${esc(city)}</span></button>${milesSelect("curMiles")}<button type="button" class="btn primary small" id="curBuild">✨ Build me a night</button><button type="button" class="btn small" id="curBrowse">🔎 Browse ideas</button></div>
   <div class="dot-say" style="margin-top:4px">${dot(d ? "happy" : "thinking", 52)}<div class="say-bubble">${esc(lead)}</div></div>
   <div class="chiprow">${CURATE_FILTERS.map(([k, l]) => `<button type="button" class="fchip ${curFilter === k ? "on" : ""}" data-cf="${k}">${l}</button>`).join("")}</div>
   ${!d && !S._curError ? `<div class="card empty compact">${dot("thinking", 64)}<p class="muted" style="margin:6px 0 0">Searching what's on, pairing dinners, checking the times. About half a minute the first time.</p></div>` : ""}
   ${S._curError ? `<div style="text-align:center;margin-bottom:12px"><button type="button" class="btn" id="curRetry">Try again</button></div>` : ""}
   <div id="nights">${shown.map((n, i) => nightCardHtml(n, "c" + i)).join("")}</div>
   ${extra > 0 ? `<div style="text-align:center;margin:4px 0 12px"><button type="button" class="btn" id="curMore">More ideas (${extra})</button></div>` : ""}
+  ${(() => { const b = builtStore().filter(n => !n.date || n.date >= todayStr()); return b.length ? `<details class="adv built-nights" ${S._builtOpen ? "open" : ""} id="builtNights"><summary>🗂️ Your built nights (${b.length})</summary>${b.map((n, i) => nightCardHtml(n, "s" + i)).join("")}<div style="text-align:right"><button type="button" class="btn ghost small" id="clearBuilt">Clear</button></div></details>` : ""; })()}
+  ${(() => { const ideas = savedIdeas(); return ideas.length ? `<details class="adv built-nights" ${S._ideasOpen ? "open" : ""} id="savedIdeas"><summary>⭐ Saved ideas (${ideas.length})</summary>${ideas.map((x, i) => ideaCardHtml(x, "v" + i, true)).join("")}</details>` : ""; })()}
   ${d ? `<p class="muted sm" style="margin:6px 4px 0">Found by Dot with web search and refreshed nightly. Double-check times before you go; things change.</p>` : ""}`;
 }
+// ---- Browse ideas: single activities (not a sequenced night), by category or anything you type ("book a massage").
+const IDEA_CATS = [["🍽️", "Food & drink"], ["🎶", "Live music"], ["🌳", "Outdoors"], ["🎭", "Arts & culture"], ["🎳", "Games & activities"], ["💆", "Wellness & spa"], ["🎨", "Classes & workshops"], ["🏟️", "Sports"], ["🌙", "Nightlife"], ["👨‍👩‍👧", "Family friendly"]];
+function ideaCardHtml(x, id, saved) {
+  S._ideaById = S._ideaById || {}; S._ideaById[id] = x;
+  const when = x.date ? fmtDay({ date: x.date }) + (x.time ? " · " + fmtTime(x.time) : "") : "";
+  return `<div class="card idea-card"><div class="idea-top"><span class="idea-em">${esc(x.emoji || "✨")}</span><div style="flex:1;min-width:0"><b>${esc(x.title)}</b><div class="muted sm">${esc([x.place, x.area].filter(Boolean).join(" · "))}</div>${when || x.price ? `<div class="muted sm">${esc([when, x.price].filter(Boolean).join(" · "))}</div>` : ""}</div></div>
+    ${x.blurb ? `<p class="sm" style="margin:6px 0 8px">${esc(x.blurb)}</p>` : ""}
+    <div class="btnrow" style="gap:6px;flex-wrap:wrap"><button type="button" class="btn primary small" data-iplan="${id}">Make it a plan</button>${saved ? `<button type="button" class="btn ghost small" data-iunsave="${id}">Remove</button>` : `<button type="button" class="btn small" data-isave="${id}">☆ Save</button>`}${x.url ? `<a class="btn small" href="${esc(x.url)}" target="_blank" rel="noopener">Website</a>` : ""}</div></div>`;
+}
+function ideaToPlan(x) {
+  resetCompose(); compose._restored = true;
+  compose.title = x.title.slice(0, 80); compose.emoji = [...(x.emoji || "✨")][0] || "✨";
+  if (x.date) compose.date = x.date; if (x.time) compose.time = x.time;
+  compose.where = [x.place, x.area].filter(Boolean).join(", ").slice(0, 200);
+  compose.notes = [x.blurb, x.price ? "Cost: " + x.price : "", x.url ? "More: " + x.url : ""].filter(Boolean).join("\n").slice(0, 600);
+  compose._plan = { summary: "Here's the plan, set up: " + x.title + ". Pick a day and who's coming.", missing: x.date ? ["guests"] : ["date", "guests"], unmatched: [], bring: [], ideas: [] };
+  openComposer();
+}
+function wireIdeaCards(root = document) {
+  root.querySelectorAll("[data-iplan]").forEach(b => b.onclick = () => { const x = S._ideaById[b.dataset.iplan]; if (x) { closeDialog(); ideaToPlan(x); } });
+  root.querySelectorAll("[data-isave]").forEach(b => b.onclick = () => { const x = S._ideaById[b.dataset.isave]; if (!x) return; try { localStorage.setItem("friendlyIdeas", JSON.stringify([x, ...savedIdeas().filter(y => y.title !== x.title)].slice(0, 40))); } catch {} b.textContent = "★ Saved"; b.disabled = true; toast("Saved to Curate › Saved ideas"); });
+  root.querySelectorAll("[data-iunsave]").forEach(b => b.onclick = () => { const x = S._ideaById[b.dataset.iunsave]; if (!x) return; try { localStorage.setItem("friendlyIdeas", JSON.stringify(savedIdeas().filter(y => y.title !== x.title))); } catch {} S._ideasOpen = true; render(); });
+}
+function openIdeasBrowser() {
+  if (isDemo()) return toast("Browsing ideas is off in the demo.");
+  const city = (S.profile.city || "").trim(); if (!city) { go("#/curate"); return; }
+  let ask = null, list = [], loading = false;
+  dialog(`<div id="ib"></div>`, null, null);
+  const paint = () => {
+    const box = el("ib"); if (!box) return;
+    box.innerHTML = `<div class="dot-say">${dot(loading ? "painter" : "happy", 52)}<div class="say-bubble">${loading ? "Looking around " + esc(city) + "…" : ask ? `${list.length} ideas for ${esc(ask.label)}. Make one a plan, save it, or get more.` : "Browse single things to do, no full night needed. Pick a kind, or tell me exactly what you want."}</div></div>
+      <div class="opts">${IDEA_CATS.map(([ic, l]) => `<button type="button" class="opt ${ask && ask.category === l ? "on" : ""}" data-icat="${esc(l)}"><span>${ic}</span>${esc(l)}</button>`).join("")}</div>
+      <div class="ib-free"><input id="ibFree" class="inv-search" maxlength="120" placeholder="Something specific? Book a massage, pottery class…" value="${esc(ask && ask.free ? ask.free : "")}"><button type="button" class="btn small primary" id="ibGo">Find it</button></div>
+      <div id="ibList">${list.map((x, i) => ideaCardHtml(x, "i" + i)).join("")}</div>
+      ${loading ? `<div class="card empty compact">${dot("painter", 56)}<p class="muted" style="margin:6px 0 0">Searching real places nearby. About half a minute.</p></div>` : ""}
+      ${!loading && list.length ? `<div style="text-align:center;margin:8px 0"><button type="button" class="btn" id="ibMore">＋ More ideas</button></div>` : ""}`;
+    wireIdeaCards(box);
+    box.querySelectorAll("[data-icat]").forEach(b => b.onclick = () => start({ category: b.dataset.icat, label: b.dataset.icat.toLowerCase() }));
+    const go2 = () => { const v = el("ibFree").value.trim(); if (v.length < 3) return toast("Tell me a little more."); start({ free: v, label: "“" + v + "”" }); };
+    el("ibGo").onclick = go2; el("ibFree").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); go2(); } };
+    if (el("ibMore")) el("ibMore").onclick = () => fetchMore();
+  };
+  const fetchMore = async () => {
+    if (loading || !ask) return; loading = true; paint();
+    const t = todayStr();
+    try {
+      const res = await requestViaFirestore("planRequests", { mode: "ideas", city, miles: myMiles(), category: ask.category || "", free: ask.free || "", from: t, to: addDays(t, 14), avoid: list.map(x => x.title), ...nowCtx() }, 290000);
+      const ideas = (res.data && res.data.ideas) || []; if (!ideas.length) throw new Error("nothing found");
+      const n0 = list.length; list = [...list, ...ideas]; loading = false; paint();
+      if (n0) { const c = el("ibList") && el("ibList").children[n0]; if (c) c.scrollIntoView({ block: "start" }); }
+    } catch (e) { loading = false; paint(); toast("Couldn't find ideas: " + e.message); }
+  };
+  const start = a => { ask = a; list = []; fetchMore(); };
+  paint();
+}
 function wireCurate() {
+  if (el("curBrowse")) el("curBrowse").onclick = openIdeasBrowser;
+  if (el("builtNights")) { wireNightCards(el("builtNights")); el("builtNights").ontoggle = e => { S._builtOpen = e.target.open; }; }
+  if (el("savedIdeas")) { wireIdeaCards(el("savedIdeas")); el("savedIdeas").ontoggle = e => { S._ideasOpen = e.target.open; }; }
+  if (el("clearBuilt")) el("clearBuilt").onclick = () => { try { localStorage.removeItem("friendlyBuilt"); } catch {} render(); };
   const firstMiles = () => (el("curMiles0") || {}).value;
   const firstSave = async () => { const city = await pickedCity(el("curCity")); if (city) saveCity(city, firstMiles()); };
   if (el("curCitySave")) el("curCitySave").onclick = firstSave;
@@ -1950,6 +2037,9 @@ function needIdeaCard(upcoming) {
   if (!window.Blip || isDemo()) return "";
   const t = todayStr(), soon = upcoming.some(e => e.date >= t && e.date <= addDays(t, 7)), dow = new Date().getDay(), weekendish = dow >= 4 || dow === 0;
   if (soon && !weekendish) return "";
+  // A nudge, not a fixture: it shows for 30 seconds per visit to the app, then fades away.
+  if (!S._ideaAt) { S._ideaAt = Date.now(); setTimeout(() => { const c = document.querySelector(".idea-row"); if (c) { c.classList.add("fade-away"); setTimeout(render, 500); } else render(); }, 30000); }
+  if (Date.now() - S._ideaAt >= 30000) return "";
   const city = (S.profile.city || "").trim(), nights = (S.curated && S.curated.nights) || [];
   const n = nights.find(x => (x.tags || []).includes("weekend")) || nights[0];
   const text = n ? `${n.title} · ${nightWhen(n)}. Two more where that came from.` : city ? "I'm putting a few ideas together." : "Tell me your city and I'll find a few nights out.";
@@ -1969,7 +2059,7 @@ function openNightBuilder() {
   const draw = () => {
     const box = el("nb"); if (!box) return;
     let q, body;
-    if (!B.vibe) { q = "Let's build one. What's the vibe?"; body = opt("vibe", VIBES) + `<label class="field" style="margin-top:10px"><span>Or just tell me</span><textarea id="nbFree0" rows="2" maxlength="300" placeholder="Something low-key for six, we've done tacos to death, under $40 a head">${esc(B.free)}</textarea></label><button type="button" class="btn small" id="nbFreeGo">Build from that</button>`; }
+    if (!B.vibe) { q = "Let's build one. What's the vibe?"; body = opt("vibe", VIBES) + `<label class="field" style="margin-top:10px"><span>Or just tell me</span><textarea id="nbFree0" rows="2" maxlength="300" placeholder="Something low-key for six, we've done tacos to death, under $40 a head">${esc(B.free)}</textarea></label><button type="button" class="btn small" id="nbFreeGo">Build from that</button><p class="muted sm" style="margin:12px 0 0">Just want to look around? <a id="nbBrowse" style="color:var(--accent);font-weight:600">Browse single ideas</a>, no full night needed.</p>`; }
     else if (!B.who) { q = "Who's coming?"; body = opt("who", WHO); }
     else if (!B.when) { q = "When?"; body = opt("when", WHEN); }
     else if (B.when === "Pick a date" && !B.date) { q = "Which day?"; body = `<label class="field"><span>Date</span><input type="date" id="nbDate" min="${todayStr()}"></label><button type="button" class="btn small" id="nbDateGo">That day</button>`; }
@@ -1977,24 +2067,41 @@ function openNightBuilder() {
     box.innerHTML = `<div class="dot-say">${dot("happy", 52)}<div class="say-bubble">${esc(q)}</div></div>${crumbs() ? `<p class="muted sm" style="margin:-4px 0 8px"><a id="nbBack" style="color:var(--accent);font-weight:600">‹ Back</a> · ${esc(crumbs())}</p>` : ""}${body}`;
     box.querySelectorAll(".opt").forEach(b => b.onclick = () => { B[b.dataset.k] = b.dataset.v; if (b.dataset.k === "when" && b.dataset.v !== "Pick a date") B.date = ""; draw(); });
     if (el("nbBack")) el("nbBack").onclick = () => { if (B.budget) B.budget = ""; else if (B.when === "Pick a date" && B.date) B.date = ""; else if (B.when) B.when = ""; else if (B.who) B.who = ""; else B.vibe = ""; draw(); };
+    if (el("nbBrowse")) el("nbBrowse").onclick = () => { closeDialog(); openIdeasBrowser(); };
     if (el("nbFreeGo")) el("nbFreeGo").onclick = () => { B.free = el("nbFree0").value.trim(); if (B.free.length < 6) return toast("Tell me a little more."); B.freeOnly = true; B.vibe = "Surprise me"; B.who = B.who || "a few friends"; B.when = B.when || "This weekend"; B.budget = B.budget || "flexible"; run(); };
     if (el("nbDateGo")) el("nbDateGo").onclick = () => { const v = el("nbDate").value; if (!v) return toast("Pick a day."); B.date = v; draw(); };
     if (el("nbGo")) el("nbGo").onclick = () => { B.free = el("nbFree").value.trim(); if (!B.budget) B.budget = "flexible"; run(); };
   };
-  const run = async () => {
+  // Every batch stays: "Try another three" adds three more under the ones you already have, and they're all
+  // kept under "Your built nights" on the Curate page so you can come back to them.
+  const built = []; const baseFree = B.free;
+  const paintBuilt = loading => {
     const box = el("nb"); if (!box) return;
+    box.innerHTML = `<div class="dot-say">${dot(loading ? "painter" : "happy", 52)}<div class="say-bubble">${loading ? (built.length ? "Three more coming up, different from these…" : "On it. Searching what's on, pairing a place to eat, checking the times. Give me half a minute.") : `${built.length} ways to do it. Pick one and I'll set it up, or poll the group.`}</div></div>
+      ${built.length ? `<div class="btnrow" style="gap:6px;margin:0 0 10px;flex-wrap:wrap"><button type="button" class="btn primary small" id="nbPollAll">Poll the group with ${built.length <= 3 ? "all three" : "the newest three"}</button></div>` : `<p class="muted sm">${esc(crumbs())}</p>`}
+      ${built.map((n, i) => nightCardHtml(n, "b" + i)).join("")}
+      ${loading && built.length ? `<div class="card empty compact">${dot("painter", 56)}<p class="muted" style="margin:6px 0 0">Finding three more…</p></div>` : ""}
+      ${!loading && built.length ? `<div style="text-align:center;margin:8px 0"><button type="button" class="btn" id="nbAgain">＋ Try another three</button></div>` : ""}`;
+    wireNightCards(box);
+    if (el("nbPollAll")) el("nbPollAll").onclick = () => pollNights(built.slice(-3));
+    if (el("nbAgain")) el("nbAgain").onclick = () => run();
+  };
+  const run = async () => {
+    if (!el("nb")) return;
     const [from, to] = windowFor();
-    box.innerHTML = `<div class="dot-say">${dot("thinking", 52)}<div class="say-bubble">On it. Searching what's on, pairing a place to eat, checking the times. Give me half a minute.</div></div><p class="muted sm">${esc(crumbs())}</p>`;
+    const free = [baseFree, built.length ? "Different from: " + built.map(n => n.title).join("; ") : ""].filter(Boolean).join(". ");
+    paintBuilt(true);
+    if (built.length) { const last = el("nb").querySelector(".card.empty.compact"); if (last) last.scrollIntoView({ block: "center" }); }
     try {
-      const res = await requestViaFirestore("planRequests", { mode: "night", city, miles: myMiles(), vibe: B.vibe, who: B.who, budget: B.budget, free: B.free, from, to, ...nowCtx() }, 290000);
+      const res = await requestViaFirestore("planRequests", { mode: "night", city, miles: myMiles(), vibe: B.vibe, who: B.who, budget: B.budget, free, from, to, ...nowCtx() }, 290000);
       const nights = (res.data && res.data.nights) || []; if (!nights.length) throw new Error("nothing found");
-      box.innerHTML = `<div class="dot-say">${dot("happy", 52)}<div class="say-bubble">Three ways to do it. Pick one and I'll set it up, or send all three to the group as a poll.</div></div>
-        <div class="btnrow" style="gap:6px;margin:0 0 10px;flex-wrap:wrap"><button type="button" class="btn primary small" id="nbPollAll">Poll the group with all three</button><button type="button" class="btn small" id="nbAgain">Try another three</button></div>
-        ${nights.map((n, i) => nightCardHtml(n, "b" + i)).join("")}`;
-      wireNightCards(box);
-      el("nbPollAll").onclick = () => pollNights(nights);
-      el("nbAgain").onclick = () => { B.free = (B.free ? B.free + ". " : "") + "Different from: " + nights.map(n => n.title).join("; "); run(); };
-    } catch (e) { box.innerHTML = `<div class="dot-say">${dot("oops", 52)}<div class="say-bubble">That didn't come together. Try again?</div></div><button type="button" class="btn" id="nbRetry">Try again</button>`; el("nbRetry").onclick = run; toast("Couldn't build that: " + e.message); }
+      const first0 = built.length; built.push(...nights); rememberBuilt(nights); paintBuilt(false);
+      if (first0) { const c = el("nb").querySelectorAll(".card.night")[first0]; if (c) c.scrollIntoView({ block: "start" }); }
+    } catch (e) {
+      if (built.length) { paintBuilt(false); toast("Couldn't find three more: " + e.message); return; }
+      const box = el("nb"); if (!box) return;
+      box.innerHTML = `<div class="dot-say">${dot("oops", 52)}<div class="say-bubble">That didn't come together. Try again?</div></div><button type="button" class="btn" id="nbRetry">Try again</button>`; el("nbRetry").onclick = run; toast("Couldn't build that: " + e.message);
+    }
   };
   draw();
 }
@@ -2321,6 +2428,8 @@ function composeBody() {
 
     <div class="section-head"><h2>${compose.kind === "meeting" ? "Agenda" : "The plan"}</h2><span class="muted sm" id="stopsHead">${stopsHead()}</span></div>
     <div class="form-card card stops-card" id="stopsCard">${stopsEditor()}</div>
+    ${compose.kind === "meeting" ? "" : `<div class="section-head"><h2>Day of</h2><span class="muted sm">what guests coordinate</span></div>
+    <div class="form-card card" id="cDayCard">${composeDayInner()}</div>`}
     <div class="section-head"><h2>Who's invited</h2></div>
     <div class="form-card card">
       ${groups.length ? `<label class="field"><span>Invite a whole group</span>
@@ -2330,6 +2439,7 @@ function composeBody() {
         <div class="inv-chosen" id="cInvChosen">${composePickedInner()}</div>
         <button type="button" class="btn small" id="cAddPeople">＋ Add people</button>
       </div>
+      ${plusFields("c", compose.plusOn == null ? compose.kind !== "meeting" : compose.plusOn, compose.plusMax)}
       <div class="${compose.kind === "meeting" ? "hidden" : ""}">
       <details class="adv"><summary>Co-hosts &amp; approval</summary>
         <span class="field-label" style="margin-top:10px">Co-hosts (can edit &amp; manage)</span>
@@ -2349,6 +2459,8 @@ function composeBody() {
 
     </div>
     <button class="btn primary lg full" id="createEventBtn">${compose.kind === "meeting" ? "Create meeting &amp; send invites" : "Create event &amp; send invites"}</button>
+    <button type="button" class="btn full" id="saveDraftBtn" style="margin-top:10px">📝 ${compose._draftId ? "Update draft" : "Save as draft"}</button>
+    <p class="muted sm" style="text-align:center;margin:6px 0 0">Drafts aren't sent to anyone. Find them under 📝 Drafts on the Events page.</p>
   </div>`;
 }
 function qRow(q) { return `<div class="q-row" data-q="${q.id}"><input value="${esc(q.q)}" data-qedit="${q.id}" maxlength="80" placeholder="Your question"><button class="btn ghost small" data-qdel="${q.id}">✕</button></div>`; }
@@ -2465,6 +2577,8 @@ function wireCompose() {
   el("addQ").onclick = () => { compose.questions.push({ id: newId().slice(0, 6), q: "" }); el("qList").insertAdjacentHTML("beforeend", qRow(compose.questions[compose.questions.length - 1])); wireQ(); };
   wireQ();
   el("createEventBtn").onclick = () => createEvent();
+  if (el("saveDraftBtn")) el("saveDraftBtn").onclick = () => saveDraftToAccount();
+  wirePlusFields("c"); wireComposeDay();
   document.querySelectorAll("[data-kind]").forEach(b => b.onclick = () => { syncCompose(); compose.kind = b.dataset.kind; render(); });
   if (el("discardDraft")) el("discardDraft").onclick = () => { try { localStorage.removeItem("friendlyDraft"); } catch {} resetCompose(); compose._restored = true; render(); };
 }
@@ -2489,7 +2603,7 @@ function wireCover() {
   };
   if (el("aiGo")) el("aiGo").onclick = async () => {
     const p = el("aiPrompt").value.trim(); if (!p) return toast("Describe the vibe first.");
-    el("coverPanel").innerHTML = `<div class="cover-spin">${dot("thinking", 64) || `<div class="spinner"></div>`}Painting your cover…</div>`;
+    el("coverPanel").innerHTML = `<div class="cover-spin">${dot("painter", 84) || `<div class="spinner"></div>`}Dot is painting your cover…</div>`;
     try { compose.cover = await generateCover(p); refreshCoverUI(); toast("Fresh cover, made for you ✨"); }
     catch (e) { toast(e.message || "Generator busy, try again."); compose.coverTab = "ai"; refreshCoverUI(); }
   };
@@ -2523,6 +2637,9 @@ async function createEvent() {
     date, time: stopsOut.length ? ((stopsOut.find(x => x.time) || {}).time || el("cTime").value || "") : (el("cTime").value || ""), endTime: el("cEnd").value || "",
     location: stopsOut.length ? (stopsOut[0].place || el("cWhere").value.trim()) : el("cWhere").value.trim(), stops: stopsOut, food: stopsOut.length ? "" : el("cFood") ? el("cFood").value.trim() : "", notes: el("cNotes").value.trim(),
     capacity: Number(el("cCap").value) || 0, approval: !!el("cApproval").checked,
+    tz: (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { return ""; } })(),
+    allowPlus: !!(el("cPlusOn") && el("cPlusOn").checked), plusMax: el("cPlusMax") ? Number(el("cPlusMax").value) || 0 : 0,
+    ...(compose.kind === "meeting" ? {} : { dayBring: compose.bringOn !== false, dayCarpool: compose.carOn !== false }),
     questions, rsvps: { [myUid()]: "going" }, plusOnes: {}, hypes: {}, answers: {},
     // The event's own unguessable id is the access token behind the "add people" flow
     // (anyone with the link can open + join), so it's always on now.
@@ -2534,8 +2651,12 @@ async function createEvent() {
   try {
     el("createEventBtn").disabled = true; el("createEventBtn").textContent = "Creating…";
     await setDoc(doc(db, "events", id), ev);
-    const planBring = compose._plan ? compose._plan.bring : [];
+    const planBring = [...(compose._plan ? compose._plan.bring : []), ...(compose.kind !== "meeting" && compose.bringOn !== false ? (compose.bring || []) : [])];
+    const myRide = compose.kind !== "meeting" && compose.carOn !== false && compose.drive ? Number(compose.seats || 3) : 0;
+    const fromDraft = compose._draftId;
     composeStop(); resetCompose(); try { localStorage.removeItem("friendlyDraft"); } catch {}
+    if (fromDraft) deleteDoc(doc(db, "users", myUid(), "drafts", fromDraft)).catch(() => {});
+    if (myRide) addDoc(collection(db, "events", id, "comments"), { kind: "ride", seats: myRide, from: "", note: "", authorId: myUid(), authorName: S.profile.name, text: "", createdAt: Date.now() }).catch(() => {});
     for (const b of planBring) { try { await addDoc(collection(db, "events", id, "comments"), { kind: "bring", item: b.item, qty: b.qty, authorId: myUid(), authorName: S.profile.name, text: "", createdAt: Date.now() }); } catch {} }
     go("#/e/" + id);
     const made = (ev.kind === "meeting" ? "Meeting" : "Event") + " created, invites are on their way";
@@ -2625,8 +2746,8 @@ function eventInner(ev) {
       <button class="rb maybe ${myR === "maybe" ? "on" : ""}" data-rsvp="maybe">Maybe</button>
       <button class="rb no ${myR === "no" ? "on" : ""}" data-rsvp="no">Can't go</button>
     </div>
-    ${myR === "going" || myR === "waitlist" ? `<div class="plus"><span>Bringing</span>
-      <button data-plus="-1" ${myPlus <= 0 ? "disabled" : ""}>−</button><b>+${myPlus}</b><button data-plus="1">＋</button></div>
+    ${(myR === "going" || myR === "waitlist") && plusAllowed(ev) ? `<div class="plus"><span>Bringing</span>
+      <button data-plus="-1" ${myPlus <= 0 ? "disabled" : ""}>−</button><b>+${myPlus}</b><button data-plus="1" ${ev.plusMax && myPlus >= ev.plusMax ? "disabled" : ""}>＋</button></div>
     ${myPlus > 0 ? (() => {
       const raw = (ev.plusNames || {})[me]; const names = Array.isArray(raw) ? raw : (raw ? [raw] : []);
       return Array.from({ length: myPlus }, (_, i) => `<input class="plus-name" data-plusidx="${i}" maxlength="40" placeholder="Guest ${i + 1}'s name" value="${esc(names[i] || "")}">`).join("");
@@ -2860,14 +2981,18 @@ function dayInner(ev) {
   const statuses = Object.values(latest).filter(c => c.status !== "clear" && Date.now() - c.createdAt < 36e5 * 18).sort((a, b) => b.createdAt - a.createdAt);
   const mine = latest[me] && latest[me].status !== "clear" ? latest[me].status : "";
   const items = typed("bring"); const rides = typed("ride");
+  // Three clear parts: weather and who's on the way, the bring list, and carpool. The host can turn the
+  // bring list or carpool off (ev.dayBring / ev.dayCarpool === false) when making or editing the event.
   return `<div class="glass-head">Day of <span>${esc(fmtDay(ev))}</span></div>
-    <div id="wx" class="muted-th sm" style="margin:-4px 0 8px">${ev._wx || ""}</div>
+    <div class="day-sec"><div class="glass-sub">☀️ Weather &amp; arrivals</div>
+    <div id="wx" class="muted-th sm" style="margin:0 0 8px">${ev._wx || ""}</div>
     ${statuses.length ? `<div class="chipwrap">${statuses.map(c => `<span class="day-chip">${c.status === "late" ? "⏰" : "🚗"} ${esc(first(c.authorName || nameOf(c.authorId)))} ${c.status === "late" ? "is running late" : "is on the way"} <i>${ago(c.createdAt)}</i></span>`).join("")}</div>` : ""}
     <div class="btnrow" style="margin:4px 0 10px">
       ${soon || mine ? `<button type="button" class="btn-th small ${mine === "omw" ? "accent" : ""}" data-status="omw">🚗 On my way</button><button type="button" class="btn-th small ${mine === "late" ? "accent" : ""}" data-status="late">⏰ Running late</button>` : ""}
       ${S.profile && S.profile.calToken ? "" : `<button type="button" class="btn-th small" id="addCal">📆 Add to calendar</button>`}
     </div>
-    <div class="glass-sub">Bring list <button type="button" class="btn-th ghost small" id="addBring">＋ Add</button></div>
+    </div>
+    ${ev.dayBring === false ? "" : `<div class="day-sec"><div class="glass-sub">🧺 Bring list <button type="button" class="btn-th ghost small" id="addBring">＋ Add</button></div>
     ${items.length ? items.map(c => {
       const st = bringState(c), iAmIn = st.who.includes(me), myQty = st.qtyOf(me);
       const names = st.who.map(u => { const n = claimerName(c, u); return esc(n ? first(n) : "A guest"); });
@@ -2882,9 +3007,10 @@ function dayInner(ev) {
         </span>${c.authorId === me || canManage(ev) ? `<button type="button" class="wall-del" data-delc="${c.id}" title="Remove">✕</button>` : ""}</div>`;
     }).join("") : `<p class="muted-th sm" style="margin:2px 0 8px">Nothing on the list yet. Add what's needed and people claim it.</p>`}
     ${items.length && items.every(c => bringState(c).covered) ? `<div class="dot-note">${dot("happy", 44)}<span>Everything's covered. Thanks, everyone.</span></div>` : ""}
-    <div class="glass-sub">Carpool <button type="button" class="btn-th ghost small" id="addRide">🚗 Offer a ride</button></div>
+    </div>`}
+    ${ev.dayCarpool === false ? "" : `<div class="day-sec"><div class="glass-sub">🚗 Carpool <button type="button" class="btn-th ghost small" id="addRide">Offer a ride</button></div>
     ${rides.length ? rides.map(c => { const riders = ((c.reactions || {}).ride || []); const left = Math.max(0, (c.seats || 0) - riders.length); const inCar = riders.includes(me); const driver = c.authorId === me; return `<div class="day-row"><span style="flex:1;min-width:0"><b>${esc(first(c.authorName || nameOf(c.authorId)))} is driving</b>${c.from ? ` <span class="muted-th sm">from ${esc(c.from)}</span>` : ""}<div class="muted-th sm">${left} seat${left === 1 ? "" : "s"} left${riders.length ? " · " + riders.map(u => esc(first(nameOf(u)))).join(", ") : ""}${c.note ? " · " + esc(c.note) : ""}</div></span>
-        ${driver ? `<button type="button" class="wall-del" data-delc="${c.id}" title="Remove">✕</button>` : `<button type="button" class="btn-th small ${inCar ? "accent" : ""}" data-ride="${c.id}" ${!inCar && !left ? "disabled" : ""}>${inCar ? "✓ Riding" : left ? "Need a seat" : "Full"}</button>`}</div>`; }).join("") : `<p class="muted-th sm" style="margin:2px 0 4px">No rides offered yet.</p>`}`;
+        ${driver ? `<button type="button" class="wall-del" data-delc="${c.id}" title="Remove">✕</button>` : `<button type="button" class="btn-th small ${inCar ? "accent" : ""}" data-ride="${c.id}" ${!inCar && !left ? "disabled" : ""}>${inCar ? "✓ Riding" : left ? "Need a seat" : "Full"}</button>`}</div>`; }).join("") : `<p class="muted-th sm" style="margin:2px 0 4px">No rides offered yet.</p>`}</div>`}`;
 }
 function wireDay(ev) {
   const me = myUid();
@@ -2957,7 +3083,17 @@ function openCalendarDialog(ev) {
   const g = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent((ev.emoji ? ev.emoji + " " : "") + ev.title)}&dates=${dt(ev.date, ev.time)}/${ev.endTime ? dt(ev.date, ev.endTime) : dt(ev.date, String(e.getHours()).padStart(2, "0") + ":" + String(e.getMinutes()).padStart(2, "0"))}&location=${encodeURIComponent(ev.location || "")}&details=${encodeURIComponent("https://officialfriendly.com/#/e/" + ev.id)}`;
   dialog(`<h3>Add to calendar</h3><p class="muted" style="margin-top:-6px">Just this event. To keep every Friendly plan in your calendar automatically, use Calendar sync on your profile.</p>
     <div class="stack"><button type="button" class="btn primary" id="calApple">📆 Apple / iPhone Calendar</button><a class="btn" href="${g}" target="_blank" rel="noopener">Google Calendar</a><button type="button" class="btn" data-go="#/profile">Calendar sync (all events)</button></div>`, null, null);
-  el("calApple").onclick = () => { const blob = new Blob([eventIcs(ev)], { type: "text/calendar;charset=utf-8" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = (ev.title || "event").replace(/[^\w]+/g, "-") + ".ics"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000); toast("Open the downloaded file to add it to your calendar."); };
+  // The calendar file comes from the server, so iPhone (and the app on any phone) hands it to Safari or
+  // the browser, which shows "Add to Calendar". A blob download did nothing inside the iPhone app.
+  el("calApple").onclick = async () => {
+    try {
+      let t = S.profile.icsToken;
+      if (!t) { t = [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, "0")).join(""); await updateDoc(doc(db, "users", myUid()), { icsToken: t }); }
+      const url = `${FN_BASE}/cal?u=${encodeURIComponent(myUid())}&t=${t}&e=${encodeURIComponent(ev.id)}`;
+      closeDialog();
+      if (NATIVE || IOS) location.href = url; else window.open(url, "_blank");
+    } catch (e) { toast("Couldn't open the calendar file: " + e.message); }
+  };
   document.querySelectorAll("#appDialog [data-go]").forEach(b => b.onclick = () => { closeDialog(); go(b.dataset.go); });
 }
 // The morning after, the host's app posts a recap on the wall once.
@@ -3157,7 +3293,9 @@ async function attemptRsvp(ev, status) {
   setRsvp(ev, status);
 }
 async function setPlus(ev, delta) {
-  const me = myUid(); const cur = ((ev.plusOnes || {})[me]) || 0; const n = Math.max(0, cur + delta);
+  const me = myUid(); const cur = ((ev.plusOnes || {})[me]) || 0; let n = Math.max(0, cur + delta);
+  if (delta > 0 && !plusAllowed(ev)) return;
+  if (ev.plusMax && n > ev.plusMax) { n = ev.plusMax; toast(`The host allows up to ${ev.plusMax} guest${ev.plusMax === 1 ? "" : "s"} each.`); if (n === cur) return; }
   // Two separate writes: firestore.rules' onlyOwn() only allows a non-host guest
   // to touch ONE top-level field per update, so plusOnes and plusNames can't be
   // combined into a single updateDoc call without getting rejected for guests.
@@ -3348,13 +3486,15 @@ function editEvent(ev) {
     ${ev.kind === "meeting" ? "" : `<label class="field estops-hide ${many ? "hidden" : ""}"><span>Food &amp; drinks</span><input id="eFood" maxlength="120" value="${esc(ev.food || "")}" placeholder="Tacos and margs · BYOB"></label>`}
     ${repeatFields("e", ev)}
     <label class="field"><span>Details</span><textarea id="eNotes">${esc(ev.notes || "")}</textarea></label>
+    ${plusFields("e", plusAllowed(ev), ev.plusMax)}
+    ${ev.kind === "meeting" ? "" : `<label class="switch" style="margin-top:8px"><input type="checkbox" id="eBringOn" ${ev.dayBring === false ? "" : "checked"}><span>🧺 Bring list on Day of</span></label><label class="switch"><input type="checkbox" id="eCarOn" ${ev.dayCarpool === false ? "" : "checked"}><span>🚗 Carpool on Day of</span></label>`}
     <span class="field-label" style="margin-top:10px">Co-hosts (can edit &amp; manage)</span><div class="check-grid">${contactChecks("ecoh", new Set(ev.cohostUids || []))}</div>`,
     "Save", async () => {
       const cohostUids = [...document.querySelectorAll("input[name=ecoh]:checked")].map(i => i.value).filter(u => u !== ev.hostId);
-      try { await updateDoc(doc(db, "events", ev.id), { cohostUids, ...(cohostUids.length ? { invitedUids: arrayUnion(...cohostUids) } : {}), title: el("eTitle").value.trim(), date: el("eDate").value, ...(() => { const st = sortStops(cleanStops(E.stops)); return st.length >= 2 ? { stops: st, time: (st.find(x => x.time) || {}).time || el("eTime").value, location: st[0].place || el("eWhere").value.trim(), food: "" } : { stops: [], time: el("eTime").value, location: el("eWhere").value.trim() }; })(), ...(el("eFood") && cleanStops(E.stops).length < 2 ? { food: el("eFood").value.trim() } : {}), notes: el("eNotes").value.trim(), ...readRepeat("e") }); closeDialog(); toast("Saved"); } catch (e) { toast(e.message); }
+      try { await updateDoc(doc(db, "events", ev.id), { cohostUids, ...(cohostUids.length ? { invitedUids: arrayUnion(...cohostUids) } : {}), title: el("eTitle").value.trim(), date: el("eDate").value, ...(() => { const st = sortStops(cleanStops(E.stops)); return st.length >= 2 ? { stops: st, time: (st.find(x => x.time) || {}).time || el("eTime").value, location: st[0].place || el("eWhere").value.trim(), food: "" } : { stops: [], time: el("eTime").value, location: el("eWhere").value.trim() }; })(), ...(el("eFood") && cleanStops(E.stops).length < 2 ? { food: el("eFood").value.trim() } : {}), notes: el("eNotes").value.trim(), allowPlus: el("ePlusOn").checked, plusMax: Number(el("ePlusMax").value) || 0, ...(el("eBringOn") ? { dayBring: el("eBringOn").checked, dayCarpool: el("eCarOn").checked } : {}), ...readRepeat("e") }); closeDialog(); toast("Saved"); } catch (e) { toast(e.message); }
     });
   attachPlaces(el("eWhere"));
-  stopCtx = ectx; wireStops(); wireRepeat("e");
+  stopCtx = ectx; wireStops(); wireRepeat("e"); wirePlusFields("e");
 }
 
 // ---------- MONEY ----------
@@ -3618,7 +3758,7 @@ function profileBody() {
   return `
   <button class="link-back" data-go="#/">‹ Back</button>
   <div class="profile-hero"><button type="button" class="avatar-edit" id="photoBtn" title="Change photo">${avatar(myUid(), "xxl")}<span class="cam">📷</span></button><div><h1>${esc(p.name)}</h1><div class="muted mono">${esc(p.email || "")}</div></div></div>
-  <div class="form-card card">
+  <div class="form-card card" data-keep>
     <label class="field"><span>Name</span><input id="pName" value="${esc(p.name)}" maxlength="40"></label>
     <label class="field"><span>Email <span class="muted">(calendar invites, password reset)</span></span><input id="pEmail" type="email" value="${esc(p.email || "")}" placeholder="you@example.com" autocomplete="email"></label>
     <div class="two"><label class="field"><span>Venmo</span><input id="pVenmo" value="${esc(p.venmo || "")}" placeholder="@sam-rivera"></label>
@@ -3644,13 +3784,16 @@ function profileBody() {
     <p class="muted sm" style="margin:8px 0 0">Google Calendar: Other calendars → ＋ → From URL → paste the link. Calendars refresh on their own schedule (usually within a few hours).</p></div>
   <div class="section-head" style="margin-top:22px"><h2>Account</h2></div>
   <button class="btn tour-btn" id="takeTour">${dot("happy", 26)}<span>Take the tour with Dot</span></button>
+  <div class="btnrow" style="gap:8px;margin:0 0 12px"><button class="btn" id="bugBtn" style="flex:1">🐞 Report a bug</button>${shakeNeedsPermission() && !shakeOn() ? `<button class="btn" id="shakeOn" style="flex:1">📳 Turn on shake to report</button>` : ""}</div>
   <button class="btn danger-ghost" id="signOut" style="width:100%;justify-content:center;font-weight:700;border:1.5px solid var(--bad)">Sign out</button>
   <div class="section-head" style="margin-top:22px"><h2>Blocked people</h2></div>
   <div class="card">${(p.blockedUids || []).length ? p.blockedUids.map(u => `<div class="member-row">${avatar(u, "lg")}<div style="flex:1;min-width:0"><b>${esc(nameOf(u))}</b><div class="muted sm">You don't see anything they post.</div></div><button class="btn small" data-unblock="${u}">Unblock</button></div>`).join("") : `<p class="muted sm" style="padding:14px 16px;margin:0">Nobody blocked. Use ⋯ on a message or photo to report it or block the person.</p>`}</div>
   <div class="section-head" style="margin-top:22px"><h2>Delete account</h2></div>
   <div class="card" style="padding:14px 16px"><p class="muted sm" style="margin:0 0 10px">Deleting removes your profile and sign-in permanently. Groups you own pass to another member.</p><button class="btn danger-ghost" id="deleteAccount">Delete my account</button></div>
   ${isAdmin() ? `<div class="section-head" style="margin-top:28px"><h2>Reports <span class="muted sm">moderation</span></h2></div>
-  <div class="card" id="reportsCard"><p class="muted" style="padding:14px 16px;margin:0">Loading…</p></div>` : ""}`;
+  <div class="card" id="reportsCard"><p class="muted" style="padding:14px 16px;margin:0">Loading…</p></div>
+  <div class="section-head" style="margin-top:22px"><h2>Bug reports</h2></div>
+  <div class="card" id="bugsCard"><p class="muted" style="padding:14px 16px;margin:0">Loading…</p></div>` : ""}`;
 }
 // Moderation queue (admins only): remove the reported content or dismiss.
 function reportsInner(rows) {
@@ -3718,7 +3861,9 @@ function wireProfile() {
   };
   if (el("calSubscribe")) el("calSubscribe").onclick = async () => { try { const u = await calUrl(); location.href = u.replace(/^https:/, "webcal:"); } catch (e) { toast(e.message); } };
   if (el("calCopy")) el("calCopy").onclick = async () => { try { const u = await calUrl(); await navigator.clipboard.writeText(u); toast("Link copied. Google Calendar: Other calendars → From URL"); } catch (e) { toast(e.message); } };
-  wireReports();
+  wireReports(); wireBugs();
+  if (el("bugBtn")) el("bugBtn").onclick = () => openBugDialog();
+  if (el("shakeOn")) el("shakeOn").onclick = async () => { if (await enableShake()) { toast("Shake your phone anytime to report a bug", null, null, "happy"); render(); } else toast("Motion access wasn't allowed. You can still use Report a bug."); };
   // App Store requires in-app account deletion (guideline 5.1.1). Re-auth first:
   // Firebase refuses to delete a user without a recent sign-in.
   document.querySelectorAll("[data-unblock]").forEach(b => b.onclick = async () => { try { await updateDoc(doc(db, "users", myUid()), { blockedUids: arrayRemove(b.dataset.unblock) }); toast("Unblocked"); } catch (e) { toast(e.message); } });
@@ -4167,6 +4312,54 @@ function dmReportDialog(fid, msg) {
     });
 }
 
+// ---------- BUG REPORTS: shake the phone (or Profile › Report a bug) ----------
+// Reports go to bugs/{id} with where you were and what app version; admins get a push and a queue on Profile.
+const shakeNeedsPermission = () => typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function";
+const shakeOn = () => { try { return localStorage.getItem("friendlyShake") === "1"; } catch { return false; } };
+let shakeHits = [], shakeQuiet = 0, shakeWired = false;
+function wireShake() {
+  if (shakeWired || typeof window.DeviceMotionEvent === "undefined") return; shakeWired = true;
+  window.addEventListener("devicemotion", e => {
+    const a = e.accelerationIncludingGravity || e.acceleration; if (!a) return;
+    const g = Math.sqrt((a.x || 0) ** 2 + (a.y || 0) ** 2 + (a.z || 0) ** 2), now = Date.now();
+    if (g < 24) return;                                   // a firm shake, not a bump or a walk
+    shakeHits = shakeHits.filter(t => now - t < 1200); shakeHits.push(now);
+    if (shakeHits.length >= 3 && now > shakeQuiet && S.user && !document.querySelector("#appDialog[open]")) { shakeQuiet = now + 8000; shakeHits = []; openBugDialog(true); }
+  });
+}
+async function enableShake() {
+  try { if (shakeNeedsPermission() && (await DeviceMotionEvent.requestPermission()) !== "granted") return false; } catch { return false; }
+  try { localStorage.setItem("friendlyShake", "1"); } catch {} wireShake(); return true;
+}
+// Phones that don't ask for motion permission (Android, most browsers) get shake-to-report right away.
+if (!shakeNeedsPermission() || shakeOn()) wireShake();
+function openBugDialog(fromShake) {
+  if (!S.user) return;
+  let shot = null;
+  dialog(`<div class="dot-say">${dot("oops", 52)}<div class="say-bubble">${fromShake ? "Whoa, a shake! " : ""}Something not working? Tell me what happened and I'll pass it straight to the Friendly team.</div></div>
+    <label class="field"><span>What happened?</span><textarea id="bugText" rows="4" maxlength="2000" placeholder="I tapped Add to calendar and nothing happened…"></textarea></label>
+    <button type="button" class="btn small" id="bugShot">📷 Add a screenshot</button><span class="muted sm" id="bugShotNote" style="margin-left:8px"></span>
+    <p class="muted sm" style="margin:10px 0 0">We'll include the screen you were on and your app version.</p>`, "Send", async () => {
+      const text = el("bugText").value.trim(); if (text.length < 4) return toast("Tell us a little about what happened.");
+      try {
+        await addDoc(collection(db, "bugs"), { uid: myUid(), name: S.profile.name || "", text, ...(shot ? { photo: shot } : {}), route: location.hash || "#/", version: nativeVersion || "", platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", ua: navigator.userAgent.slice(0, 200), status: "open", createdAt: Date.now() });
+        closeDialog(); toast("Thanks! The team has it.", null, null, "happy");
+      } catch (e) { toast(e.message); }
+    });
+  el("bugShot").onclick = async () => { const f = await pickFile(); if (!f) return; try { shot = await compressImage(f, 1400, 0.75); el("bugShotNote").textContent = "✓ Screenshot attached"; } catch (e) { toast(e.message); } };
+  setTimeout(() => el("bugText") && el("bugText").focus(), 50);
+}
+function wireBugs() {
+  if (!el("bugsCard")) return;
+  S.evSubs.push(onSnapshot(query(collection(db, "bugs"), where("status", "==", "open")), snap => {
+    const rows = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.createdAt - a.createdAt);
+    const c = el("bugsCard"); if (!c) return;
+    c.innerHTML = rows.length ? rows.map(r => `<div class="member-row" style="align-items:flex-start;flex-wrap:wrap"><div style="flex:1;min-width:0"><b>${esc(r.name || "Someone")}</b> <span class="muted sm">· ${esc(r.platform || "")} ${esc(r.version || "")} · ${ago(r.createdAt)}</span><div class="sm" style="margin-top:4px;white-space:pre-wrap;overflow-wrap:anywhere">${esc(r.text)}</div><div class="muted sm mono">${esc(r.route || "")}</div>${r.photo ? `<img src="${esc(r.photo)}" alt="" style="max-width:160px;border-radius:8px;margin-top:6px;cursor:pointer" data-bugimg>` : ""}</div><div class="btnrow" style="width:100%;margin-top:6px"><button class="btn small" data-bugdone="${r.id}">Mark fixed</button></div></div>`).join("") : `<p class="muted" style="padding:14px 16px;margin:0">No open bug reports. 🎉</p>`;
+    c.querySelectorAll("[data-bugimg]").forEach(i => i.onclick = () => lightbox(i.src));
+    c.querySelectorAll("[data-bugdone]").forEach(b => b.onclick = () => updateDoc(doc(db, "bugs", b.dataset.bugdone), { status: "fixed", handledAt: Date.now() }).catch(e => toast(e.message)));
+  }, err => console.warn("bugs:", err.message)));
+}
+
 // ---------- APP ICON BADGE ----------
 // The red number on the app icon = the bell's unread count. Pushes set it from the server;
 // whenever the app is open it re-syncs, so reading something clears it. Only app builds
@@ -4225,7 +4418,7 @@ function wireActivity() {
 function meetingBody(ev) {
   const me = myUid(); const myR = (ev.rsvps || {})[me]; const invited = (ev.invitedUids || []).includes(me); const manage = canManage(ev);
   const g = statusGroups(ev);
-  const row = (label, uids, phones = []) => uids.length || phones.length ? `<div class="muted sm" style="margin:8px 0 4px;font-weight:600">${label} · ${uids.length + phones.length}</div>${phones.map(p => `<div class="member-row" style="padding:6px 0"><span style="display:flex;align-items:center;gap:8px;flex:1;min-width:0"><span class="avatar sm texted-av">💬</span><span>${esc(phoneName(ev, p))} <span class="muted sm">· by text, not on Friendly yet</span></span></span>${manage ? `<button class="btn ghost small" data-setphone="${esc(p)}" title="Mark their answer">✎ Set</button><button class="btn ghost small" data-uninvitephone="${esc(p)}" title="Remove">✕</button>` : ""}</div>`).join("")}${uids.map(u => `<div class="member-row" style="padding:6px 0"><span data-viewprofile="${u}" style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;cursor:pointer">${avatar(u, "sm")}<span>${esc(nameOf(u))}${u === ev.hostId ? " · organizer" : ""}</span></span>${manage && u !== me && u !== ev.hostId ? `<button class="btn ghost small" data-setrsvp="${u}" title="Mark their answer">✎ Set</button><button class="btn ghost small" data-removeguest="${u}" title="Remove from invite list">✕</button>` : ""}</div>`).join("")}` : "";
+  const row = (label, uids, phones = []) => uids.length || phones.length ? `<div class="muted sm" style="margin:8px 0 4px;font-weight:600">${label} · ${uids.length + phones.length}</div>${phones.map(p => `<div class="member-row" style="padding:6px 0"><span style="display:flex;align-items:center;gap:8px;flex:1;min-width:0"><span class="avatar sm texted-av">💬</span><span>${esc(phoneName(ev, p))} <span class="muted sm">· by text, not on Friendly yet</span></span></span>${manage ? `<button class="btn ghost small" data-setphone="${esc(p)}" title="Mark their answer">✎ Set</button><button class="btn ghost small" data-uninvitephone="${esc(p)}" title="Remove">✕</button>` : ""}</div>`).join("")}${uids.map(u => `<div class="member-row" style="padding:6px 0"><span data-viewprofile="${u}" style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;cursor:pointer">${avatar(u, "sm")}<span>${esc(nameOf(u))}${u === ev.hostId ? " · organizer" : ""}${(ev.plusOnes || {})[u] ? ` <i class="plusone">+${ev.plusOnes[u]}</i>` : ""}</span></span>${manage && u !== me && u !== ev.hostId ? `<button class="btn ghost small" data-setrsvp="${u}" title="Mark their answer">✎ Set</button><button class="btn ghost small" data-removeguest="${u}" title="Remove from invite list">✕</button>` : ""}</div>`).join("")}` : "";
   return `
   <button class="link-back" data-go="#/">‹ Back</button>
   <div class="group-hero"><span class="li" style="width:52px;height:52px;font-size:24px">📅</span>
@@ -4240,7 +4433,7 @@ function meetingBody(ev) {
     <button class="btn ${myR === "going" ? "primary" : ""}" data-rsvp="going">${myR === "going" ? "✓ Accepted" : "Accept"}</button>
     <button class="btn ${myR === "maybe" ? "primary" : ""}" data-rsvp="maybe">${myR === "maybe" ? "✓ Maybe" : "Maybe"}</button>
     <button class="btn ${myR === "no" ? "primary" : ""}" data-rsvp="no">${myR === "no" ? "✓ Declined" : "Decline"}</button>
-  </div>` : ev.groupId && S.groups.has(ev.groupId) ? `<p class="muted" style="margin-top:12px">Adding you to this meeting…</p>` : ev.openLink ? `<div class="btnrow" style="margin-top:14px"><button class="btn primary" data-join>I'll be there</button></div>` : `<p class="muted" style="margin-top:12px">You're viewing this meeting but aren't on the invite list.</p>`}
+  </div>${myR === "going" && plusAllowed(ev) ? (() => { const mp = ((ev.plusOnes || {})[myUid()]) || 0; return `<div class="plus" style="margin-top:10px"><span>Bringing</span><button data-plus="-1" ${mp <= 0 ? "disabled" : ""}>−</button><b>+${mp}</b><button data-plus="1" ${ev.plusMax && mp >= ev.plusMax ? "disabled" : ""}>＋</button></div>`; })() : ""}` : ev.groupId && S.groups.has(ev.groupId) ? `<p class="muted" style="margin-top:12px">Adding you to this meeting…</p>` : ev.openLink ? `<div class="btnrow" style="margin-top:14px"><button class="btn primary" data-join>I'll be there</button></div>` : `<p class="muted" style="margin-top:12px">You're viewing this meeting but aren't on the invite list.</p>`}
   <div class="btnrow" style="margin-top:10px">
     <button class="btn small" data-cal>Add to calendar</button>
     ${manage ? `<button class="btn small" id="addPeopleBtn">＋ Add people</button><button class="btn small" data-nudge>Nudge non-responders</button><button class="btn small" data-edit>Edit</button><button class="btn small" data-dup>Duplicate</button><button class="btn small danger-ghost" data-del>Delete</button>` : ""}
@@ -4261,6 +4454,7 @@ function wireMeeting(ev) {
     (async () => { const up = { invitedUids: arrayUnion(myUid()), [`names.${myUid()}`]: S.profile.name }; if (myPhoneE164()) up[`phoneKeys.${myUid()}`] = await phoneKey(myPhoneE164()); return updateDoc(doc(db, "events", ev.id), up); })().catch(e => console.warn("auto-join failed:", e.message));
   }
   document.querySelectorAll("[data-rsvp]").forEach(b => b.onclick = () => setRsvp(ev, b.dataset.rsvp));
+  document.querySelectorAll("[data-plus]").forEach(b => b.onclick = () => setPlus(ev, Number(b.dataset.plus)));
   document.querySelectorAll("[data-viewprofile]").forEach(el2 => el2.onclick = () => openProfileDialog(el2.dataset.viewprofile));
   document.querySelectorAll("[data-removeguest]").forEach(b => b.onclick = () => removeGuest(ev, b.dataset.removeguest));
   document.querySelectorAll("[data-setrsvp]").forEach(b => b.onclick = e => { e.stopPropagation(); openSetRsvpDialog(ev, b.dataset.setrsvp); });
@@ -4444,6 +4638,63 @@ function saveDraft() {
     localStorage.setItem("friendlyDraft", JSON.stringify({ ...compose, invitees: [...compose.invitees], cohosts: [...compose.cohosts], _restored: undefined, _fromDraft: undefined }));
     const s = el("draftStatus"); if (s) s.textContent = "✓ Draft saved";
   } catch {}
+}
+// Drafts you save on purpose live on your account (users/{uid}/drafts), so they're on every device.
+const composeJson = () => JSON.stringify({ ...compose, invitees: [...compose.invitees], cohosts: [...compose.cohosts], _restored: undefined, _fromDraft: undefined, _draftId: undefined, _plan: undefined });
+async function saveDraftToAccount() {
+  if (!(compose.title || "").trim()) return toast("Give it a name first, then save the draft.");
+  const id = compose._draftId || newId();
+  try {
+    await setDoc(doc(db, "users", myUid(), "drafts", id), { json: composeJson(), title: compose.title.trim(), emoji: compose.emoji || "🎉", date: compose.date || "", kind: compose.kind || "event", updatedAt: Date.now() });
+    composeStop(); resetCompose(); try { localStorage.removeItem("friendlyDraft"); } catch {}
+    go("#/drafts"); toast("Saved to Drafts", null, null, "happy");
+  } catch (e) { toast(/exceed|size|large/i.test(e.message) ? "That draft is too big to save (try a smaller cover photo)." : e.message); }
+}
+function openDraft(d) {
+  try {
+    const x = JSON.parse(d.json || "{}");
+    resetCompose(); Object.assign(compose, x, { invitees: new Set(x.invitees || []), cohosts: new Set(x.cohosts || []), questions: x.questions || [], stops: x.stops || [] });
+    compose._draftId = d.id; compose._restored = true; go("#/new");
+  } catch { toast("Couldn't open that draft."); }
+}
+function draftsBody() {
+  const ds = S.drafts || [];
+  return `<button class="link-back" data-go="#/">‹ Events</button>
+  <div class="section-head"><h1 style="margin:0">Drafts</h1><button class="btn primary small" data-go="#/new">＋ New event</button></div>
+  <p class="muted sm" style="margin:-4px 0 14px">Plans you saved without sending. Nobody sees them until you create the event.</p>
+  ${ds.length ? `<div class="card">${ds.map(d => `<div class="member-row"><span class="li">${esc(d.emoji || "📝")}</span><div style="flex:1;min-width:0"><b>${esc(d.title || "Untitled")}</b><div class="muted sm">${d.kind === "meeting" ? "Meeting · " : ""}${d.date ? esc(fmtDay({ date: d.date })) + " · " : ""}saved ${ago(d.updatedAt)}</div></div><span class="btnrow" style="gap:6px"><button class="btn small primary" data-opendraft="${d.id}">Continue</button><button class="btn ghost small" data-deldraft="${d.id}" title="Delete draft">✕</button></span></div>`).join("")}</div>`
+    : emptyState("📝", "No drafts", "Tap “Save as draft” while making an event to finish it later.", "sleepy")}`;
+}
+function wireDrafts() {
+  document.querySelectorAll("[data-opendraft]").forEach(b => b.onclick = () => { const d = (S.drafts || []).find(x => x.id === b.dataset.opendraft); if (d) openDraft(d); });
+  document.querySelectorAll("[data-deldraft]").forEach(b => b.onclick = () => { if (confirm("Delete this draft?")) deleteDoc(doc(db, "users", myUid(), "drafts", b.dataset.deldraft)).then(() => toast("Draft deleted")).catch(e => toast(e.message)); });
+}
+// Day-of setup while making the event: start the bring list, offer your own car, or turn either part off.
+function composeDayInner() {
+  const c = compose, bring = c.bring || [];
+  return `<label class="switch"><input type="checkbox" id="cBringOn" ${c.bringOn === false ? "" : "checked"}><span>🧺 Bring list</span></label>
+    <div class="${c.bringOn === false ? "hidden" : ""}" style="margin:8px 0 12px">
+      ${bring.map((b, i) => `<div class="inv-hit"><div style="flex:1;min-width:0"><b>${esc(b.item)}</b>${b.qty ? ` <span class="muted sm">× ${esc(b.qty)}</span>` : ""}</div><button type="button" class="btn ghost small" data-bringx="${i}">✕</button></div>`).join("")}
+      <div class="two"><label class="field"><span>Add an item</span><input id="cBringItem" maxlength="60" placeholder="Ice, chips, a dessert…"></label><label class="field"><span>How many <span class="muted">(optional)</span></span><input id="cBringQty" maxlength="12" placeholder="2 bags"></label></div>
+      <button type="button" class="btn small" id="cBringAdd">＋ Add to list</button>
+    </div>
+    <label class="switch"><input type="checkbox" id="cCarOn" ${c.carOn === false ? "" : "checked"}><span>🚗 Carpool</span></label>
+    <div class="${c.carOn === false ? "hidden" : ""}" style="margin:8px 0 0">
+      <label class="cbox"><input type="checkbox" id="cDrive" ${c.drive ? "checked" : ""}> I'm driving and have room</label>
+      <label class="field ${c.drive ? "" : "hidden"}" style="margin-top:6px"><span>Open seats</span><select id="cSeats">${[1, 2, 3, 4, 5, 6].map(n => `<option ${Number(c.seats || 3) === n ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+    </div>`;
+}
+function wireComposeDay() {
+  const card = el("cDayCard"); if (!card) return;
+  const redraw = () => { card.innerHTML = composeDayInner(); wireComposeDay(); saveDraft(); };
+  el("cBringOn").onchange = e => { compose.bringOn = e.target.checked; redraw(); };
+  el("cCarOn").onchange = e => { compose.carOn = e.target.checked; redraw(); };
+  el("cDrive").onchange = e => { compose.drive = e.target.checked; redraw(); };
+  el("cSeats").onchange = e => { compose.seats = Number(e.target.value) || 3; saveDraft(); };
+  const add = () => { const item = el("cBringItem").value.trim(); if (!item) return toast("Type what's needed."); compose.bring = [...(compose.bring || []), { item, qty: el("cBringQty").value.trim() }]; redraw(); setTimeout(() => el("cBringItem") && el("cBringItem").focus(), 0); };
+  el("cBringAdd").onclick = add;
+  el("cBringItem").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); add(); } };
+  card.querySelectorAll("[data-bringx]").forEach(b => b.onclick = () => { compose.bring.splice(Number(b.dataset.bringx), 1); redraw(); });
 }
 function restoreDraft() {
   if (compose._restored || compose.title) return; compose._restored = true;

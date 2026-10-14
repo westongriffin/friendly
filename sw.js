@@ -1,34 +1,51 @@
-// Friendly service worker: cache the app shell so the installed PWA opens
-// instantly. Firebase (Firestore/Auth) traffic and fonts always hit the
-// network. Bump CACHE to invalidate old shells on deploy.
-const CACHE = "friendly-fb-v161";
+// Friendly service worker: keeps a full copy of the app (our files, the Firebase SDK, and the fonts) so
+// it opens with no signal at all; Firestore's own device cache supplies the data. Our files are
+// network-first with a short timeout (fresh when online, instant from the copy on a dead or crawling
+// connection); the versioned Firebase SDK and font files never change, so they're cache-first.
+// Bump CACHE on deploy.
+const CACHE = "friendly-fb-v162";
 const SHELL = [
-  "./", "./index.html", "./styles.css", "./app.js", "./blip.js", "./themes.js",
+  "./", "./index.html", "./styles.css", "./app.js", "./blip.js", "./themes.js", "./version.json",
   "./firebase-config.js", "./manifest.webmanifest",
   "./icons/icon-192.png", "./icons/icon-512.png",
   "./icons/maskable-512.png", "./icons/apple-touch-icon.png"
 ];
+const SDK = ["app", "auth", "firestore"].map(m => `https://www.gstatic.com/firebasejs/10.12.5/firebase-${m}.js`);
+const IMMUTABLE = /^https:\/\/(www\.gstatic\.com\/firebasejs\/|fonts\.gstatic\.com\/)/, FONT_CSS = /^https:\/\/fonts\.googleapis\.com\//;
 
 self.addEventListener("install", e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()).catch(() => {}));
+  e.waitUntil(caches.open(CACHE).then(c => Promise.all([
+    c.addAll(SHELL),
+    ...SDK.map(u => fetch(new Request(u, { mode: "cors" })).then(r => r.ok && c.put(u, r)).catch(() => {}))
+  ])).then(() => self.skipWaiting()).catch(() => {}));
 });
 self.addEventListener("activate", e => {
   e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
+// One cached copy per file, whatever ?v= it was asked for with.
+const keyOf = url => url.origin + url.pathname;
+function fresh(req, ms) {
+  const url = new URL(req.url);
+  const net = fetch(req).then(res => { if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(keyOf(url), copy)); } return res; });
+  const late = new Promise((_, no) => setTimeout(() => no(new Error("slow")), ms));
+  return Promise.race([net, late]).catch(async () => {
+    const hit = await caches.match(keyOf(url))
+      || (req.mode === "navigate" ? (await caches.match(url.origin + "/index.html")) || (await caches.match(url.origin + "/")) : null);
+    return hit || net;   // nothing saved yet: keep waiting on the network after all
+  });
+}
 self.addEventListener("fetch", e => {
+  if (e.request.method !== "GET") return;
   const url = new URL(e.request.url);
-  // Only cache our own same-origin GETs; never intercept Firebase/font traffic.
-  if (e.request.method !== "GET" || url.origin !== location.origin) return;
-  // Network-first: the app needs Firebase anyway, so always take the latest
-  // shell when online; the cache is only an offline fallback. (Cache-first
-  // could pin a stale shell for a long time.)
-  e.respondWith(
-    fetch(e.request).then(res => {
-      if (res.ok) caches.open(CACHE).then(c => c.put(e.request, res.clone()));
-      return res;
-    }).catch(() => caches.match(e.request, { ignoreSearch: e.request.mode === "navigate" })
-      .then(cached => cached || caches.match("./index.html")))
-  );
+  if (url.origin === location.origin) { e.respondWith(fresh(e.request, url.pathname.endsWith("version.json") ? 2500 : 4000)); return; }
+  if (IMMUTABLE.test(url.href)) {
+    e.respondWith(caches.match(url.href).then(hit => hit || fetch(e.request).then(res => { if (res.ok || res.type === "opaque") { const copy = res.clone(); caches.open(CACHE).then(c => c.put(url.href, copy)); } return res; })));
+    return;
+  }
+  if (FONT_CSS.test(url.href)) {
+    e.respondWith(caches.match(url.href).then(hit => { const net = fetch(e.request).then(res => { if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(url.href, copy)); } return res; }).catch(() => hit); return hit || net; }));
+  }
+  // Everything else (Firestore, Auth, functions, images elsewhere) goes straight to the network.
 });
 
 // ---- Web push ----
