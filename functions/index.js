@@ -1237,7 +1237,7 @@ exports.onReport = onDocumentCreated({ document: "reports/{id}", ...PUSH }, asyn
 
 // Bug report (shake or Profile › Report a bug) -> push the admins.
 exports.onBug = onDocumentCreated({ document: "bugs/{id}", ...PUSH }, async e => {
-  const b = e.data && e.data.data(); if (!b) return;
+  const b = e.data && e.data.data(); if (!b || b.diag) return;   // app diagnostics: no push
   await notify(ADMIN_UIDS, "🐞 Bug report from " + firstName(b.name), String(b.text || "").slice(0, 120), "/#/profile?to=bugsCard", { type: "bug" });
 });
 // A phone invite for someone who is already a member/guest (the host typed or

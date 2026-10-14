@@ -15,6 +15,10 @@ import {
 import { firebaseConfig, mapsKey, adminUids, vapidPublicKey, giphyKey } from "./firebase-config.js";
 import { THEMES, themeOf, applyTheme, startParticles, DEFAULT_THEME, CUSTOM_FONTS, CUSTOM_PARTICLES, makeCustomTheme } from "./themes.js";
 
+// TEMP diagnostics (admins only): record JS errors and a trace to bugs/ with status "diag".
+window.__diag = (text) => { try { if (!(window.__isAdminNow && window.__isAdminNow())) return; window.__diagQ = (window.__diagQ || []).concat(String(text).slice(0, 500)); } catch {} };
+window.addEventListener("error", e => window.__diag("error: " + (e.message || "") + " @" + (e.filename || "").split("/").pop() + ":" + e.lineno));
+window.addEventListener("unhandledrejection", e => window.__diag("rejection: " + ((e.reason && (e.reason.message || e.reason)) || "")));
 const APP_V = (() => { try { return new URL(import.meta.url).searchParams.get("v") || "dev"; } catch { return "?"; } })();
 const fb = initializeApp(firebaseConfig);
 const auth = getAuth(fb);
@@ -1616,9 +1620,10 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
       await onSubmit(direct, texted);
     });
   renderPicked();
+  window.__diag("dialog wired; invPick count=" + document.querySelectorAll("#invPick").length + " native=" + !!nativeContacts);
   if (el("invAddManual")) el("invAddManual").onclick = () => { addPicked(el("invName").value.trim(), el("invPhone").value.trim()); el("invName").value = ""; el("invPhone").value = ""; };
   if (el("invPick")) el("invPick").onclick = async () => {
-    const diag = t => { if (isAdmin() && el("invPick")) el("invPick").textContent = t; };
+    const diag = t => { window.__diag("contacts: " + t); if (isAdmin() && el("invPick")) el("invPick").textContent = t; };
     diag("tap · " + (nativeContacts ? ["pickContacts", "pickContact"].map(m => m + "=" + typeof nativeContacts[m]).join(" ") : "no plugin"));
     console.log("[contacts] tap; plugin:", !!nativeContacts);
     try {
@@ -4339,6 +4344,8 @@ function dmReportDialog(fid, msg) {
     });
 }
 
+window.__isAdminNow = () => { try { return !!(S.user && isAdmin()); } catch { return false; } };
+setInterval(() => { const q = window.__diagQ; if (!q || !q.length || !S.user) return; window.__diagQ = []; addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: q.join("\n"), route: location.hash, version: APP_V + " / " + (nativeVersion || ""), platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now() }).catch(() => {}); }, 3000);
 // ---------- BUG REPORTS: shake the phone (or Profile › Report a bug) ----------
 // Reports go to bugs/{id} with where you were and what app version; admins get a push and a queue on Profile.
 const shakeNeedsPermission = () => typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function";
