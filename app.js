@@ -3017,7 +3017,7 @@ function dayInner(ev) {
   // bring list or carpool off (ev.dayBring / ev.dayCarpool === false) when making or editing the event.
   return `<div class="glass-head">Day of <span>${esc(fmtDay(ev))}</span></div>
     <div class="day-sec"><div class="glass-sub">☀️ Weather &amp; arrivals</div>
-    <div id="wx" class="muted-th sm" style="margin:0 0 8px">${ev._wx || ""}</div>
+    <div id="wx" class="muted-th sm" style="margin:0 0 8px">${esc(ev._wx || "")}</div>
     ${statuses.length ? `<div class="chipwrap">${statuses.map(c => `<span class="day-chip">${c.status === "late" ? "⏰" : "🚗"} ${esc(first(c.authorName || nameOf(c.authorId)))} ${c.status === "late" ? "is running late" : "is on the way"} <i>${ago(c.createdAt)}</i></span>`).join("")}</div>` : ""}
     <div class="btnrow" style="margin:4px 0 10px">
       ${soon || mine ? `<button type="button" class="btn-th small ${mine === "omw" ? "accent" : ""}" data-status="omw">🚗 On my way</button><button type="button" class="btn-th small ${mine === "late" ? "accent" : ""}" data-status="late">⏰ Running late</button>` : ""}
@@ -3084,20 +3084,45 @@ function wireDay(ev) {
 }
 // Weather from Open-Meteo (no key). Geocodes the location text, falling back to its last parts (city, state).
 const WX = { 0: "☀️ Clear", 1: "🌤 Mostly clear", 2: "⛅ Partly cloudy", 3: "☁️ Cloudy", 45: "🌫 Fog", 48: "🌫 Fog", 51: "🌦 Drizzle", 53: "🌦 Drizzle", 55: "🌧 Drizzle", 61: "🌧 Light rain", 63: "🌧 Rain", 65: "🌧 Heavy rain", 71: "🌨 Snow", 73: "🌨 Snow", 75: "❄️ Heavy snow", 80: "🌦 Showers", 81: "🌧 Showers", 82: "⛈ Heavy showers", 95: "⛈ Thunderstorms", 96: "⛈ Storms w/ hail", 99: "⛈ Storms w/ hail" };
+// Find a place on the map from an address or venue string, for the forecast. Reads "..., City, ST 12345, USA":
+// drops the country and zip, takes the state, and only accepts a match in that state (a bare "USA" used to
+// resolve to Uşak, Turkey). With no state or country to go on, only a big, well-known city is accepted.
+const STATE_NAME_BY_ABBR = Object.fromEntries(Object.entries(US_STATES).map(([name, ab]) => [ab, name]));
+async function geocodePlace(str) {
+  const parts = String(str || "").split(",").map(p => p.trim()).filter(Boolean);
+  let country = "";
+  if (parts.length && /^(usa|u\.s\.a\.?|us|u\.s\.|united states( of america)?)$/i.test(parts[parts.length - 1])) { country = "US"; parts.pop(); }
+  let state = "";
+  if (parts.length) {
+    const last = parts[parts.length - 1].replace(/\s*\d{5}(-\d{4})?$/, "").trim();
+    if (/^[A-Za-z]{2}$/.test(last) && STATE_NAME_BY_ABBR[last.toUpperCase()]) { state = last.toUpperCase(); parts.pop(); }
+    else if (US_STATES[last.toLowerCase()]) { state = US_STATES[last.toLowerCase()]; parts.pop(); }
+    else if (!last) parts.pop();   // the part was only a zip code
+  }
+  if (state) country = "US";
+  const street = /\b(st|street|ave|avenue|rd|road|dr|drive|ln|lane|blvd|boulevard|way|ct|court|pkwy|parkway|hwy|highway|suite|ste|apt|unit)\b\.?$/i;
+  const cands = parts.slice(-2).reverse().map(c => c.replace(/\b\d{5}(-\d{4})?\b/g, "").trim()).filter(c => c && !/\d/.test(c) && !street.test(c));
+  for (const c of cands) {
+    const g = await (await fetch("https://geocoding-api.open-meteo.com/v1/search?name=" + encodeURIComponent(c) + "&count=10&language=en" + (country ? "&countryCode=" + country : ""))).json();
+    const rs = g.results || [];
+    const hit = state ? rs.find(r => String(r.admin1 || "").toLowerCase() === STATE_NAME_BY_ABBR[state]) : rs.find(r => (r.population || 0) >= 100000);
+    if (hit) return hit;
+  }
+  return null;
+}
 async function loadWeather(ev) {
   const box = el("wx"); if (!box || !ev.location || /zoom|meet\.google|teams|http|online|call/i.test(ev.location)) return;
   const du = daysUntil(ev); if (du < 0 || du > 15) return;
-  const key = "wx:" + ev.date + ":" + ev.location; let cached = null; try { cached = JSON.parse(sessionStorage.getItem(key) || "null"); } catch {}
+  const key = "wx2:" + ev.date + ":" + ev.location; let cached = null; try { cached = JSON.parse(sessionStorage.getItem(key) || "null"); } catch {}
   const show = txt => { ev._wx = txt; const b = el("wx"); if (b) b.textContent = txt; };
   if (cached && Date.now() - cached.at < 36e5) return show(cached.txt);
   try {
-    const parts = ev.location.split(",").map(p => p.trim()).filter(Boolean);
-    const tries = [parts.slice(-2).join(", "), parts.slice(-1)[0], parts.slice(-3, -1).join(", ")].filter(Boolean);
-    let hit = null; for (const q of tries) { const g = await (await fetch("https://geocoding-api.open-meteo.com/v1/search?name=" + encodeURIComponent(q.replace(/\b\d{5}(-\d{4})?\b/g, "").trim()) + "&count=1&language=en")).json(); if (g.results && g.results[0]) { hit = g.results[0]; break; } }
+    // The event's address first; with several stops, any stop that names a city will do.
+    let hit = null; for (const place of [ev.location, ...evStops(ev).map(x => x.place)].filter(Boolean)) { hit = await geocodePlace(place); if (hit) break; }
     if (!hit) return;
     const f = await (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${hit.latitude}&longitude=${hit.longitude}&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&temperature_unit=fahrenheit&timezone=auto&start_date=${ev.date}&end_date=${ev.date}`)).json();
     const d = f.daily; if (!d || !d.weather_code) return;
-    const txt = `${WX[d.weather_code[0]] || "🌡"} · ${Math.round(d.temperature_2m_max[0])}° / ${Math.round(d.temperature_2m_min[0])}°${d.precipitation_probability_max && d.precipitation_probability_max[0] != null ? " · " + d.precipitation_probability_max[0] + "% rain" : ""} · ${esc(hit.name)}`;
+    const txt = `${WX[d.weather_code[0]] || "🌡"} · ${Math.round(d.temperature_2m_max[0])}° / ${Math.round(d.temperature_2m_min[0])}°${d.precipitation_probability_max && d.precipitation_probability_max[0] != null ? " · " + d.precipitation_probability_max[0] + "% rain" : ""} · ${hit.name}`;
     try { sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), txt })); } catch {}
     show(txt);
   } catch {}
