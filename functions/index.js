@@ -517,7 +517,7 @@ async function buildIdeas(d) {
 Reply with ONLY a JSON array of objects with these keys: "emoji" (one emoji), "title" (short and specific, under 60 characters), "place" (venue or business name), "area" (neighborhood or city), "date" (YYYY-MM-DD if it is a dated event in that window, else ""), "time" (24-hour HH:MM if dated, else ""), "price" (like "$25", "Free", or "$$"), "blurb" (one friendly sentence, Oxford comma, no em-dashes), "url" (the official page if you found one, else "").`;
   const raw = await askGroundedReliably(prompt, 2500, d.onPhase, "ideas");
   return raw.map(x => ({
-    emoji: clip(x.emoji, 4) || "✨", title: clip(x.title, 70), place: clip(x.place, 80), area: clip(x.area, 60),
+    emoji: (() => { try { const g = [...new Intl.Segmenter("en", { granularity: "grapheme" }).segment(String(x.emoji || "").trim())][0]; return g ? g.segment : "✨"; } catch { return "✨"; } })(), title: clip(x.title, 70), place: clip(x.place, 80), area: clip(x.area, 60),
     date: /^\d{4}-\d{2}-\d{2}$/.test(x.date || "") ? x.date : "", time: /^\d{2}:\d{2}$/.test(x.time || "") ? x.time : "",
     price: clip(x.price, 20), blurb: clip(x.blurb, 200), url: isUrl(x.url) ? String(x.url).slice(0, 300) : ""
   })).filter(x => x.title).slice(0, 6);
@@ -568,7 +568,7 @@ exports.curateNightly = onSchedule({ schedule: "30 3 * * *", timeZone: "America/
 
 exports.onPlanRequest = onDocumentCreated({ document: "planRequests/{id}", region: "us-central1", timeoutSeconds: 300, memory: "512MiB" }, async e => {
   const d = e.data && e.data.data(); if (!d) return;
-  if (!d.text && d.mode !== "curate-city" && d.mode !== "night") return;   // the curate modes carry no text
+  if (!d.text && !["curate-city", "night", "ideas"].includes(d.mode)) return;   // the curate modes carry no text
   const ref = e.data.ref;
   try {
     const data = d.mode === "expense" ? await draftExpense(d) : d.mode === "edit" ? await draftEdit(d) : d.mode === "ask" ? await answerQuestion(d)

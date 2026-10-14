@@ -4667,7 +4667,12 @@ function draftsBody() {
 }
 function wireDrafts() {
   document.querySelectorAll("[data-opendraft]").forEach(b => b.onclick = () => { const d = (S.drafts || []).find(x => x.id === b.dataset.opendraft); if (d) openDraft(d); });
-  document.querySelectorAll("[data-deldraft]").forEach(b => b.onclick = () => { if (confirm("Delete this draft?")) deleteDoc(doc(db, "users", myUid(), "drafts", b.dataset.deldraft)).then(() => toast("Draft deleted")).catch(e => toast(e.message)); });
+  document.querySelectorAll("[data-deldraft]").forEach(b => b.onclick = () => {
+    if (!confirm("Delete this draft?")) return;
+    // The draft you had open goes too, so New event starts clean.
+    if (compose._draftId === b.dataset.deldraft) { resetCompose(); try { localStorage.removeItem("friendlyDraft"); } catch {} }
+    deleteDoc(doc(db, "users", myUid(), "drafts", b.dataset.deldraft)).then(() => toast("Draft deleted")).catch(e => toast(e.message));
+  });
 }
 // Day-of setup while making the event: start the bring list, offer your own car, or turn either part off.
 function composeDayInner() {
