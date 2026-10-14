@@ -15,9 +15,6 @@ import {
 import { firebaseConfig, mapsKey, adminUids, vapidPublicKey, giphyKey } from "./firebase-config.js";
 import { THEMES, themeOf, applyTheme, startParticles, DEFAULT_THEME, CUSTOM_FONTS, CUSTOM_PARTICLES, makeCustomTheme } from "./themes.js";
 
-// TEMP (admins): which element gets each tap, and how many dialogs are open.
-window.__tapLog = [];
-document.addEventListener("pointerdown", e => { try { const t = e.target; const d = t.closest && t.closest("dialog"); window.__tapLog.push(`${t.tagName}#${t.id || ""}.${String(t.className || "").slice(0, 30)} dlg=${d ? d.id || "?" : "-"} open=${document.querySelectorAll("dialog[open]").length} at ${Math.round(e.clientX)},${Math.round(e.clientY)}`); } catch {} }, true);
 const APP_V = (() => { try { return new URL(import.meta.url).searchParams.get("v") || "dev"; } catch { return "?"; } })();
 const fb = initializeApp(firebaseConfig);
 const auth = getAuth(fb);
@@ -4360,7 +4357,6 @@ function dmReportDialog(fid, msg) {
     });
 }
 
-setInterval(() => { try { if (!window.__tapLog.length || !S.user || !isAdmin()) return; const q = window.__tapLog.splice(0); addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: q.join("\n"), route: location.hash, version: APP_V, platform: NATIVE ? "ios" : "web", status: "open", diag: true, createdAt: Date.now() }).catch(() => {}); } catch {} }, 3000);
 // ---------- BUG REPORTS: shake the phone (or Profile › Report a bug) ----------
 // Reports go to bugs/{id} with where you were and what app version; admins get a push and a queue on Profile.
 const shakeNeedsPermission = () => typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function";
@@ -4780,13 +4776,17 @@ function dialog(inner, okLabel, onOk) {
   d.className = "app-dialog"; d.id = "appDialog";
   d.innerHTML = `<form method="dialog" class="dlg-inner">${inner}
     <div class="dlg-actions">${okLabel ? `<button type="button" class="btn" id="dlgCancel">Cancel</button><button type="button" class="btn primary" id="dlgOk">${esc(okLabel)}</button>` : `<button type="button" class="btn primary" id="dlgCancel">Close</button>`}</div></form>`;
+  // Shown as an ordinary fixed overlay (show(), not showModal()): in the iPhone app, a modal <dialog> opened
+  // from far down a long page (Add people on New event) silently stopped receiving taps.
   lockScroll();
-  document.body.appendChild(d); d.showModal();
+  const bd = document.createElement("div"); bd.id = "dlgBackdrop"; bd.className = "dlg-backdrop";
+  document.body.appendChild(bd); document.body.appendChild(d); d.show();
   el("dlgCancel").onclick = closeDialog;
   if (el("dlgOk")) el("dlgOk").onclick = onOk;
-  d.addEventListener("close", () => { d.remove(); if (!el("appDialog")) unlockScroll(); });
+  d.addEventListener("close", () => { d.remove(); if (!el("appDialog")) { const b = el("dlgBackdrop"); if (b) b.remove(); unlockScroll(); } });
 }
-function closeDialog() { const d = el("appDialog"); if (d) { d.close(); d.remove(); } unlockScroll(); }
+function closeDialog() { const d = el("appDialog"); if (d) { d.close(); d.remove(); } const b = el("dlgBackdrop"); if (b) b.remove(); unlockScroll(); }
+document.addEventListener("keydown", e => { if (e.key === "Escape" && el("appDialog")) closeDialog(); });
 // While a dialog is open the page underneath is pinned in place (body fixed at the scrolled offset) and put
 // back on close. In the iPhone app, a modal dialog opened over a page scrolled far down stopped receiving
 // taps at all (Add people on the long New event form); with the page pinned at the top it hit-tests right.

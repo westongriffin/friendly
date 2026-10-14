@@ -902,3 +902,7 @@ html{background:var(--bg)}
 .book-name{display:flex;flex-direction:column;min-width:0}
 .book-name b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .book-on{color:var(--good);font-weight:600}
+/* Dialogs are plain fixed overlays (not the modal top layer), centered over a dimmed backdrop. */
+.app-dialog[open]{position:fixed;inset:0;margin:auto;height:fit-content;z-index:1001}
+.dlg-backdrop{position:fixed;inset:0;background:rgba(30,16,10,.5);z-index:1000}
+#toast{z-index:1100}
