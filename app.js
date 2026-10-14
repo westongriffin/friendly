@@ -19,6 +19,7 @@ import { THEMES, themeOf, applyTheme, startParticles, DEFAULT_THEME, CUSTOM_FONT
 window.__diag = (text) => { try { if (!(window.__isAdminNow && window.__isAdminNow())) return; window.__diagQ = (window.__diagQ || []).concat(String(text).slice(0, 500)); } catch {} };
 window.addEventListener("error", e => window.__diag("error: " + (e.message || "") + " @" + (e.filename || "").split("/").pop() + ":" + e.lineno));
 window.addEventListener("unhandledrejection", e => window.__diag("rejection: " + ((e.reason && (e.reason.message || e.reason)) || "")));
+["pointerdown", "pointerup", "touchend", "click"].forEach(t => document.addEventListener(t, e => { const d = e.target && e.target.closest && e.target.closest("#appDialog"); if (d) window.__diag(t + " on " + (e.target.id || e.target.tagName) + (e.target.closest("#invPick") ? " [in invPick]" : "") + " defaultPrevented=" + e.defaultPrevented); }, true));
 const APP_V = (() => { try { return new URL(import.meta.url).searchParams.get("v") || "dev"; } catch { return "?"; } })();
 const fb = initializeApp(firebaseConfig);
 const auth = getAuth(fb);
