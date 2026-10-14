@@ -1617,7 +1617,8 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
   renderPicked();
   if (el("invAddManual")) el("invAddManual").onclick = () => { addPicked(el("invName").value.trim(), el("invPhone").value.trim()); el("invName").value = ""; el("invPhone").value = ""; };
   if (el("invPick")) el("invPick").onclick = async () => {
-    console.log("[contacts] tap; plugin:", !!nativeContacts, "methods:", nativeContacts ? ["pickContacts", "pickContact"].map(m => m + "=" + typeof nativeContacts[m]).join(",") : "-");
+    if (isAdmin()) toast("[contacts] tap · plugin " + !!nativeContacts + " · " + (nativeContacts ? ["pickContacts", "pickContact"].map(m => m + "=" + typeof nativeContacts[m]).join(", ") : "-"));
+    console.log("[contacts] tap; plugin:", !!nativeContacts);
     try {
       if (nativeContacts) {
         const projection = { name: true, emails: true, phones: true };
