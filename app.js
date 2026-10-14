@@ -1640,26 +1640,20 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
     });
   };
   const bookNote = t => { const n = el("invNote"); if (n) { n.textContent = t; n.hidden = !t; } };
-  // Admin-only step log (bugs/, diag: true, no push) while we chase a freeze on real phones.
-  const t0 = Date.now(); const trace = m => { try { if (isAdmin()) addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `[contacts ${Date.now() - t0}ms] ${m}`, route: location.hash, version: APP_V + " / " + (nativeVersion || ""), platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now() }).catch(() => {}); } catch {} };
   async function openBook() {
     const C = nativeContacts;
-    trace("openBook; getContacts=" + typeof C.getContacts + " checkPermissions=" + typeof C.checkPermissions);
-    let perm = null; try { perm = await C.checkPermissions(); trace("check -> " + JSON.stringify(perm)); if (perm && perm.contacts !== "granted" && perm.contacts !== "limited") { perm = await C.requestPermissions(); trace("request -> " + JSON.stringify(perm)); } } catch (e) { trace("perm error: " + (e && e.message)); }
+    let perm = null; try { perm = await C.checkPermissions(); if (perm && perm.contacts !== "granted" && perm.contacts !== "limited") perm = await C.requestPermissions(); } catch {}
     if (!perm || (perm.contacts !== "granted" && perm.contacts !== "limited")) return false;
     el("invPick").textContent = "Loading your contacts…"; el("invPick").disabled = true;
-    trace("getContacts start");
     const r = await C.getContacts({ projection: { name: true, phones: true } });
-    trace("getContacts done: " + ((r && r.contacts) || []).length + " contacts");
     const seen = new Set();
     book = ((r && r.contacts) || []).map(c => { const phone = phoneOfContact(c); return { name: nameOfContact(c).trim(), phone, e164: toE164(phone) }; })
       .filter(c => c.e164 && !seen.has(c.e164) && seen.add(c.e164)).sort((a, b) => (a.name || "~").localeCompare(b.name || "~"));
     el("invPick").outerHTML = `<div class="book"><input type="search" class="inv-search" id="invBookQ" placeholder="Search your contacts…" autocomplete="off"><div class="book-list" id="invBook"></div></div>`;
     el("invBookQ").oninput = e => paintBook(e.target.value);
-    paintBook(""); trace("list shown: " + book.length); return true;
+    paintBook(""); return true;
   }
   if (el("invPick")) el("invPick").onclick = async () => {
-    trace("tap; native=" + !!nativeContacts);
     bookNote("");
     try {
       if (nativeContacts) {
@@ -1671,7 +1665,7 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
         const notes = []; await addPicked(nameOfContact(c), phoneOfContact(c), notes); if (notes.length) bookNote(notes.join(" "));
       }
       else { const rows = await navigator.contacts.select(["name", "tel"], { multiple: true }); const notes = []; for (const r of rows) await addPicked((r.name || [])[0] || "", (r.tel || [])[0] || "", notes); if (notes.length) bookNote(notes.join(" ")); }
-    } catch (e) { const m = String((e && e.message) || e || ""); trace("error: " + m); if (el("invPick")) { el("invPick").disabled = false; el("invPick").textContent = "📇 Choose from contacts"; } bookNote(/cancel/i.test(m) || !m ? "" : "Couldn't read your contacts: " + m); }
+    } catch (e) { const m = String((e && e.message) || e || ""); if (el("invPick")) { el("invPick").disabled = false; el("invPick").textContent = "📇 Choose from contacts"; } bookNote(/cancel/i.test(m) || !m ? "" : "Couldn't read your contacts: " + m); }
   };
   if (el("invSearch")) {
     const renderResults = q => { const ql = q.toLowerCase(); const hits = known.filter(([u, i]) => !picked.some(p => p.uid === u) && (i.name || "").toLowerCase().includes(ql)); el("invResults").innerHTML = hits.slice(0, 8).map(([u, i]) => `<div class="inv-hit" data-choose="${u}">${avatar(u)}<div><b>${esc(i.name || "Friend")}</b></div><span class="add">Add</span></div>`).join("") || `<p class="muted sm">No one else to add.</p>`; };
@@ -4403,7 +4397,7 @@ function openBugDialog(fromShake) {
 function wireBugs() {
   if (!el("bugsCard")) return;
   S.evSubs.push(onSnapshot(query(collection(db, "bugs"), where("status", "==", "open")), snap => {
-    const rows = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.createdAt - a.createdAt);
+    const rows = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => !r.diag).sort((a, b) => b.createdAt - a.createdAt);
     const c = el("bugsCard"); if (!c) return;
     c.innerHTML = rows.length ? rows.map(r => `<div class="member-row" style="align-items:flex-start;flex-wrap:wrap"><div style="flex:1;min-width:0"><b>${esc(r.name || "Someone")}</b> <span class="muted sm">· ${esc(r.platform || "")} ${esc(r.version || "")} · ${ago(r.createdAt)}</span><div class="sm" style="margin-top:4px;white-space:pre-wrap;overflow-wrap:anywhere">${esc(r.text)}</div><div class="muted sm mono">${esc(r.route || "")}</div>${r.photo ? `<img src="${esc(r.photo)}" alt="" style="max-width:160px;border-radius:8px;margin-top:6px;cursor:pointer" data-bugimg>` : ""}</div><div class="btnrow" style="width:100%;margin-top:6px"><button class="btn small" data-bugdone="${r.id}">Mark fixed</button></div></div>`).join("") : `<p class="muted" style="padding:14px 16px;margin:0">No open bug reports. 🎉</p>`;
     c.querySelectorAll("[data-bugimg]").forEach(i => i.onclick = () => lightbox(i.src));
