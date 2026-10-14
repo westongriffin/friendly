@@ -1617,7 +1617,8 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
   renderPicked();
   if (el("invAddManual")) el("invAddManual").onclick = () => { addPicked(el("invName").value.trim(), el("invPhone").value.trim()); el("invName").value = ""; el("invPhone").value = ""; };
   if (el("invPick")) el("invPick").onclick = async () => {
-    if (isAdmin()) toast("[contacts] tap · plugin " + !!nativeContacts + " · " + (nativeContacts ? ["pickContacts", "pickContact"].map(m => m + "=" + typeof nativeContacts[m]).join(", ") : "-"));
+    const diag = t => { if (isAdmin() && el("invPick")) el("invPick").textContent = t; };
+    diag("tap · " + (nativeContacts ? ["pickContacts", "pickContact"].map(m => m + "=" + typeof nativeContacts[m]).join(" ") : "no plugin"));
     console.log("[contacts] tap; plugin:", !!nativeContacts);
     try {
       if (nativeContacts) {
@@ -1645,7 +1646,7 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
         if (skipped.length) toast(skipped.length === 1 ? skipped[0] : `Skipped ${skipped.length}: ` + skipped.map(m => m.replace(/\.$/, "")).join("; ") + ".", null, null, "thinking");
       }
       else { const rows = await navigator.contacts.select(["name", "tel"], { multiple: true }); const skipped = []; for (const r of rows) await addPicked((r.name || [])[0] || "", (r.tel || [])[0] || "", skipped); if (skipped.length) toast(skipped.length === 1 ? skipped[0] : `Skipped ${skipped.length}: ` + skipped.map(m => m.replace(/\.$/, "")).join("; ") + ".", null, null, "thinking"); }
-    } catch (e) { const m = String((e && e.message) || e || ""); console.log("[contacts] failed:", m, e && e.code); toast(/cancel/i.test(m) || !m ? "Contact picking was cancelled." : "Couldn't read that contact: " + m); }
+    } catch (e) { const m = String((e && e.message) || e || ""); console.log("[contacts] failed:", m, e && e.code); if (isAdmin() && el("invPick")) el("invPick").textContent = "ERR " + m.slice(0, 80); toast(/cancel/i.test(m) || !m ? "Contact picking was cancelled." : "Couldn't read that contact: " + m); }
   };
   if (el("invSearch")) {
     const renderResults = q => { const ql = q.toLowerCase(); const hits = known.filter(([u, i]) => !picked.some(p => p.uid === u) && (i.name || "").toLowerCase().includes(ql)); el("invResults").innerHTML = hits.slice(0, 8).map(([u, i]) => `<div class="inv-hit" data-choose="${u}">${avatar(u)}<div><b>${esc(i.name || "Friend")}</b></div><span class="add">Add</span></div>`).join("") || `<p class="muted sm">No one else to add.</p>`; };
