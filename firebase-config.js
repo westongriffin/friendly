@@ -25,4 +25,4 @@ export const adminUids = ["zzJY7MHFnyN2kAqq13hv79rZTVF2", "TUngQGsAKTRtHBpVEpZwF
 export const vapidPublicKey = "BAG0yqJjd5-thc9sQ3g9oG95zpXkbsUTLn2uJ0_nzx2n9IZ4cSgrQ5pLhTuVVexRrnUBNSOYLJDmyDs-paqWTN8";
 
 // GIPHY API key for GIF search in chats (developers.giphy.com → Create an App → API). Empty hides the GIF button.
-export const giphyKey = "";
+export const giphyKey = "TMRqR4xANGfjzbqaDzrDWJeBPMhu3RZ7";
