@@ -1470,8 +1470,9 @@ function homeBody() {
     <button class="fchip ${homeFilter === "none" ? "on" : ""}" data-filter="none">Just friends</button>
   </div>` : "";
 
-  const todayEvs = upcoming.filter(e => e.date === todayStr()).slice(0, 2);
-  const todayCards = todayEvs.map(e => `<div class="card notif-card today-card" data-ev="${e.id}" role="button">${dotHat(56)}<div style="flex:1;min-width:0"><div class="eyebrow-sm">Today</div><b>${esc(e.title)}${e.time ? " · " + fmtTime(e.time) : ""}</b><div class="muted sm">${e.kind === "meeting" ? (e.invitedUids || []).filter(u => (e.rsvps || {})[u] === "going").length + " accepted" : goingCount(e) + " going"}${evStops(e).length ? " · " + evStops(e).length + " stops" : e.location ? " · " + esc(e.location) : ""}</div></div><span class="chev">›</span></div>`).join("");
+  let hiddenToday = []; try { hiddenToday = JSON.parse(localStorage.getItem("friendlyTodayHidden") || "[]"); } catch {}
+  const todayEvs = upcoming.filter(e => e.date === todayStr() && !hiddenToday.includes(e.id + "|" + e.date)).slice(0, 2);
+  const todayCards = todayEvs.map(e => `<div class="card notif-card today-card" data-ev="${e.id}" role="button"><button type="button" class="today-x" data-hide-today="${e.id}|${e.date}" aria-label="Hide this">✕</button>${dotHat(56)}<div style="flex:1;min-width:0"><div class="eyebrow-sm">Today</div><b>${esc(e.title)}${e.time ? " · " + fmtTime(e.time) : ""}</b><div class="muted sm">${e.kind === "meeting" ? (e.invitedUids || []).filter(u => (e.rsvps || {})[u] === "going").length + " accepted" : goingCount(e) + " going"}${evStops(e).length ? " · " + evStops(e).length + " stops" : e.location ? " · " + esc(e.location) : ""}</div></div><span class="chev">›</span></div>`).join("");
   if ((S.profile.city || "").trim()) ensureCurated();
   return `
   ${notifCard()}
@@ -1519,6 +1520,7 @@ function wireHome() {
   document.querySelectorAll("[data-filter]").forEach(b => b.onclick = () => { homeFilter = b.dataset.filter; calDay = null; render(); });
   document.querySelectorAll("[data-bplan]").forEach(b => b.onclick = () => { const x = upcomingBirthdays(400).find(y => y.uid === b.dataset.bplan); if (x) planBirthday(x); });
   document.querySelectorAll("[data-bdismiss]").forEach(b => b.onclick = () => { try { const d = JSON.parse(localStorage.getItem("friendlyBdayDismissed") || "[]"); d.push(b.dataset.bdismiss); localStorage.setItem("friendlyBdayDismissed", JSON.stringify(d.slice(-40))); } catch {} render(); });
+  document.querySelectorAll("[data-hide-today]").forEach(b => b.onclick = e => { e.stopPropagation(); let h = []; try { h = JSON.parse(localStorage.getItem("friendlyTodayHidden") || "[]"); } catch {} h = [...h, b.dataset.hideToday].slice(-30); try { localStorage.setItem("friendlyTodayHidden", JSON.stringify(h)); } catch {} render(); });
   if (el("pastToggle")) el("pastToggle").onclick = () => { S.pastOpen = !S.pastOpen; if (S.pastOpen) startPast(); render(); };
   if (homeView === "calendar") startPast();
   if (el("viewToggle")) el("viewToggle").onclick = () => { homeView = homeView === "calendar" ? "cards" : "calendar"; try { localStorage.setItem("friendlyHomeView", homeView); } catch {} render(); };
@@ -2874,8 +2876,11 @@ function cleanupEvent() { S.evSubs.forEach(fn => fn()); S.evSubs = []; eventBgSt
 function planCardHtml(ev, plain) {
   const st = evStops(ev); if (!st.length) return "";
   const meeting = ev.kind === "meeting";
-  const today = ev.date === todayStr(), d = new Date(), nowM = (d.getHours() < 5 ? d.getHours() + 24 : d.getHours()) * 60 + d.getMinutes();
+  // Minutes since midnight of the event's own date, so 12:30 AM the night before isn't mistaken for the late part
+  // of the party; the small hours after the event's date (until 5 AM) still count as that night.
+  const nowM = (Date.now() - evDate(ev).getTime()) / 60000, today = nowM >= 0 && nowM < 29 * 60;
   let cur = -1; if (today) st.forEach((x, i) => { if (stopMins(x.time) <= nowM) cur = i; });
+  if (today && ev.endTime && stopMins(ev.endTime) <= nowM) cur = st.length;
   return `<div class="${plain ? "card th-plain" : "ev-card-glass"} plan-card" id="planCard"><div class="glass-head">${meeting ? "Agenda" : "The plan"} <span>${st.length} ${meeting ? "items" : "stops"}</span></div>
     <div class="tl tl-ev">${st.map((x, i) => { const state = !today ? "" : i < cur ? "done" : i === cur ? "cur" : i === cur + 1 ? "next" : "";
       return `<div class="stop ${state}"><span class="t">${x.time ? esc(fmtTime(x.time)) : ""}</span><span class="e">${esc(x.emoji || "📍")}</span>

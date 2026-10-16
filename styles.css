@@ -938,3 +938,5 @@ p .linkish{display:inline;margin:0;padding:0;color:var(--accent)}
 .past-head h2{margin:0}
 .past-chev{margin-left:auto;font-size:22px;line-height:1;color:var(--muted);transition:transform .2s}
 .past-head[aria-expanded="true"] .past-chev{transform:rotate(90deg)}
+.today-card{position:relative}
+.today-x{position:absolute;top:8px;right:10px;background:none;border:0;color:var(--muted);font-size:15px;padding:6px;cursor:pointer;z-index:1}
