@@ -4736,7 +4736,7 @@ let prevHash = location.hash;
 window.addEventListener("hashchange", () => {
   const was = prevHash; prevHash = location.hash;
   if (was !== "#/new" || location.hash === "#/new") return;
-  if ((compose.title || "").trim() && S.user && !isDemo() && !compose._created) {
+  if ((compose.title || "").trim() && S.user && !compose._created) {
     clearTimeout(draftTimer);
     if (!compose._draftId) compose._draftId = newId();
     let json = composeJson(); if (json.length > 900000) json = JSON.stringify({ ...JSON.parse(json), cover: null, coverTab: "emoji" });
@@ -4746,7 +4746,7 @@ window.addEventListener("hashchange", () => {
   resetCompose(); compose._restored = true;
 });
 function saveDraft() {
-  if (!(compose.title || "").trim() || !S.user || isDemo()) return;
+  if (!(compose.title || "").trim() || !S.user) return;
   clearTimeout(draftTimer);
   draftTimer = setTimeout(() => {
     if (location.hash !== "#/new" || !(compose.title || "").trim() || (el("createEventBtn") && el("createEventBtn").disabled)) return;
