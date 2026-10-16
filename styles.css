@@ -63,6 +63,9 @@ img{max-width:100%}
 .brand{font-family:var(--display);font-weight:700;font-size:24px;letter-spacing:-.03em}
 .brand.xl{font-size:44px}
 .brand .tilt{display:inline-block;color:var(--accent);transform:rotate(-9deg)}
+/* the SVG letters: 1.24em tall with .13em above and below, so they sit exactly where the 1.5-line-height text did */
+.wordmark{display:inline-block;vertical-align:top;height:1.24em;width:auto;margin:.13em 0;overflow:visible;fill:currentColor} .wordmark .wm-l{fill:var(--accent)}
+.splash-brand .wm-l{fill:#FFC145}
 .brand::after{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--sun);margin-left:4px;vertical-align:top;margin-top:2px}
 .brand.has-dot{display:inline-flex;align-items:flex-start;cursor:pointer} .brand.has-dot::after{display:none}
 .brand-dot{position:relative;width:16px;height:16px;border-radius:50%;background:var(--sun) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cellipse cx='5.6' cy='7' rx='1.15' ry='1.75' fill='%232A2019'/%3E%3Cellipse cx='10.4' cy='7' rx='1.15' ry='1.75' fill='%232A2019'/%3E%3Ccircle cx='5.3' cy='6.3' r='.4' fill='%23fff'/%3E%3Ccircle cx='10.1' cy='6.3' r='.4' fill='%23fff'/%3E%3Ccircle cx='3.4' cy='10' r='1.25' fill='%23FF6B57' fill-opacity='.55'/%3E%3Ccircle cx='12.6' cy='10' r='1.25' fill='%23FF6B57' fill-opacity='.55'/%3E%3Cpath d='M6.6 10.6q1.4 1.1 2.8 0' stroke='%232A2019' stroke-width='.8' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") center/100% no-repeat;margin:-2px 0 0 3px;padding:0;flex:none;transition:transform .25s;cursor:pointer;animation:dotBlink 5s infinite}

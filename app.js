@@ -81,12 +81,17 @@ document.addEventListener("focusout", () => setTimeout(() => {
 }, 60));
 // Inside the native app the layout is fixed: no pinch or focus zoom, so nothing can knock it out of place.
 if (NATIVE) { const vp = document.querySelector('meta[name="viewport"]'); if (vp) vp.setAttribute("content", "width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"); }
+// The logo's letters as drawn shapes (Bricolage Grotesque 700, traced the way the CSS set them), so it looks the
+// same on every device before the font loads. Ink follows the text color; the tilted "l" is coral (.wm-l).
+// The big sign-in logo uses the font's 44px optical cut, which is a little tighter, like the text it replaces.
+const WORDMARK = `<svg class="wordmark" viewBox="0 -950 3713 1240" role="img" aria-label="Friendly"><g transform="scale(1,-1)"><path d="M70 0V660H213V0ZM138 247V365H518V247ZM138 537V660H555V537ZM601 0V257V525H721V341H739Q746 410 765.5 453Q785 496 819 516.5Q853 537 903 537Q913 537 924.5 536Q936 535 951 531L945 378Q928 385 910 388Q892 391 878 391Q840 391 812 373Q784 355 767.5 320.5Q751 286 745 237V0ZM999 0V525H1143V0ZM1071 600Q1029 600 1006.5 617.5Q984 635 984 669Q984 704 1006.5 721.5Q1029 739 1071 739Q1114 739 1136.5 721.5Q1159 704 1159 669Q1159 635 1136.5 617.5Q1114 600 1071 600ZM1483 -14Q1417 -14 1367 4.5Q1317 23 1282 57.5Q1247 92 1229 141.5Q1211 191 1211 253Q1211 315 1228.5 367Q1246 419 1279.5 458Q1313 497 1362 518Q1411 539 1473 539Q1534 539 1580.5 519Q1627 499 1658 460Q1689 421 1703.5 365Q1718 309 1713 236L1304 233V312L1627 315L1580 274Q1586 327 1573 360.5Q1560 394 1533.5 410.5Q1507 427 1474 427Q1436 427 1408 406.5Q1380 386 1364.5 348Q1349 310 1349 256Q1349 172 1385.5 132Q1422 92 1483 92Q1511 92 1530.5 99.5Q1550 107 1562.5 119Q1575 131 1582 146.5Q1589 162 1593 178L1719 153Q1712 116 1695 85.5Q1678 55 1649 33Q1620 11 1579.5 -1.5Q1539 -14 1483 -14ZM1784 0V314V525H1902L1901 360H1919Q1932 420 1955.5 460Q1979 500 2015.5 519.5Q2052 539 2103 539Q2193 539 2240 475.5Q2287 412 2287 278V0H2143V262Q2143 343 2119 380.5Q2095 418 2049 418Q2009 418 1982.5 393.5Q1956 369 1942 326.5Q1928 284 1928 231V0ZM2567 -14Q2502 -14 2453.5 19.5Q2405 53 2378 115Q2351 177 2351 264Q2351 345 2375 406.5Q2399 468 2445.5 503Q2492 538 2561 538Q2611 538 2646 518.5Q2681 499 2703.5 462Q2726 425 2739 371H2760Q2754 404 2748.5 435.5Q2743 467 2739.5 495Q2736 523 2736 544V712H2881V250V0H2760L2761 154H2742Q2731 97 2708 60Q2685 23 2650 4.5Q2615 -14 2567 -14ZM2616 104Q2647 104 2670 117.5Q2693 131 2707.5 153.5Q2722 176 2729.5 202.5Q2737 229 2737 254V271Q2737 291 2731.5 312Q2726 333 2716 352.5Q2706 372 2691 387.5Q2676 403 2656.5 412Q2637 421 2613 421Q2578 421 2553 401Q2528 381 2514.5 345Q2501 309 2501 262Q2501 215 2515 179Q2529 143 2555 123.5Q2581 104 2616 104ZM3409 -178Q3370 -178 3329 -171Q3288 -164 3252 -149Q3216 -134 3190 -111L3230 15Q3262 -18 3309.5 -34.5Q3357 -51 3403 -51Q3456 -51 3491.5 -29.5Q3527 -8 3545 36Q3563 80 3566 146L3571 238H3551Q3542 171 3519.5 128.5Q3497 86 3462 66.5Q3427 47 3381 47Q3323 47 3284.5 76Q3246 105 3226.5 162.5Q3207 220 3207 306V525H3351V341Q3351 248 3372 207Q3393 166 3436 166Q3459 166 3478 178.5Q3497 191 3510 215Q3523 239 3530.5 274Q3538 309 3538 353V525H3682V140Q3682 79 3671 28.5Q3660 -22 3638.5 -60.5Q3617 -99 3584.5 -125.5Q3552 -152 3508.5 -165Q3465 -178 3409 -178Z"/><path class="wm-l" d="M3029.5 -6.8 2918.1 696.4 3058.3 718.6 3169.7 15.4Z"/></g></svg>`;
+const WORDMARK_XL = `<svg class="wordmark" viewBox="0 -950 3593 1240" role="img" aria-label="Friendly"><g transform="scale(1,-1)"><path d="M62 0V660H206V0ZM131 246V364H500V246ZM131 538V660H537V538ZM573 0V262V525H695L694 332H709Q716 405 735 450Q754 495 786.5 516Q819 537 864 537Q876 537 889.5 535Q903 533 919 527L912 372Q895 381 876.5 384.5Q858 388 843 388Q806 388 779 369.5Q752 351 737 314.5Q722 278 717 226V0ZM960 0V525H1104V0ZM1033 591Q991 591 968.5 609Q946 627 946 661Q946 695 968.5 713Q991 731 1033 731Q1076 731 1098 713Q1120 695 1120 661Q1120 627 1098 609Q1076 591 1033 591ZM1432 -14Q1365 -14 1314.5 5Q1264 24 1230.5 59.5Q1197 95 1180 144Q1163 193 1163 253Q1163 313 1179.5 365.5Q1196 418 1229 457Q1262 496 1310.5 517.5Q1359 539 1422 539Q1484 539 1531 518.5Q1578 498 1608 458.5Q1638 419 1651 363.5Q1664 308 1658 238L1255 234V314L1565 318L1526 275Q1532 326 1519.5 359.5Q1507 393 1482 409.5Q1457 426 1423 426Q1384 426 1357 406Q1330 386 1315.5 348Q1301 310 1301 257Q1301 173 1336 133Q1371 93 1432 93Q1460 93 1479 100.5Q1498 108 1510.5 120.5Q1523 133 1529.5 149Q1536 165 1538 182L1666 162Q1661 126 1646 94Q1631 62 1603 38Q1575 14 1533 0Q1491 -14 1432 -14ZM1722 0V306V525H1842L1840 344H1856Q1866 410 1888.5 453Q1911 496 1948.5 517.5Q1986 539 2038 539Q2128 539 2173.5 477Q2219 415 2219 285V0H2075V269Q2075 345 2052.5 381Q2030 417 1985 417Q1947 417 1920.5 392.5Q1894 368 1880.5 323Q1867 278 1866 216V0ZM2486 -14Q2423 -14 2375 18.5Q2327 51 2300 113.5Q2273 176 2273 265Q2273 349 2297.5 410Q2322 471 2368 504.5Q2414 538 2480 538Q2530 538 2565 518.5Q2600 499 2622.5 460.5Q2645 422 2657 365H2675Q2669 399 2663.5 431Q2658 463 2655 491.5Q2652 520 2652 543V707H2797V235V0H2674L2675 157H2660Q2648 100 2625 62Q2602 24 2567.5 5Q2533 -14 2486 -14ZM2534 103Q2563 103 2585.5 116.5Q2608 130 2622.5 152Q2637 174 2645 200.5Q2653 227 2653 255V269Q2653 291 2647.5 313Q2642 335 2632 354Q2622 373 2607 388Q2592 403 2573.5 411.5Q2555 420 2532 420Q2497 420 2472.5 399.5Q2448 379 2435.5 343Q2423 307 2423 261Q2423 215 2436 179Q2449 143 2474.5 123Q2500 103 2534 103ZM3296 -172Q3259 -172 3219.5 -165Q3180 -158 3144 -143.5Q3108 -129 3081 -107L3121 23Q3154 -11 3200.5 -27Q3247 -43 3290 -43Q3343 -43 3378 -21Q3413 1 3431 44Q3449 87 3450 150L3455 243H3438Q3431 175 3408.5 132Q3386 89 3351 69Q3316 49 3270 49Q3212 49 3173.5 78Q3135 107 3116 164.5Q3097 222 3097 307V525H3241V342Q3241 251 3261.5 210.5Q3282 170 3325 170Q3348 170 3366.5 182Q3385 194 3398 218Q3411 242 3418 277Q3425 312 3426 357V525H3569V144Q3569 86 3558.5 37Q3548 -12 3527 -50.5Q3506 -89 3473.5 -116.5Q3441 -144 3397 -158Q3353 -172 3296 -172Z"/><path class="wm-l" d="M2931.5 -7 2820.9 691.3 2962.1 713.7 3072.7 15.4Z"/></g></svg>`;
 if (BLOCKED_MOBILE_WEB) {
   document.getElementById("app").innerHTML = `
   <div class="auth-wrap">
     <div class="auth-bg"></div>
     <div class="auth-card card">
-      <div class="brand xl">Friend<span class="tilt">l</span>y</div>
+      <div class="brand xl">${WORDMARK_XL}</div>
       <p class="auth-lede">Friendly is best on the app. Taking you to ${IS_ANDROID ? "Google Play" : "the App Store"}…</p>
       <a class="btn primary lg" href="${IS_ANDROID ? PLAY_STORE_URL : APP_STORE_URL}">Get the Friendly app</a>
     </div>
@@ -921,7 +926,7 @@ window.addEventListener("hashchange", () => keptInputs.clear());
 function restoreKept() { for (const [id, v] of keptInputs) { const n = document.getElementById(id); if (!n || !n.closest("[data-keep]")) continue; if (n.type === "checkbox") n.checked = !!v; else if (n.value !== v) n.value = v; } }
 // The loading screen: the wordmark flows into Blip (blip.js), then Blip idles until the app is ready.
 let splashStop = null;
-function splashInner(msg) { return window.Blip ? `<svg class="splash-blip"></svg><div class="splash-say" aria-hidden="true"><b>Hi, I'm Dot!</b> Let's get everyone together.</div>` : `<div class="brand splash-brand">Friend<span class="tilt">l</span>y</div>`; }
+function splashInner(msg) { return window.Blip ? `<svg class="splash-blip"></svg><div class="splash-say" aria-hidden="true"><b>Hi, I'm Dot!</b> Let's get everyone together.</div>` : `<div class="brand splash-brand">${WORDMARK}</div>`; }
 function mountSplash(root, msg) {
   const cur = root.querySelector(".splash");
   if (cur && cur.querySelector(".splash-blip")) return;
@@ -945,7 +950,7 @@ function replaySplash() {
 }
 // What shows while the account is still loading: the real header and tabs, with soft placeholder cards.
 function loadingShell() {
-  return `<header class="topbar"><div class="brand has-dot"><span>Friend<span class="tilt">l</span>y</span><span class="brand-dot" aria-hidden="true"></span></div><div class="topbar-right"><span class="skel skel-chip"></span></div></header>
+  return `<header class="topbar"><div class="brand has-dot"><span>${WORDMARK}</span><span class="brand-dot" aria-hidden="true"></span></div><div class="topbar-right"><span class="skel skel-chip"></span></div></header>
   <nav class="tabs"><button class="tab on" type="button">Events</button><button class="tab" type="button">Groups</button><button class="tab" type="button">Money</button><button class="tab" type="button"><span class="curate-lbl">${CURATE_LABEL}<i class="spark">✦</i></span></button></nav>
   <main class="wrap boot-skel" aria-busy="true" aria-label="Loading"><div class="skel skel-banner"></div><div class="skel skel-line"></div><div class="skel-grid"><div class="skel skel-tile"></div><div class="skel skel-tile"></div><div class="skel skel-tile"></div><div class="skel skel-tile"></div></div></main>`;
 }
@@ -987,7 +992,7 @@ function onboardingBody() {
   <div class="auth-wrap">
     <canvas id="authbg" class="auth-bg"></canvas>
     <div class="auth-card card">
-      <div class="brand xl">Friend<span class="tilt">l</span>y</div>
+      <div class="brand xl">${WORDMARK_XL}</div>
       ${window.Blip ? `<div class="dot-say">${dot("happy", 60)}<div class="say-bubble">Hi ${esc(first(p.name))}, I'm Dot. Let's finish setting up your profile. After that I'll be up in the logo if you ever want a tip.</div></div>` : `<p class="auth-lede">Welcome, ${esc(p.name)}! Let's finish setting up your profile.</p>`}
       <p class="pic-cta">✨ Select a profile pic! ✨</p>
       <button type="button" class="avatar-edit pulse" id="obPhotoBtn" title="Add a photo" style="margin:0 auto 14px;display:block">${avatar(myUid(), "xxl")}<span class="cam">📷</span></button>
@@ -1042,7 +1047,7 @@ function renderAuth(root) {
   <div class="auth-wrap">
     <canvas id="authbg" class="auth-bg"></canvas>
     <div class="auth-card card">
-      <div class="brand xl">Friend<span class="tilt">l</span>y</div>
+      <div class="brand xl">${WORDMARK_XL}</div>
       <div class="auth-dot">${window.Blip ? window.Blip.svg({ mood: "happy", size: 64, wave: true }) : ""}<div class="say-bubble">${authMode === "in"
         ? `<b>Hi, I'm Dot!</b> Welcome back. Sign in and I'll catch you up on what your friends are planning.`
         : `<b>Hi, I'm Dot!</b> I help your crew plan nights out, send invites, and settle up. Make an account and I'll show you around.`}</div></div>
@@ -1146,7 +1151,7 @@ function renderResetPassword(root) {
       .catch(() => { resetState = "invalid"; render(); });
   }
   const goHome = () => { location.href = location.origin + location.pathname; };
-  const shell = inner => `<div class="auth-wrap"><canvas id="authbg" class="auth-bg"></canvas><div class="auth-card card"><div class="brand xl">Friend<span class="tilt">l</span>y</div>${inner}</div></div>`;
+  const shell = inner => `<div class="auth-wrap"><canvas id="authbg" class="auth-bg"></canvas><div class="auth-card card"><div class="brand xl">${WORDMARK_XL}</div>${inner}</div></div>`;
   if (resetState === "checking") { root.innerHTML = shell(`<p class="auth-lede">Checking your reset link…</p>`); startParticles(el("authbg"), "confetti"); return; }
   if (resetState === "invalid") {
     root.innerHTML = shell(`<div style="display:flex;justify-content:center">${dot("oops", 72)}</div><p class="auth-lede">This reset link is invalid or has expired. Request a new one from the sign-in screen.</p><button class="btn primary lg" id="resetBack">Back to sign in</button>`);
@@ -1201,7 +1206,7 @@ function shell(body) {
   return `
   ${isDemo() ? `<div class="demo-bar">${dot("happy", 26)}<span>Demo mode -- this is Riley, a shared public sandbox account. Explore freely; changes are visible to other visitors and reset nightly.</span></div>` : ""}
   <header class="topbar">
-    <div class="brand has-dot"><span data-go="#/">Friend<span class="tilt">l</span>y</span><button type="button" class="brand-dot" id="brandDot" aria-label="A tip from Dot"></button></div>
+    <div class="brand has-dot"><span data-go="#/">${WORDMARK}</span><button type="button" class="brand-dot" id="brandDot" aria-label="A tip from Dot"></button></div>
     <div class="topbar-right"><button class="bell" data-go="#/search" title="Search">🔍</button>${S.msgsReady ? `<button class="bell" data-go="#/messages" title="Messages">💬${msgBadge() ? `<span class="badge">${msgBadge()}</span>` : ""}</button>` : ""}<button class="bell" data-go="#/activity" title="Activity">🔔${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ""}</button>
     <button class="me-chip" data-go="#/profile">${avatar(S.user.uid)}<span>${esc(first(p.name))}</span></button></div>
   </header>
