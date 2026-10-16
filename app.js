@@ -660,12 +660,10 @@ async function resolveCity(input) {
 // ---------- state ----------
 // The intro is a flat 6 seconds, every time.
 const BOOT_AT = Date.now(), SPLASH_MIN = 6000, SPLASH_MAX = 6000; let splashTimer = null, splashHold = false;
-// Dot's intro plays only when someone has been away from the app for 10 minutes or more (first launch included).
-// Reopening sooner, even after closing the app, goes straight in. friendlyLastSeen is refreshed while the app is open.
+// Dot's intro plays on every fresh launch (the app was closed), and when the app comes back from the background
+// after 10 minutes or more; a quicker switch back goes straight in.
 const AWAY_FOR_INTRO = 10 * 60 * 1000;
-const lastSeenAt = (() => { try { return Number(localStorage.getItem("friendlyLastSeen")) || 0; } catch { return 0; } })();
 const markSeen = () => { try { localStorage.setItem("friendlyLastSeen", String(Date.now())); } catch {} };
-const SKIP_INTRO = lastSeenAt && Date.now() - lastSeenAt < AWAY_FOR_INTRO;
 markSeen(); setInterval(() => { if (!document.hidden) markSeen(); }, 30000);
 window.addEventListener("pagehide", markSeen);
 const S = {
@@ -956,7 +954,6 @@ function renderNow() {
   const root = el("app");
   // The intro runs its own course (logo, Dot forms, a beat of rest) and then always gets out of the way.
   // It never waits on data: if the account hasn't loaded yet, the app appears with placeholders instead.
-  if (SKIP_INTRO) S._introOver = true;
   if (!S._introOver && Date.now() - BOOT_AT < SPLASH_MIN) {
     if (!splashTimer) splashTimer = setTimeout(() => { splashTimer = null; render(); }, SPLASH_MIN - (Date.now() - BOOT_AT) + 20);
     mountSplash(root, "Getting everyone here…"); return; }
@@ -1416,7 +1413,7 @@ function homeBody() {
   ${todayCards}
   ${needIdeaCard(upcoming)}
   ${birthdayCard()}
-  <div class="section-head"><h2>${homeView === "calendar" ? "Calendar" : "Upcoming"}</h2><span class="btnrow" style="gap:8px"><button class="btn small" id="viewToggle" title="Switch view">${homeView === "calendar" ? "🗂 Cards" : "📅 Calendar"}</button>${(S.drafts || []).length ? `<button class="btn small" data-go="#/drafts" title="Saved drafts">📝 Drafts (${S.drafts.length})</button>` : ""}<button class="btn primary small" data-go="#/new">＋ New event</button></span></div>
+  <div class="section-head"><h2>${homeView === "calendar" ? "Calendar" : "Upcoming"}</h2><span class="btnrow head-tools"><button class="icon-btn" id="viewToggle" title="${homeView === "calendar" ? "Show as cards" : "Show as a calendar"}" aria-label="${homeView === "calendar" ? "Show as cards" : "Show as a calendar"}">${homeView === "calendar" ? "🗂" : "📅"}</button><button class="icon-btn" data-go="#/drafts" title="Drafts" aria-label="Drafts${(S.drafts || []).length ? ", " + S.drafts.length + " saved" : ""}">📝${(S.drafts || []).length ? `<span class="badge">${S.drafts.length}</span>` : ""}</button><button class="btn primary small" data-go="#/new">＋ New event</button></span></div>
   ${filterBar}
   ${homeView === "calendar" ? calendarBody([...upcoming, ...past]) : `<div class="ev-grid">${upcoming.length ? upcoming.map(eventCard).join("") : emptyState("🗓️", "No plans yet", "Create your first event: pick a theme and invite the crew.", "sleepy") + (window.Blip && !isDemo() ? `<div style="text-align:center;margin:-6px 0 14px"><button type="button" class="btn tell-dot inline" id="homeTell">${dot("happy", 26)} Or just tell Dot the plan</button></div>` : "")}</div>
   ${past.length ? `<div class="section-head" style="margin-top:26px"><h2>Past</h2></div><div class="ev-grid dim">${past.map(eventCard).join("")}</div>` : ""}`}`;
