@@ -4934,12 +4934,14 @@ let lockedY = null;
 function lockScroll() {
   if (lockedY !== null) return;
   lockedY = window.scrollY || 0;
+  document.body.classList.add("dlg-open");
   const b = document.body.style;
   b.position = "fixed"; b.top = -lockedY + "px"; b.left = "0"; b.right = "0"; b.width = "100%";
 }
 function unlockScroll() {
   if (lockedY === null) return;
   const y = lockedY; lockedY = null;
+  document.body.classList.remove("dlg-open");
   const b = document.body.style;
   b.position = ""; b.top = ""; b.left = ""; b.right = ""; b.width = "";
   window.scrollTo(0, y);

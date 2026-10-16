@@ -199,8 +199,12 @@ export function startParticles(canvas, id, custom) {
   function seed() { parts = Array.from({ length: count() }, make); }
 
   let last = performance.now();
+  // Paused while a dialog is open (body.dlg-open) or the app is in the background: the full-screen redraw every
+  // frame starved taps inside dialogs on event pages (Add people with a long contacts list felt frozen).
+  let idleT = 0;
   function frame(now) {
     if (!running) return;
+    if (document.hidden || document.body.classList.contains("dlg-open")) { raf = 0; clearTimeout(idleT); idleT = setTimeout(() => { if (running) { last = performance.now(); raf = requestAnimationFrame(frame); } }, 300); return; }
     const dt = Math.min((now - last) / 1000, .05); last = now;
     ctx.clearRect(0, 0, W, H);
     for (const p of parts) {
@@ -254,5 +258,5 @@ export function startParticles(canvas, id, custom) {
   } else {
     raf = requestAnimationFrame(frame);
   }
-  return () => { running = false; cancelAnimationFrame(raf); window.removeEventListener("resize", onResize); ctx && ctx.clearRect(0, 0, W, H); };
+  return () => { running = false; clearTimeout(idleT); cancelAnimationFrame(raf); window.removeEventListener("resize", onResize); ctx && ctx.clearRect(0, 0, W, H); };
 }
