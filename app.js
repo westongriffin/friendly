@@ -2916,7 +2916,7 @@ function renderEventPage(root, id) {
   S.comments = []; S.photos = []; S.polls = []; S.songs = [];
   const sub = (name, fn) => S.evSubs.push(onSnapshot(collection(db, "events", id, name), snap => fn(snap.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.warn("listener event/" + name + ":", err.code || err.message)));
   sub("comments", rows => { S.comments = rows.sort((a, b) => a.createdAt - b.createdAt); withInputKept(() => { const b = el("wall"); if (b) { b.innerHTML = wallInner(ev); wireWall(ev); } const dc = el("dayCard"); if (dc) { dc.innerHTML = dayInner(ev); wireDay(ev); } }); });
-  sub("photos", rows => { S.photos = rows.sort((a, b) => b.createdAt - a.createdAt); const b = el("photosCard"); if (b) { b.innerHTML = photosInner(ev); wirePhotos(ev); } });
+  sub("photos", rows => { S.photos = rows.sort((a, b) => b.createdAt - a.createdAt); S.memories.set(id, S.photos.filter(visibleContent)); const b = el("photosCard"); if (b) { b.innerHTML = photosInner(ev); wirePhotos(ev); } });
   sub("polls", rows => { S.polls = rows.sort((a, b) => a.createdAt - b.createdAt); const b = el("pollsCard"); if (b) { b.innerHTML = pollsInner(ev); wirePolls(ev); } });
   sub("songs", rows => { S.songs = rows.sort((a, b) => (Object.keys(b.votes || {}).length - Object.keys(a.votes || {}).length) || a.createdAt - b.createdAt); const b = el("playlistCard"); if (b) { b.innerHTML = playlistInner(ev); wirePlaylist(ev); } });
 }
@@ -4848,7 +4848,7 @@ function photosPageBody() {
   const section = (ev, label) => `<div class="section-head" style="margin-top:18px"><h2>${label ? label + " · " : ""}${esc(ev.emoji || "")} ${esc(ev.title)}</h2><a class="muted sm" data-go="#/e/${ev.id}">${esc(fmtWhen(ev))} ›</a></div>
     <div class="photo-grid mem-grid">${(S.memories.get(ev.id) || []).map(p => `<div class="photo-tile"><img src="${esc(p.img)}" data-mem="${p.id}" data-mev="${ev.id}" alt="" loading="lazy">${photoBadges(p)}</div>`).join("")}</div>`;
   return `<button class="link-back" data-go="#/profile">‹ Profile</button>
-  <div class="section-head"><h2>Memories</h2><span class="muted sm">${evs.reduce((t, ev) => t + S.memories.get(ev.id).length, 0)} photos</span></div>
+  <div class="section-head"><h2>Memories</h2><span class="muted sm">${(n => n + (n === 1 ? " photo" : " photos"))(evs.reduce((t, ev) => t + S.memories.get(ev.id).length, 0))}</span></div>
   ${S._memLoading ? `<p class="muted">Gathering photos…</p>` : ""}
   ${ago1.map(ev => section(ev, "🕰️ One year ago")).join("")}
   ${evs.length ? evs.map(ev => section(ev)).join("") : (S._memLoading ? "" : emptyState("📸", "No photos yet", "Photos added to your events' photo walls show up here, newest first.", "sleepy"))}`;
