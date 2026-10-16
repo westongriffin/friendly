@@ -801,22 +801,22 @@ function subscribeAll(u) {
       invitesPhoneKey = pk;
       if (invitesPhoneUnsub) invitesPhoneUnsub();
       invitesPhoneUnsub = on("invitesPhone", query(collection(db, "groups"), where("invitedPhones", "array-contains", pk)), snap => {
-        S.pendingInvitesPhone = new Map(snap.docs.map(d2 => ({ id: d2.id, ...d2.data() })).filter(g => !(g.memberUids || []).includes(u.uid)).map(g => [g.id, g])); render();
+        S.pendingInvitesPhone = new Map(snap.docs.map(d2 => ({ id: d2.id, ...d2.data() })).filter(g => !(g.memberUids || []).includes(u.uid)).map(g => [g.id, g])); renderSoon();
       });
       add(invitesPhoneUnsub);
       // Events someone invited this phone number to by text, not joined yet: shown on Events with a "tap to join" veil.
       if (phoneEventsUnsub) phoneEventsUnsub();
       phoneEventsUnsub = on("phoneEvents", query(collection(db, "events"), where("invitedPhones", "array-contains", pk), where("openLink", "==", true)), snap => {
-        S.phoneEvents = new Map(snap.docs.map(d2 => ({ id: d2.id, ...d2.data(), _unjoined: true })).filter(e => !(e.invitedUids || []).includes(u.uid)).map(e => [e.id, e])); render();
+        S.phoneEvents = new Map(snap.docs.map(d2 => ({ id: d2.id, ...d2.data(), _unjoined: true })).filter(e => !(e.invitedUids || []).includes(u.uid)).map(e => [e.id, e])); renderSoon();
       });
       add(phoneEventsUnsub);
     }
-    render();
+    renderSoon();
   }));
 
   add(on("groups", query(collection(db, "groups"), where("memberUids", "array-contains", u.uid)), snap => {
     S.groups = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }]));
-    rebuildContacts(); resubscribeEvents(u); render();
+    rebuildContacts(); resubscribeEvents(u); renderSoon();
   }));
 
   add(on("invites", query(collection(db, "groups"), where("invitedEmails", "array-contains", (u.email || "").toLowerCase())), snap => {
@@ -824,31 +824,31 @@ function subscribeAll(u) {
     // to [id, doc] pairs before filtering, so every invite lost its fields and
     // Join looked up an undefined key: the "Join does nothing" bug.)
     S.pendingInvites = new Map(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(g => !(g.memberUids || []).includes(u.uid)).map(g => [g.id, g]));
-    render();
+    renderSoon();
   }));
 
   add(on("expenses", query(collection(db, "expenses"), where("involved", "array-contains", u.uid)), snap => {
-    S.expenses = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); render();
+    S.expenses = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); renderSoon();
   }));
   add(on("settlements", query(collection(db, "settlements"), where("involved", "array-contains", u.uid)), snap => {
-    S.settlements = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); render();
+    S.settlements = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); renderSoon();
   }));
 
   // saved event drafts (users/{uid}/drafts), newest first
   add(on("drafts", query(collection(db, "users", u.uid, "drafts"), orderBy("updatedAt", "desc"), limit(50)), snap => {
-    S.drafts = snap.docs.map(d => ({ id: d.id, ...d.data() })); render();
+    S.drafts = snap.docs.map(d => ({ id: d.id, ...d.data() })); renderSoon();
   }));
   // friends (requests both ways + accepted) and private conversations
   add(on("friends", query(collection(db, "friendships"), where("uids", "array-contains", u.uid)), snap => {
     S.msgsReady = true;   // Messages appear only once the server side (rules) answers; until then nothing half-works
-    S.friends = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); rebuildContacts(); render();
+    S.friends = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); rebuildContacts(); renderSoon();
   }));
   add(on("dms", query(collection(db, "dms"), where("uids", "array-contains", u.uid)), snap => {
-    S.dms = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); render();
+    S.dms = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); renderSoon();
   }));
   // activity feed (written by Cloud Functions for everything I'd be notified about)
   add(on("activity", query(collection(db, "activity"), where("uids", "array-contains", u.uid), orderBy("createdAt", "desc"), limit(60)), snap => {
-    S.activity = snap.docs.map(d => ({ id: d.id, ...d.data() })); render();
+    S.activity = snap.docs.map(d => ({ id: d.id, ...d.data() })); renderSoon();
   }));
 
   // events where I'm directly invited: upcoming ones now, past ones a moment after everything else is in
@@ -857,7 +857,7 @@ function subscribeAll(u) {
   const invUp = (full) => add(onSnapshot(full ? query(collection(db, "events"), where("invitedUids", "array-contains", u.uid))
     : query(collection(db, "events"), where("invitedUids", "array-contains", u.uid), where("date", ">=", S.evCut)), snap => {
     takeEvents("inv", snap); if (full) S.pastLoaded = true;
-    render(); if (!snap.metadata.fromCache) schedulePast();
+    renderSoon(); if (!snap.metadata.fromCache) schedulePast();
   }, err => {
     // Without its index (just deployed, still building) the dated query fails: fall back to loading everything.
     console.warn("listener events:", err.code || err.message);
@@ -884,8 +884,8 @@ function startPast() {
   S.pastOn = true; clearTimeout(S._pastTimer);
   const u = S.user;
   S.subs.push(onSnapshot(query(collection(db, "events"), where("invitedUids", "array-contains", u.uid), where("date", "<", S.evCut)), snap => {
-    takeEvents("invPast", snap); S.pastLoaded = true; render();
-  }, err => { console.warn("listener past events:", err.code || err.message); S.pastLoaded = true; render(); }));
+    takeEvents("invPast", snap); S.pastLoaded = true; renderSoon();
+  }, err => { console.warn("listener past events:", err.code || err.message); S.pastLoaded = true; renderSoon(); }));
   resubscribeEvents(u);
 }
 // Tear down every listener before signing out; otherwise the SDK re-sends
@@ -905,7 +905,7 @@ function resubscribeEvents(u) {
   if (!gids.length) return;
   const subscribe = (src, q, attempt, onFail) => {
     let unsub = null;
-    unsub = onSnapshot(q, snap => { takeEvents(src, snap); render(); }, err => {
+    unsub = onSnapshot(q, snap => { takeEvents(src, snap); renderSoon(); }, err => {
       // Right after creating or joining a group, the local groups snapshot fires before the server has the
       // membership write, so the rule check for this query can fail once. A dead listener would hide every
       // group event, so retry a few times.
@@ -967,7 +967,12 @@ function withInputKept(fn) {
   n.focus({ preventScroll: true });
   try { if (snap.s != null) n.setSelectionRange(snap.s, snap.e); } catch {}
 }
-function render() { withInputKept(renderNow); restoreKept(); try { syncBadge(); } catch {} }
+function render() { clearTimeout(renderTimer); renderTimer = 0; withInputKept(renderNow); restoreKept(); try { syncBadge(); } catch {} }
+// Data arriving from the server redraws through here: a burst of snapshots (a dozen listeners, each answering
+// from the device copy and then the server) becomes one redraw, and an open event page skips redraws that
+// don't touch it. Rebuilding the whole screen for every snapshot left iPhones half-painted and stalling.
+let renderTimer = 0;
+function renderSoon() { if (renderTimer) return; renderTimer = setTimeout(() => { renderTimer = 0; S._bgRender = true; try { render(); } finally { S._bgRender = false; } }, 80); }
 // Forms marked data-keep (sign-up details, profile) hold what you typed even when something else
 // redraws the screen, like adding a photo (it saves at once, and the redraw used to empty every field).
 const keptInputs = new Map();
@@ -2870,7 +2875,7 @@ async function createEvent() {
 
 // ---------- EVENT PAGE (the themed invite) ----------
 let eventBgStop = () => {};
-function cleanupEvent() { S.evSubs.forEach(fn => fn()); S.evSubs = []; eventBgStop(); eventBgStop = () => {}; }
+function cleanupEvent() { S._evShown = null; S.evSubs.forEach(fn => fn()); S.evSubs = []; eventBgStop(); eventBgStop = () => {}; }
 // The plan on the event page: a timeline of stops. On the day itself, the stop underway is marked Now,
 // earlier ones fade, and the next one is marked Up next; every stop with a place opens directions.
 function planCardHtml(ev, plain) {
@@ -2888,8 +2893,12 @@ function planCardHtml(ev, plain) {
         ${(x.place || x.name) && state !== "done" ? `<a class="stop-dir" href="${esc(stopMapUrl(x))}" target="_blank" rel="noopener">Directions</a>` : ""}</div>`; }).join("")}</div></div>`;
 }
 function renderEventPage(root, id) {
-  cleanupEvent();
   const ev = S.events.get(id);
+  // A background redraw with nothing new for this page: keep what's on screen (its own listeners keep the
+  // wall, photos, polls and playlist current).
+  if (S._bgRender && ev && S._evShown && S._evShown.id === id && S._evShown.ev === ev && S._evShown.profile === S.profile && el("evPage")) return;
+  cleanupEvent();
+  S._evShown = ev ? { id, ev, profile: S.profile } : null;
   if (!ev) startPast();
   if (!ev) { root.innerHTML = shell(`<div class="card empty">${dot("thinking", 72)}<b>Loading event…</b><p class="muted">If this stays, you may not have access.</p><button class="btn" data-go="#/">Home</button></div>`); wireShell(); getDoc(doc(db, "events", id)).then(d => { if (d.exists()) { S.events.set(id, { id, ...d.data() }); render(); } }).catch(() => {}); return; }
   if (ev.kind === "meeting") { root.innerHTML = shell(meetingBody(ev)); wireShell(); wireMeeting(ev); return; }
