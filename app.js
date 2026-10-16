@@ -1737,7 +1737,7 @@ const groupInviteText = g => `Hey! I added you to our group "${g.name}" on Frien
 // number from the user's own phone (one text per person), then opens Friendly again. Off until the
 // Shortcut's iCloud link is set. Whether it's installed can't be detected, so a device remembers it
 // after the first send that comes back.
-const INVITES_SHORTCUT_URL = "";
+const INVITES_SHORTCUT_URL = "https://www.icloud.com/shortcuts/96d0a800f5d6409c9cec3fe35f4125d8";
 const AUTO_SEND = NATIVE && !IS_ANDROID && !!INVITES_SHORTCUT_URL;
 const autoSendReady = v => { try { if (v === undefined) return localStorage.getItem("friendlyAutoSend") === "1"; if (v) localStorage.setItem("friendlyAutoSend", "1"); else localStorage.removeItem("friendlyAutoSend"); } catch { return false; } };
 const shortcutRunUrl = (numbers, body) => "shortcuts://run-shortcut?name=" + encodeURIComponent("Friendly Invites") + "&input=text&text=" + encodeURIComponent(JSON.stringify({ m: body, p: numbers.map(n => n.replace(/[^+\d]/g, "")) }));
