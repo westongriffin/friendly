@@ -921,4 +921,4 @@ html{background:var(--bg)}
 .icon-btn .badge{position:absolute;top:-4px;right:-4px}
 /* Narrow phones (iPhone mini/SE width): the logo never wraps; the profile chip shows just the photo */
 .topbar .brand{white-space:nowrap;flex:none}
-@media (max-width:389px){.topbar .me-chip span{display:none}.topbar .me-chip{padding:3px}}
+@media (max-width:389px){.topbar .me-chip > span:not(.avatar){display:none}.topbar .me-chip{padding:3px}}
