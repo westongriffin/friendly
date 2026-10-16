@@ -979,7 +979,19 @@ function withInputKept(fn) {
   n.focus({ preventScroll: true });
   try { if (snap.s != null) n.setSelectionRange(snap.s, snap.e); } catch {}
 }
-function render() { clearTimeout(renderTimer); renderTimer = 0; withInputKept(renderNow); restoreKept(); try { syncBadge(); } catch {} }
+function render() {
+  clearTimeout(renderTimer); renderTimer = 0;
+  // Background data never rebuilds a screen you're filling in or chatting on: the New event form (its draft
+  // autosave answers back as a snapshot, and the rebuild closed sections and jumped the form) and a message
+  // thread (its own listener paints new messages).
+  if (S._bgRender && S.route && ((S.route.name === "new" && el("cTitle")) || (S.route.name === "dm" && el("dmList")))) { try { syncBadge(); } catch {} return; }
+  // Expandable sections you opened stay open through a redraw (keyed by id, else by their summary text).
+  const openKeys = new Set([...document.querySelectorAll("#app details[open]")].map(detailsKey));
+  withInputKept(renderNow); restoreKept();
+  if (openKeys.size) document.querySelectorAll("#app details").forEach(d => { if (openKeys.has(detailsKey(d))) d.open = true; });
+  try { syncBadge(); } catch {}
+}
+const detailsKey = d => d.id || (location.hash.split("?")[0] + "|" + ((d.querySelector("summary") || {}).textContent || "").trim());
 // Data arriving from the server redraws through here: a burst of snapshots (a dozen listeners, each answering
 // from the device copy and then the server) becomes one redraw, and an open event page skips redraws that
 // don't touch it. Rebuilding the whole screen for every snapshot left iPhones half-painted and stalling.
@@ -4378,7 +4390,7 @@ function ensureDmSub(fid) {
 }
 function markDmRead(fid) {
   const t = S.dms.get(fid);
-  if (t && dmIsUnread(t) && document.visibilityState === "visible" && S.route.name === "dm") updateDoc(doc(db, "dms", fid), { [`readAt.${myUid()}`]: Date.now() }).catch(() => {});
+  if (t && dmIsUnread(t) && document.visibilityState === "visible" && S.route.name === "dm") updateDoc(doc(db, "dms", fid), { [`readAt.${myUid()}`]: Math.max(Date.now(), t.lastAt || 0) }).catch(() => {});
 }
 // Links become tappable; 1-3 emoji with no other text show big, like iMessage.
 const linkifyHtml = h => h.replace(/\b(https?:\/\/[^\s<]+[^\s<.,;:!?)\]'"])/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
@@ -4724,7 +4736,9 @@ function activityBody() {
 }
 function wireActivity() {
   document.querySelectorAll("[data-act]").forEach(a => a.onclick = e => { e.preventDefault(); location.hash = routeTail(a.dataset.act); });
-  if (unreadCount()) updateDoc(doc(db, "users", myUid()), { activitySeenAt: Date.now() }).catch(() => {});
+  // Seen up to the newest item's own time (server clock), not this phone's: a phone clock running behind left the
+  // newest item "unread" forever, so every redraw wrote again and the screen kept redrawing.
+  if (unreadCount()) { const newest = Math.max(Date.now(), ...(S.activity || []).map(x => x.createdAt || 0)); if (Date.now() - (S._actSeenTry || 0) > 5000) { S._actSeenTry = Date.now(); S._actSeenWrote = newest; updateDoc(doc(db, "users", myUid()), { activitySeenAt: newest }).catch(() => {}); } }
 }
 
 // ---------- MEETINGS (plain calendar entries, rendered in the normal shell) ----------
