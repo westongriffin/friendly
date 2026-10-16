@@ -555,6 +555,17 @@ async function compressImage(src, maxDim = 1400, quality = 0.8, maxBytes = 72000
   if (out.length > maxBytes && maxDim > 800) return compressImage(out, Math.round(maxDim * 0.8), quality, maxBytes);
   return out;
 }
+// Looks for AI covers. "Surprise me" picks one at random each time, so covers don't all come out alike.
+const COVER_STYLES = [
+  ["surprise", "🎲 Surprise me", ""],
+  ["photo", "📷 Photo", "realistic candid photograph, natural light, shallow depth of field, true-to-life colors"],
+  ["illustration", "🖍️ Illustration", "detailed editorial illustration, considered color palette, textured brushwork"],
+  ["watercolor", "🎨 Watercolor", "loose watercolor painting on textured paper, soft washes, gentle palette"],
+  ["retro", "📺 Retro poster", "vintage 1970s screen-printed poster art, limited color palette, paper grain"],
+  ["minimal", "◻️ Minimal", "minimalist graphic composition, lots of negative space, two or three colors"],
+  ["film", "🎞️ Film", "35mm film photograph, visible grain, slightly faded colors, nostalgic mood"]
+];
+const coverStylePrompt = k => { const pool = COVER_STYLES.filter(s => s[2]); const s = COVER_STYLES.find(x => x[0] === k && x[2]) || pool[Math.floor(Math.random() * pool.length)]; return s[2]; };
 async function generateCover(prompt) {
   // Primary: a Gemini image model on Vertex, driven through a Firestore trigger.
   // We write a request doc; the Cloud Function generates the image and writes
@@ -567,7 +578,7 @@ async function generateCover(prompt) {
     if (image) return compressImage(image, 1024, 0.8);
   } catch (e) { console.warn("Imagen unavailable, using fallback:", e && e.message); }
   const seed = Math.floor(Math.random() * 1e6);
-  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt + ", vibrant celebratory illustration, bold colors, high quality, no text, no words, no numbers, no dates")}?width=1024&height=640&nologo=true&model=flux&seed=${seed}`;
+  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt + ". High quality, no text, no words, no numbers, no dates")}?width=1024&height=640&nologo=true&model=flux&seed=${seed}`;
   const res = await fetch(url); if (!res.ok) throw new Error("Generator busy, try again");
   return compressImage(await blobToURL(await res.blob()), 1024, 0.74);
 }
@@ -579,7 +590,7 @@ function imagenViaFirestore(prompt) {
     let unsub = null, timer = null;
     const done = (fn, arg) => { if (timer) clearTimeout(timer); if (unsub) unsub(); deleteDoc(ref).catch(() => {}); fn(arg); };
     try {
-      await setDoc(ref, { uid, prompt: String(prompt).slice(0, 400), status: "pending", createdAt: Date.now() });
+      await setDoc(ref, { uid, prompt: String(prompt).slice(0, 700), status: "pending", createdAt: Date.now() });
     } catch (e) { return reject(e); }
     timer = setTimeout(() => done(reject, new Error("timed out")), 90000);
     unsub = onSnapshot(ref, s => {
@@ -2657,7 +2668,9 @@ const COVER_EMOJIS = ["🎉", "🍕", "🌮", "🍻", "🎂", "🎬", "🎮", "�
 function coverPanel() {
   if (compose.cover) return `<div class="cover-preview-img"><img src="${compose.cover}" alt="cover"><button type="button" class="rm" id="coverRemove">✕</button></div>`;
   if (compose.coverTab === "upload") return `<div class="cover-drop" id="coverDrop">📷 Tap to upload a photo</div>`;
-  if (compose.coverTab === "ai") return `<div class="ai-row"><input id="aiPrompt" placeholder="e.g. neon rooftop taco party at sunset"><button type="button" class="btn primary" id="aiGo">Generate</button></div><p class="muted sm" style="margin:8px 0 0">Describe your vibe and AI paints a one-of-a-kind cover.</p>`;
+  if (compose.coverTab === "ai") return `<div class="ai-row"><input id="aiPrompt" placeholder="e.g. rooftop taco party at sunset"><button type="button" class="btn primary" id="aiGo">Generate</button></div>
+    <div class="style-chips" id="aiStyles">${COVER_STYLES.map(([k, l]) => `<button type="button" class="${(compose.coverStyle || "surprise") === k ? "on" : ""}" data-cstyle="${k}">${l}</button>`).join("")}</div>
+    <p class="muted sm" style="margin:8px 0 0">Describe your vibe, pick a look, and AI makes a one-of-a-kind cover.</p>`;
   return `<div class="emoji-pick" id="cEmoji">${COVER_EMOJIS.map(e => `<button type="button" class="${e === compose.emoji ? "on" : ""}" data-e="${e}">${e}</button>`).join("")}</div>`;
 }
 const PARTICLE_LABELS = { confetti: "🎊 Confetti", petals: "🌸 Petals", stars: "✨ Stars", bubbles: "🫧 Bubbles", sparkles: "💫 Sparkles", embers: "🔥 Embers", none: "◯ None" };
@@ -2803,10 +2816,11 @@ function wireCover() {
     el("coverDrop").textContent = "Processing…";
     try { compose.cover = await compressImage(cropped, 1600, 0.82); refreshCoverUI(); } catch (e) { toast("Couldn't read that image: " + e.message); el("coverDrop").textContent = "📷 Tap to upload a photo"; }
   };
+  document.querySelectorAll("[data-cstyle]").forEach(b => b.onclick = () => { compose.coverStyle = b.dataset.cstyle; document.querySelectorAll("[data-cstyle]").forEach(x => x.classList.toggle("on", x === b)); });
   if (el("aiGo")) el("aiGo").onclick = async () => {
     const p = el("aiPrompt").value.trim(); if (!p) return toast("Describe the vibe first.");
     el("coverPanel").innerHTML = `<div class="cover-spin">${dot("painter", 84) || `<div class="spinner"></div>`}Dot is painting your cover…</div>`;
-    try { compose.cover = await generateCover(p); refreshCoverUI(); toast("Fresh cover, made for you ✨"); }
+    try { compose.cover = await generateCover(`${p}. Style: ${coverStylePrompt(compose.coverStyle || "surprise")}`); refreshCoverUI(); toast("Fresh cover, made for you ✨"); }
     catch (e) { toast(e.message || "Generator busy, try again."); compose.coverTab = "ai"; refreshCoverUI(); }
   };
 }

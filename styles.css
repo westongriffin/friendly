@@ -968,3 +968,7 @@ p .linkish{display:inline;margin:0;padding:0;color:var(--accent)}
 .pv-form{display:flex;gap:8px}
 .pv-form input{flex:1;min-width:0;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);color:#fff;border-radius:999px;padding:10px 14px;font:inherit;font-size:16px}
 .pv-form input::placeholder{color:rgba(255,255,255,.5)}
+/* AI cover looks */
+.style-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.style-chips button{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:6px 11px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.style-chips button.on{background:var(--ink);color:#fff;border-color:var(--ink)}

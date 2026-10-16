@@ -94,9 +94,10 @@ const IMAGE_MODELS = [
 const vertexHost = loc => (loc === "global" ? "" : loc + "-") + "aiplatform.googleapis.com";
 const gauth = new GoogleAuth({ scopes: "https://www.googleapis.com/auth/cloud-platform" });
 
-// "Invitation art" made models paint dates/RSVP text onto covers; ask for
-// pure imagery instead.
-const FLAIR = ", vibrant celebratory illustration, bold colors, high quality. Pure imagery only: no text, no words, no letters, no numbers, no dates, no calendars, no signs or banners with writing";
+// "Invitation art" made models paint dates/RSVP text onto covers; ask for pure imagery instead. The look comes
+// from the prompt itself (the app adds the style the host picked). This used to force "vibrant celebratory
+// illustration, bold colors" onto every cover, which made them all look alike: cartoonish and the same palette.
+const FLAIR = ". High quality, well composed. Pure imagery only: no text, no words, no letters, no numbers, no dates, no calendars, no signs or banners with writing";
 
 // Firestore docs cap at 1MB and these models return multi-MB PNGs, so
 // normalize to a ~1024px JPEG data URL (~100-200KB).
@@ -150,7 +151,7 @@ async function pollinationsGenerate(prompt) {
 exports.onCoverRequest = onDocumentCreated({ document: "coverRequests/{id}", region: "us-central1", timeoutSeconds: 120, memory: "512MiB" }, async e => {
   const d = e.data && e.data.data(); if (!d || !d.prompt) return;
   const ref = e.data.ref;
-  const prompt = String(d.prompt).slice(0, 400);
+  const prompt = String(d.prompt).slice(0, 700);
   let image = null, source = null;
   try { const g = await geminiGenerate(prompt); image = g.image; source = g.model; }
   catch (err) {
@@ -431,7 +432,7 @@ function cleanNight(n) {
     cost: clip(n.cost, 50), size: clip(n.size, 40), parking: clip(n.parking, 120), why: clip(n.why, 260), ticketUrl: isUrl(n.ticketUrl) ? sv(n.ticketUrl, 300) : "",
     emoji: noLone(sv(n.emoji, 8).replace(/[A-Za-z0-9\s]/g, "").slice(0, 4)), emojis: noLone(sv(n.emojis, 12).replace(/[A-Za-z0-9\s]/g, "").slice(0, 8)),
     scene: sv(n.scene, 140), theme: THEME_IDS.includes(n.theme) ? n.theme : "midnight",
-    coverId: nodeCrypto.createHash("md5").update(sv(n.title, 80) + "|" + sv(n.date, 10)).digest("hex").slice(0, 12)
+    coverId: nodeCrypto.createHash("md5").update("v2|" + sv(n.title, 80) + "|" + sv(n.date, 10)).digest("hex").slice(0, 12)   // v2: repaint after the style change
   };
 }
 const nightShape = `Return ONLY a JSON array, no prose: [{"title": short and specific, "date": "YYYY-MM-DD", "start": 24-hour "HH:MM" of the first stop, "tags": [any of weekend, tonight, date, group, cheap, family], "stops": [{"time": like "5:30 PM", "name": the real venue or event name, "note": one useful detail (walk time, what to order, parking), "kind": "eat" | "do" | "go", "url": the listing or booking page if you found one}], "cost": like "$45 a head all in", "size": like "Best for 2–6", "parking": one short line, "why": one sentence in Dot's voice on why this night works, "ticketUrl": the ticket page if tickets are sold, "emoji": one emoji for the night, "emojis": exactly two emojis, the thing to do then the food (like "⚾🌮"), "scene": a 10-to-16-word visual description of the night for an illustration, concrete objects and setting only, no people's faces, no text (like "a baseball game under stadium lights beside a plate of street tacos"), "theme": the one of ${THEME_IDS.join(", ")} that fits the vibe (sunset or golden for dinners, confetti for parties, garden or blossom for brunch and outdoors, midnight or cosmic for nights out and shows, disco, rave or retro for dance and costume nights, citrus or bubblegum for playful daytime plans, aurora for big arena events)}]. Every stop is a different venue; never list the same place twice. Only include things you actually found; never invent an event, a venue, or a price. Times must make sense in sequence. Always use the Oxford comma in lists.`;
@@ -522,6 +523,7 @@ Reply with ONLY a JSON array of objects with these keys: "emoji" (one emoji), "t
     price: clip(x.price, 20), blurb: clip(x.blurb, 200), url: isUrl(x.url) ? String(x.url).slice(0, 300) : ""
   })).filter(x => x.title).slice(0, 6);
 }
+const CURATE_STYLES = ["candid documentary photograph", "35mm film photograph with fine grain", "editorial lifestyle photograph, shallow depth of field", "wide establishing photograph of the place", "close-up detail photograph of the food, drinks or activity", "street photography, candid moment"];
 // Each night gets a small painted cover made from its own scene (the ballgame and the tacos, not a stock palette).
 // Runs after curated/{city} changes; covers are keyed by title+date so unchanged nights keep theirs across rebuilds.
 exports.onCuratedWritten = onDocumentWritten({ document: "curated/{cityKey}", region: "us-central1", timeoutSeconds: 540, memory: "1GiB" }, async e => {
@@ -532,7 +534,10 @@ exports.onCuratedWritten = onDocumentWritten({ document: "curated/{cityKey}", re
   const todo = nights.filter(n => !have.has(n.coverId)).slice(0, 30);
   const shrink = async dataUrl => { const b64 = String(dataUrl).split(",")[1]; const out = await sharp(Buffer.from(b64, "base64")).resize({ width: 720, withoutEnlargement: true }).jpeg({ quality: 74 }).toBuffer(); return "data:image/jpeg;base64," + out.toString("base64"); };
   const paint = async n => {
-    const prompt = (n.scene || n.title) + ", " + (n.title || "") + ", warm evening light";
+    // Each night gets its own photographic look, lit for when it happens, so the feed doesn't repeat one palette.
+    const h = parseInt(n.coverId.slice(0, 6), 16) || 0, hr = parseInt((n.start || "19:00").slice(0, 2), 10);
+    const light = hr < 11 ? "soft morning daylight" : hr < 17 ? "bright natural daylight" : hr < 20 ? "early evening light" : "night, lit by the venue's own lights";
+    const prompt = `${n.scene || n.title}, ${n.title || ""}. ${CURATE_STYLES[h % CURATE_STYLES.length]}, ${light}, real people and real places, natural true-to-life colors, not a cartoon`;
     let image = null;
     try { image = (await geminiGenerate(prompt)).image; } catch (err) { logger.warn("cover via vertex failed: " + err.message); try { image = await pollinationsGenerate(prompt); } catch (e2) { logger.warn("cover fallback failed: " + e2.message); } }
     if (image) { try { image = await shrink(image); } catch (e3) {} await col.doc(n.coverId).set({ image, title: n.title, createdAt: Date.now() }); have.add(n.coverId); }
