@@ -759,6 +759,7 @@ onAuthStateChanged(auth, async u => {
   if (pendingJoin) location.hash = "#/join/" + pendingJoin;
   else if (/^(#\/?|#\/(money|groups|activity|photos|search|profile))$/.test(location.hash)) location.hash = "#/";
   if (NATIVE) registerPush(u.uid);
+  setTimeout(reportContactsTrace, 4000);
 });
 
 function subscribeAll(u) {
@@ -1592,6 +1593,25 @@ function openGroupDialog() {
 // number only, to be added to a pending-invite list and texted a join link).
 // Phone number is the one thing every contact reliably has, and the one thing
 // the join/auto-add mechanisms actually match on.
+// "Choose from contacts" black box (admins only). Every step and tap inside Add people is written to the
+// device with a once-a-second heartbeat. Closing the dialog clears it, so a trace still there at the next
+// launch means the app was force-closed mid-flow; it's reported as a diag row with where it stopped and
+// whether the page's code was still running (heartbeat kept going) or had frozen (heartbeat stopped).
+const CT_KEY = "friendlyContactsTrace";
+const ctTrace = {
+  t0: 0, steps: [], hb: null, last: 0,
+  start(where) { if (!isAdmin()) return; this.t0 = Date.now(); this.steps = []; this.step("open " + where); clearInterval(this.hb); this.hb = setInterval(() => this.save(), 1000); },
+  step(s) { if (!this.t0) return; this.last = Date.now(); this.steps.push(s + " @" + ((this.last - this.t0) / 1000).toFixed(1) + "s"); if (this.steps.length > 60) this.steps.splice(1, 1); this.save(); },
+  save() { if (!this.t0) return; try { localStorage.setItem(CT_KEY, JSON.stringify({ t0: this.t0, hb: Date.now(), last: this.last, steps: this.steps, route: location.hash, v: APP_V + " / " + (nativeVersion || "") })); } catch {} },
+  end() { if (!this.t0) return; clearInterval(this.hb); this.hb = null; this.t0 = 0; try { localStorage.removeItem(CT_KEY); } catch {} }
+};
+document.addEventListener("visibilitychange", () => ctTrace.step(document.visibilityState));
+function reportContactsTrace() {
+  let tr = null; try { tr = JSON.parse(localStorage.getItem(CT_KEY) || "null"); localStorage.removeItem(CT_KEY); } catch {}
+  if (!tr || !isAdmin()) return;
+  const alive = Math.round((tr.hb - tr.last) / 1000);
+  addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `contacts trace: app closed mid-flow. Code kept running ${alive}s after the last step${alive < 2 ? " (looks FROZEN)" : " (code alive, screen not responding?)"}.\n` + tr.steps.join("\n"), route: tr.route, version: tr.v, platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now(), tracedAt: tr.t0 }).catch(() => {});
+}
 function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pendingPhones = new Map(), submitLabel = "Add & send", knownLabel = "On Friendly · added right away", phoneLabel = "Gets a text with the join link", onSubmit }) {
   const me = myUid(); const picked = [];   // { name, phone, e164, uid|null }
   const nativeContacts = plugin("Contacts");
@@ -1632,6 +1652,8 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
       await onSubmit(direct, texted);
     });
   renderPicked();
+  ctTrace.start(location.hash);
+  { const dlg = el("appDialog"); if (dlg) dlg.addEventListener("pointerdown", e => { const t = e.target.closest("button,input,label,summary") || e.target; ctTrace.step("tap " + (t.id || t.dataset.book || t.textContent || t.tagName).toString().trim().slice(0, 24)); }, true); }
   if (el("invAddManual")) el("invAddManual").onclick = () => { addPicked(el("invName").value.trim(), el("invPhone").value.trim()); el("invName").value = ""; el("invPhone").value = ""; };
   // "Choose from contacts": your address book as a searchable checklist right here in the dialog (check as many
   // as you like). It reads the contacts on the phone only to show this list; nothing is uploaded except the
@@ -1662,12 +1684,15 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
   async function openBook() {
     const C = nativeContacts, btn = el("invPick"), t0 = Date.now();
     if (btn) { btn.textContent = "Opening your contacts…"; btn.disabled = true; }
+    ctTrace.step(window.__friendlyBook ? "book cached" : "book load");
     if (!window.__friendlyBook) {
       let perm = null;
       try { perm = await withTimeout(C.checkPermissions(), 6000, "Checking contacts access"); if (perm && perm.contacts !== "granted" && perm.contacts !== "limited") perm = await C.requestPermissions(); } catch {}
+      ctTrace.step("perm " + (perm && perm.contacts));
       if (!perm || (perm.contacts !== "granted" && perm.contacts !== "limited")) { if (btn) { btn.disabled = false; btn.textContent = "📇 Choose from contacts"; } return false; }
       if (btn) btn.textContent = "Loading your contacts…";
       const r = await withTimeout(C.getContacts({ projection: { name: true, phones: true } }), 25000, "Loading your contacts");
+      ctTrace.step("got " + ((r && r.contacts) || []).length);
       const seen = new Set();
       window.__friendlyBook = ((r && r.contacts) || []).map(c => { const phone = phoneOfContact(c); return { name: nameOfContact(c).trim(), phone, e164: toE164(phone) }; })
         .filter(c => c.e164 && !seen.has(c.e164) && seen.add(c.e164)).sort((a, b) => (a.name || "~").localeCompare(b.name || "~"));
@@ -1677,7 +1702,7 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
     const b2 = el("invPick"); if (!b2) return true;
     b2.outerHTML = `<div class="book"><input type="search" class="inv-search" id="invBookQ" placeholder="Search your contacts…" autocomplete="off"><div class="book-list" id="invBook"></div></div>`;
     el("invBookQ").oninput = e => paintBook(e.target.value);
-    paintBook(""); return true;
+    paintBook(""); ctTrace.step("list shown " + book.length); return true;
   }
   if (el("invPick")) el("invPick").onclick = async () => {
     bookNote("");
@@ -1691,7 +1716,7 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
         const notes = []; await addPicked(nameOfContact(c), phoneOfContact(c), notes); if (notes.length) bookNote(notes.join(" "));
       }
       else { const rows = await navigator.contacts.select(["name", "tel"], { multiple: true }); const notes = []; for (const r of rows) await addPicked((r.name || [])[0] || "", (r.tel || [])[0] || "", notes); if (notes.length) bookNote(notes.join(" ")); }
-    } catch (e) { const m = String((e && e.message) || e || ""); slowLog(0, 0, m); if (el("invPick")) { el("invPick").disabled = false; el("invPick").textContent = "📇 Try again"; } bookNote(/cancel/i.test(m) || !m ? "" : "Couldn't read your contacts: " + m); }
+    } catch (e) { const m = String((e && e.message) || e || ""); ctTrace.step("error " + m.slice(0, 60)); slowLog(0, 0, m); if (el("invPick")) { el("invPick").disabled = false; el("invPick").textContent = "📇 Try again"; } bookNote(/cancel/i.test(m) || !m ? "" : "Couldn't read your contacts: " + m); }
   };
   if (el("invSearch")) {
     const renderResults = q => { const ql = q.toLowerCase(); const hits = known.filter(([u, i]) => !picked.some(p => p.uid === u) && (i.name || "").toLowerCase().includes(ql)); el("invResults").innerHTML = hits.slice(0, 8).map(([u, i]) => `<div class="inv-hit" data-choose="${u}">${avatar(u)}<div><b>${esc(i.name || "Friend")}</b></div><span class="add">Add</span></div>`).join("") || `<p class="muted sm">No one else to add.</p>`; };
@@ -4900,7 +4925,7 @@ function dialog(inner, okLabel, onOk) {
   if (el("dlgOk")) el("dlgOk").onclick = onOk;
   d.addEventListener("close", () => { d.remove(); if (!el("appDialog")) { const b = el("dlgBackdrop"); if (b) b.remove(); unlockScroll(); } });
 }
-function closeDialog() { const d = el("appDialog"); if (d) { d.close(); d.remove(); } const b = el("dlgBackdrop"); if (b) b.remove(); unlockScroll(); }
+function closeDialog() { try { ctTrace.end(); } catch {} const d = el("appDialog"); if (d) { d.close(); d.remove(); } const b = el("dlgBackdrop"); if (b) b.remove(); unlockScroll(); }
 document.addEventListener("keydown", e => { if (e.key === "Escape" && el("appDialog")) closeDialog(); });
 // While a dialog is open the page underneath is pinned in place (body fixed at the scrolled offset) and put
 // back on close. In the iPhone app, a modal dialog opened over a page scrolled far down stopped receiving
