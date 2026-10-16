@@ -939,4 +939,7 @@ p .linkish{display:inline;margin:0;padding:0;color:var(--accent)}
 .past-chev{margin-left:auto;font-size:22px;line-height:1;color:var(--muted);transition:transform .2s}
 .past-head[aria-expanded="true"] .past-chev{transform:rotate(90deg)}
 .today-card{position:relative}
-.today-x{position:absolute;top:8px;right:10px;background:none;border:0;color:var(--muted);font-size:15px;padding:6px;cursor:pointer;z-index:1}
+.today-x{position:absolute;top:8px;right:8px;width:32px;height:32px;border-radius:50%;border:0;padding:0;display:flex;align-items:center;justify-content:center;background:rgba(42,32,25,.08);color:var(--ink);font-size:14px;font-weight:700;cursor:pointer;z-index:2}
+.today-x::before{content:"";position:absolute;inset:-8px}   /* ~48pt touch target around the 32pt circle */
+.today-x:active{background:rgba(42,32,25,.16)}
+.today-card{padding-right:48px}
