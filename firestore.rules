@@ -21,6 +21,8 @@ service cloud.firestore {
 
     // ---- Public previews of "anyone with the link" events (written by functions) ----
     match /previews/{eventId} { allow read: if true; }
+    // Full-size event covers (the event itself carries a small preview); written only by the slimEventCover function.
+    match /eventCovers/{eventId} { allow read: if request.auth != null; allow write: if false; }
 
     // ---- Nudges: a host asks the function to remind non-responders ----
     match /nudges/{nudgeId} {

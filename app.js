@@ -22,7 +22,21 @@ const auth = getAuth(fb);
 // freshens up in the background, instead of waiting on the network every launch.
 let db; try { db = initializeFirestore(fb, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) }); } catch (e) { console.warn("device cache unavailable:", e.message); db = getFirestore(fb); }
 // On sign-out or account deletion, the device copy goes too.
-async function wipeLocalData() { try { await terminate(db); await clearIndexedDbPersistence(db); } catch {} location.reload(); }
+// Every step has a time limit and the page always reloads: on iPhone, clearing a large device copy could hang
+// forever (the delete waits on a database connection that never closes), which left the app frozen on
+// sign-out. An unfinished wipe is retried at the next launch, before anything reads the copy.
+const WIPE_KEY = "friendlyWipePending";
+const within = (p, ms) => Promise.race([Promise.resolve(p).catch(() => {}), new Promise(r => setTimeout(r, ms))]);
+async function wipeLocalData() {
+  try { localStorage.setItem(WIPE_KEY, "1"); } catch {}
+  const hard = setTimeout(() => location.reload(), 5000);
+  let done = false;
+  await within(terminate(db), 2000);
+  await within(clearIndexedDbPersistence(db).then(() => { done = true; }), 2500);
+  if (done) try { localStorage.removeItem(WIPE_KEY); } catch {}
+  clearTimeout(hard); location.reload();
+}
+try { if (localStorage.getItem(WIPE_KEY)) clearIndexedDbPersistence(db).then(() => localStorage.removeItem(WIPE_KEY)).catch(() => {}); } catch {}
 
 
 
@@ -523,6 +537,9 @@ function openCropDialog(file, opts = {}) {
     }
   });
 }
+// The small copy of my photo that goes into groups and friendships (everyone downloads those on every
+// sign-in, so they carry a 160px version; the 320px original stays on my own profile).
+const myPhotoSm = () => (S.profile && (S.profile.photoSm || S.profile.photo)) || "";
 async function compressImage(src, maxDim = 1400, quality = 0.8, maxBytes = 720000) {
   const img = await loadPicked(src);
   let w = img.width, h = img.height;
@@ -1035,7 +1052,7 @@ function wireOnboarding() {
     const f = await pickFile(); if (!f) return;
     const cropped = await openCropDialog(f); if (!cropped) return;
     toast("Updating photo…");
-    try { const photo = await compressImage(cropped, 320, 0.82); await updateDoc(doc(db, "users", myUid()), { photo }); toast("Photo updated"); }
+    try { const photo = await compressImage(cropped, 320, 0.82), photoSm = await compressImage(cropped, 160, 0.8); await updateDoc(doc(db, "users", myUid()), { photo, photoSm }); toast("Photo updated"); }
     catch (e) { toast(e.message); }
   };
 }
@@ -1305,7 +1322,7 @@ function joinBody(gid) {
 async function joinGroupByLink(gid, btn, quiet) {
   if (btn) { btn.disabled = true; btn.textContent = "Joining…"; }
   try {
-    await updateDoc(doc(db, "groups", gid), { memberUids: arrayUnion(myUid()), invitedPhones: arrayRemove(S.profile.phoneE164 || "-"), invitedEmails: arrayRemove((S.user.email || "").toLowerCase()), [`members.${myUid()}`]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "", photo: S.profile.photo || "", birthday: S.profile.birthday || "" } });
+    await updateDoc(doc(db, "groups", gid), { memberUids: arrayUnion(myUid()), invitedPhones: arrayRemove(S.profile.phoneE164 || "-"), invitedEmails: arrayRemove((S.user.email || "").toLowerCase()), [`members.${myUid()}`]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "", photo: myPhotoSm(), birthday: S.profile.birthday || "" } });
     toast("You're in! 🎉"); go("#/g/" + gid);
   } catch (e) {
     if (btn) { btn.disabled = false; btn.textContent = "Join the group"; }
@@ -1839,7 +1856,7 @@ async function acceptInvite(gid, btn) {
       invitedEmails: (g.invitedEmails || []).filter(e => e !== (S.user.email || "").toLowerCase()),
       invitedPhones: (g.invitedPhones || []).filter(p => p !== (S.profile.phoneE164 || "-")),
       [`invitedPhoneNames.${S.profile.phoneE164 || "-"}`]: deleteField(),
-      [`members.${myUid()}`]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "", zelle: S.profile.zelle || "", cashapp: S.profile.cashapp || "", payPref: S.profile.payPref || "", photo: S.profile.photo || "", birthday: S.profile.birthday || "" }
+      [`members.${myUid()}`]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "", zelle: S.profile.zelle || "", cashapp: S.profile.cashapp || "", payPref: S.profile.payPref || "", photo: myPhotoSm(), birthday: S.profile.birthday || "" }
     });
     toast("You're in! Welcome to " + g.name);
     go("#/groups");
@@ -2917,7 +2934,7 @@ function eventInner(ev) {
 
   return `
   <button class="ev-back" data-go="#/">‹</button>
-  ${ev.cover ? `<div class="event-cover"><img src="${ev.cover}" alt="${esc(ev.title)}"></div>` : ""}
+  ${ev.cover ? `<div class="event-cover"><img src="${fullCovers.get(ev.id) || ev.cover}" alt="${esc(ev.title)}"></div>` : ""}
   <div class="event-hero">
     ${ev.cover ? "" : `<div class="ev-emoji">${esc(ev.emoji || "🎉")}</div>`}
     <h1 class="ev-title">${esc(ev.title)}</h1>
@@ -3274,6 +3291,7 @@ async function maybePostRecap(ev) {
 }
 
 function wireEventPage(ev) {
+  if (ev.coverFull) fullCoverOf(ev).then(c => { const img = document.querySelector(".event-cover img"); if (img && c && img.getAttribute("src") !== c) img.src = c; });
   const id = ev.id;
   markPeeked("#/e/" + ev.id);
   wireDay(ev); loadWeather(ev); maybePostRecap(ev);
@@ -4009,13 +4027,18 @@ function wireProfile() {
       await updateDoc(doc(db, "users", myUid()), { name, venmo, phone, zelle, cashapp, payPref, city, phoneE164: toE164(phone) || myPhoneE164(), birthday, email: email.trim().toLowerCase() });
       if (city) registerCity(city);
       // propagate name/contact into each group's denormalized members map
-      for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}`]: { name, venmo, phone, zelle, cashapp, payPref, photo: S.profile.photo || "", birthday } }).catch(() => {});
+      for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}`]: { name, venmo, phone, zelle, cashapp, payPref, photo: myPhotoSm(), birthday } }).catch(() => {});
       for (const f of S.friends.values()) await updateDoc(doc(db, "friendships", f.id), { [`people.${myUid()}.name`]: name }).catch(() => {});
       toast("Profile saved");
     } catch (e) { toast(e.message); }
   };
   if (el("takeTour")) el("takeTour").onclick = () => { go("#/"); setTimeout(() => { tourStep = 0; showTourStep(); }, 500); };
-  el("signOut").onclick = async () => { clearBadge(); stopListening(); await signOut(auth).catch(() => {}); wipeLocalData(); };
+  el("signOut").onclick = async () => {
+    const b = el("signOut"); if (b.disabled) return; b.disabled = true; b.textContent = "Signing out…";
+    try { clearBadge(); } catch {} try { stopListening(); } catch {}
+    await within(signOut(auth), 3000);
+    wipeLocalData();
+  };
   const pt = el("pushToggle"); if (pt) pt.onclick = () => pushState() === "on" ? disableWebPush() : enableWebPush();
   const nr = el("notifRow"); if (nr) nr.onclick = () => { location.href = "app-settings:"; };
   document.querySelectorAll("[data-notifpref]").forEach(cb => cb.onchange = () => updateDoc(doc(db, "users", myUid()), { [`notifPrefs.${cb.dataset.notifpref}`]: cb.checked }).catch(e => toast(e.message)));
@@ -4024,10 +4047,10 @@ function wireProfile() {
     const cropped = await openCropDialog(f); if (!cropped) return;
     toast("Updating photo…");
     try {
-      const photo = await compressImage(cropped, 320, 0.82);
-      await updateDoc(doc(db, "users", myUid()), { photo });
-      for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}.photo`]: photo }).catch(() => {});
-      for (const f of S.friends.values()) await updateDoc(doc(db, "friendships", f.id), { [`people.${myUid()}.photo`]: photo }).catch(() => {});
+      const photo = await compressImage(cropped, 320, 0.82), photoSm = await compressImage(cropped, 160, 0.8);
+      await updateDoc(doc(db, "users", myUid()), { photo, photoSm });
+      for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}.photo`]: photoSm }).catch(() => {});
+      for (const f of S.friends.values()) await updateDoc(doc(db, "friendships", f.id), { [`people.${myUid()}.photo`]: photoSm }).catch(() => {});
       toast("Photo updated");
     } catch (e) { toast(e.message); }
   };
@@ -4096,7 +4119,7 @@ async function sendFriendRequest(u) {
   const me = myUid(), info = S.contacts.get(u) || { name: nameHint(u) };
   try {
     await setDoc(doc(db, "friendships", pairOf(u)), { uids: [me, u].sort(), requestedBy: me, status: "pending", createdAt: Date.now(),
-      people: { [me]: { name: S.profile.name || "Friend", photo: S.profile.photo || "" }, [u]: { name: info.name || "Friend", photo: info.photo || "" } } });
+      people: { [me]: { name: S.profile.name || "Friend", photo: myPhotoSm() }, [u]: { name: info.name || "Friend", photo: info.photo || "" } } });
     toast(`Friend request sent to ${first(personName(u))}`, null, null, "happy");
   } catch (e) { toast(/permission/i.test(e.message) ? "Couldn't send that request." : e.message); }
 }
@@ -4920,7 +4943,15 @@ function restoreDraft() {
     setDoc(doc(db, "users", myUid(), "drafts", newId()), { json, title: d.title.trim(), emoji: d.emoji || "🎉", date: d.date || "", kind: d.kind || "event", updatedAt: Date.now() }).catch(() => {});
   } catch {}
 }
-function duplicateEvent(ev) {
+// Full-size cover for an event whose record only carries the small preview (see slimEventCover in functions).
+const fullCovers = new Map();
+async function fullCoverOf(ev) {
+  if (!ev || !ev.coverFull) return ev && ev.cover || "";
+  if (fullCovers.has(ev.id)) return fullCovers.get(ev.id);
+  try { const s = await getDoc(doc(db, "eventCovers", ev.id)); const c = (s.exists() && s.data().cover) || ev.cover; fullCovers.set(ev.id, c); return c; } catch { return ev.cover || ""; }
+}
+async function duplicateEvent(ev) {
+  if (ev.coverFull) { toast("Copying…"); ev = { ...ev, cover: await Promise.race([fullCoverOf(ev), new Promise(r => setTimeout(() => r(ev.cover), 5000))]) }; }
   resetCompose(); compose._restored = true;
   Object.assign(compose, { stops: evStops(ev).map(x => ({ ...x })), title: ev.title, emoji: ev.emoji || "🎉", theme: ev.theme || DEFAULT_THEME, customTheme: ev.customTheme || null, cover: ev.cover || null, coverTab: ev.cover ? "upload" : "emoji", time: ev.time || "", end: ev.endTime || "", where: ev.location || "", notes: ev.notes || "", cap: ev.capacity ? String(ev.capacity) : "", approval: !!ev.approval, questions: (ev.questions || []).map(q => ({ ...q, id: newId() })), groupId: ev.groupId || "", invitees: new Set(ev.groupId ? [] : (ev.invitedUids || []).filter(u => u !== myUid())), phoneInvitees: ev.groupId ? [] : Object.entries(ev.invitedPhoneNames || {}).map(([e164, name]) => ({ e164, name })), cohosts: new Set(ev.cohostUids || []), kind: ev.kind || "event", repeat: ev.repeat || "", date: "" });
   go("#/new"); toast("Copied. Pick a date and it's ready.");

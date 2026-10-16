@@ -684,6 +684,32 @@ async function writePreview(id, ev) {
   await ref.set(data);
 }
 
+// ---- Event covers live outside the event record ----
+// Every guest downloads every event they're invited to on each fresh sign-in, so a 350KB cover inside the
+// event made sign-in slow (2.5MB for one account). Any event saved with a big cover gets it moved to
+// eventCovers/{id} (the app fetches it only on the event page) and keeps a ~35KB preview for cards and lists.
+const COVER_SLIM_OVER = 100000;   // data-URL characters (~75KB of image)
+async function coverThumb(dataUrl) {
+  const m = /^data:image\/[a-z+]+;base64,(.+)$/i.exec(dataUrl || ""); if (!m) return null;
+  const out = await sharp(Buffer.from(m[1], "base64")).resize({ width: 600, withoutEnlargement: true }).jpeg({ quality: 66, mozjpeg: true }).toBuffer();
+  return "data:image/jpeg;base64," + out.toString("base64");
+}
+async function slimCover(ref, ev) {
+  const cover = ev && typeof ev.cover === "string" ? ev.cover : "";
+  if (cover.length > COVER_SLIM_OVER) {
+    const thumb = await coverThumb(cover); if (!thumb || thumb.length >= cover.length) return false;
+    await db.doc("eventCovers/" + ref.id).set({ cover, updatedAt: Date.now() });
+    await ref.update({ cover: thumb, coverFull: true });
+    return true;
+  }
+  if (!cover && ev && ev.coverFull) { await db.doc("eventCovers/" + ref.id).delete().catch(() => {}); await ref.update({ coverFull: FieldValue.delete() }); }
+  return false;
+}
+exports.slimEventCover = onDocumentWritten({ document: "events/{id}", region: "us-central1", memory: "512MiB" }, async e => {
+  if (!e.data.after.exists) { await db.doc("eventCovers/" + e.params.id).delete().catch(() => {}); return; }
+  try { await slimCover(e.data.after.ref, e.data.after.data()); } catch (err) { logger.error("slimEventCover " + e.params.id + ": " + err.message); }
+});
+
 // ---- Recurring events: the next occurrence is created the day after one passes ----
 // ev.repeat: weekly | biweekly | monthly | custom (repeatEvery 1-30 × repeatUnit day|week|month); ev.repeatUntil ends the series.
 function addPeriod(date, ev) {
@@ -1307,7 +1333,7 @@ async function makeFriendRequest(from, to, fromName, toName) {
   if (!tu.exists) return "missing";
   if ((tu.get("blockedUids") || []).includes(from) || (fu.get("blockedUids") || []).includes(to)) return "blocked";
   const ref = db.doc("friendships/" + pairId(from, to)); const cur = await ref.get();
-  const people = { [from]: { name: fromName || fu.get("name") || "Friend", photo: fu.get("photo") || "" }, [to]: { name: toName || tu.get("name") || "Friend", photo: tu.get("photo") || "" } };
+  const people = { [from]: { name: fromName || fu.get("name") || "Friend", photo: fu.get("photoSm") || fu.get("photo") || "" }, [to]: { name: toName || tu.get("name") || "Friend", photo: tu.get("photoSm") || tu.get("photo") || "" } };
   if (cur.exists) {
     const d = cur.data();
     if (d.status === "accepted") return "already";
