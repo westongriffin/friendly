@@ -1346,8 +1346,17 @@ function phoneChip(ev, p, manage) {
 // +1s: events allow them unless the host turned it off; meetings only when the host turned it on.
 const plusAllowed = ev => ev.kind === "meeting" ? ev.allowPlus === true : ev.allowPlus !== false;
 const plusFields = (pre, on, max) => `<div class="plus-opts"><label class="switch"><input type="checkbox" id="${pre}PlusOn" ${on ? "checked" : ""}><span>Guests can bring a +1</span></label>
-  <label class="field ${on ? "" : "hidden"}" id="${pre}PlusMaxWrap" style="margin-top:6px"><span>How many each</span><select id="${pre}PlusMax">${[[1, "1 guest"], [2, "Up to 2"], [3, "Up to 3"], [0, "No limit"]].map(([v, l]) => `<option value="${v}" ${Number(max || 0) === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>`;
-const wirePlusFields = pre => { const c = el(pre + "PlusOn"); if (c) c.onchange = () => { el(pre + "PlusMaxWrap").classList.toggle("hidden", !c.checked); if (pre === "c") compose.plusOn = c.checked; }; const m = el(pre + "PlusMax"); if (m && pre === "c") m.onchange = () => { compose.plusMax = Number(m.value) || 0; }; };
+  <div class="${on ? "" : "hidden"}" id="${pre}PlusMaxWrap" style="margin-top:6px"><label class="field"><span>How many each</span><select id="${pre}PlusMax">${(() => { const m = Number(max || 0), custom = m > 3; return [[1, "1 guest"], [2, "Up to 2"], [3, "Up to 3"], ["custom", "Custom number…"], [0, "No limit"]].map(([v, l]) => `<option value="${v}" ${(custom ? v === "custom" : m === v) ? "selected" : ""}>${l}</option>`).join(""); })()}</select></label>
+  <label class="field ${Number(max || 0) > 3 ? "" : "hidden"}" id="${pre}PlusCustomWrap" style="margin-top:6px"><span>Up to how many each</span><input id="${pre}PlusCustom" type="number" inputmode="numeric" min="1" max="99" value="${Number(max || 0) > 3 ? Number(max) : 4}"></label></div></div>`;
+// The +1 limit as a number (0 = no limit), reading the custom box when "Custom number…" is picked.
+const plusMaxVal = pre => { const s = el(pre + "PlusMax"); if (!s) return 0; if (s.value !== "custom") return Number(s.value) || 0; const n = Math.round(Number((el(pre + "PlusCustom") || {}).value)); return n > 0 ? Math.min(n, 99) : 0; };
+const wirePlusFields = pre => {
+  const c = el(pre + "PlusOn"); if (c) c.onchange = () => { el(pre + "PlusMaxWrap").classList.toggle("hidden", !c.checked); if (pre === "c") compose.plusOn = c.checked; };
+  const m = el(pre + "PlusMax"), box = el(pre + "PlusCustom");
+  const keep = () => { if (pre === "c") { compose.plusMax = plusMaxVal("c"); saveDraft(); } };
+  if (m) m.onchange = () => { el(pre + "PlusCustomWrap").classList.toggle("hidden", m.value !== "custom"); if (m.value === "custom" && box) box.focus(); keep(); };
+  if (box) box.oninput = keep;
+};
 function goingCount(ev) { return (ev.invitedUids || []).reduce((t, u) => (ev.rsvps || {})[u] === "going" ? t + 1 + (((ev.plusOnes || {})[u]) || 0) : t, 0) + (ev.invitedPhones || []).filter(p => phoneStatus(ev, p) === "going").reduce((t, p) => t + 1 + phonePlus(ev, p), 0); }
 function isFull(ev) { return ev.capacity > 0 && goingCount(ev) >= ev.capacity; }
 function canManage(ev) { if (ev._manage != null) return ev._manage; return ev.hostId === myUid() || (ev.cohostUids || []).includes(myUid()); }
@@ -2552,9 +2561,9 @@ function composeBody() {
     <div class="section-head"><h2>Who's invited</h2></div>
     <div class="form-card card">
       ${groups.length ? `<label class="field"><span>Invite a whole group</span>
-        <select id="cGroup"><option value="">Hand-pick friends instead</option>${groups.map(g => `<option value="${g.id}" ${compose.groupId === g.id ? "selected" : ""}>${esc(g.emoji || "")} ${esc(g.name)} (${(g.memberUids || []).length})</option>`).join("")}</select></label>` : `<p class="muted">You're not in any groups yet. <a data-go="#/groups">Create one</a> to invite people, or invite friends you already share a group with below.</p>`}
-      <div id="cPickWrap" class="${compose.groupId ? "hidden" : ""}">
-        <span class="field-label">Who's coming</span>
+        <select id="cGroup"><option value="">No group, just pick people</option>${groups.map(g => `<option value="${g.id}" ${compose.groupId === g.id ? "selected" : ""}>${esc(g.emoji || "")} ${esc(g.name)} (${(g.memberUids || []).length})</option>`).join("")}</select></label>` : `<p class="muted">You're not in any groups yet. <a data-go="#/groups">Create one</a> to invite people, or invite friends you already share a group with below.</p>`}
+      <div id="cPickWrap">
+        <span class="field-label" id="cPickLabel">${compose.groupId ? "Also invite (people outside the group)" : "Who's coming"}</span>
         <div class="inv-chosen" id="cInvChosen">${composePickedInner()}</div>
         <button type="button" class="btn small" id="cAddPeople">＋ Add people</button>
       </div>
@@ -2578,7 +2587,7 @@ function composeBody() {
 
     </div>
     <button class="btn primary lg full" id="createEventBtn">${compose.kind === "meeting" ? "Create meeting &amp; send invites" : "Create event &amp; send invites"}</button>
-    <button type="button" class="btn full" id="saveDraftBtn" style="margin-top:10px">📝 ${compose._draftId ? "Update draft" : "Save as draft"}</button>
+    <button type="button" class="btn full" id="saveDraftBtn" style="margin-top:10px">📝 Save draft</button>
     <p class="muted sm" style="text-align:center;margin:6px 0 0">Drafts aren't sent to anyone. Find them under 📝 Drafts on the Events page.</p>
   </div>`;
 }
@@ -2647,11 +2656,18 @@ function composePickedInner() {
   ];
   return rows.join("") || `<p class="muted sm">Nobody added yet.</p>`;
 }
+// Redraw just the Added list (a full render would close the open Co-hosts section).
+function refreshComposePicked() {
+  const box = el("cInvChosen"); if (!box) return;
+  box.innerHTML = composePickedInner();
+  box.querySelectorAll("[data-cunpick-u]").forEach(b => b.onclick = () => { compose.invitees.delete(b.dataset.cunpickU); syncCompose(); render(); });
+  box.querySelectorAll("[data-cunpick-p]").forEach(b => b.onclick = () => { compose.phoneInvitees.splice(+b.dataset.cunpickP, 1); syncCompose(); render(); });
+}
 function openComposeInviteDialog() {
   pickPeopleDialog({
     title: "Add people",
     blurb: "Pick them from your contacts. Friends already on Friendly are added when you create the event; everyone else gets texted a join link right after.",
-    exclude: new Set([...compose.invitees, myUid()]),
+    exclude: new Set([...compose.invitees, myUid(), ...((compose.groupId && S.groups.get(compose.groupId) || {}).memberUids || [])]),
     submitLabel: "Add",
     onSubmit: async (direct, texted) => {
       for (const p of direct) compose.invitees.add(p.uid);
@@ -2682,14 +2698,20 @@ function wireCompose() {
     el("cPvDate").textContent = dv ? evDate({ date: dv }).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }) + (tv ? " · " + fmtTime(tv) : "") : "Pick a date";
   };
   ["cTitle", "cDate", "cTime", "cEnd", "cWhere", "cNotes", "cCap"].forEach(id => el(id).oninput = () => { if (id === "cEnd") compose._endAuto = false; syncCompose(); upd(); }); upd();
-  document.querySelectorAll("input[name=coh], #cApproval").forEach(i => i.onchange = syncCompose);
+  document.querySelectorAll("#cApproval").forEach(i => i.onchange = syncCompose);
+  // Ticking a co-host also puts them on the guest list (unticking leaves them invited; remove them there if needed).
+  document.querySelectorAll("input[name=coh]").forEach(i => i.onchange = () => {
+    const inGroup = ((compose.groupId && S.groups.get(compose.groupId) || {}).memberUids || []).includes(i.value);
+    if (i.checked && !inGroup) compose.invitees.add(i.value);
+    syncCompose(); refreshComposePicked();
+  });
   wireRepeat("c", syncCompose);
   attachPlaces(el("cWhere"));
   wireStops();
   wireCover();
   document.querySelectorAll("[data-theme]").forEach(b => b.onclick = () => { syncCompose(); compose.theme = b.dataset.theme; render(); });
   if (el("customThemeBtn")) el("customThemeBtn").onclick = () => { syncCompose(); openCustomThemeDialog(); };
-  const gsel = el("cGroup"); if (gsel) gsel.onchange = () => { compose.groupId = gsel.value; el("cPickWrap").classList.toggle("hidden", !!compose.groupId); };
+  const gsel = el("cGroup"); if (gsel) gsel.onchange = () => { compose.groupId = gsel.value; el("cPickLabel").textContent = compose.groupId ? "Also invite (people outside the group)" : "Who's coming"; syncCompose(); };
   if (el("cAddPeople")) el("cAddPeople").onclick = openComposeInviteDialog;
   document.querySelectorAll("[data-cunpick-u]").forEach(b => b.onclick = () => { compose.invitees.delete(b.dataset.cunpickU); syncCompose(); render(); });
   document.querySelectorAll("[data-cunpick-p]").forEach(b => b.onclick = () => { compose.phoneInvitees.splice(+b.dataset.cunpickP, 1); syncCompose(); render(); });
@@ -2736,12 +2758,12 @@ async function createEvent() {
   const title = el("cTitle").value.trim(); if (!title) return toast("Add a title.");
   const date = el("cDate").value; if (!date) return toast("Pick a date.");
   let invitedUids, invitedPhones = [], invitedPhoneNames = {}, groupId = compose.groupId || null;
-  if (groupId) { const g = S.groups.get(groupId); invitedUids = [...new Set([...(g.memberUids || []), myUid()])]; }
-  else {
-    invitedUids = [...new Set([...compose.invitees, myUid()])];
-    invitedPhones = compose.phoneInvitees.map(p => p.e164);
-    invitedPhoneNames = Object.fromEntries(compose.phoneInvitees.map(p => [p.e164, p.name || ""]));
-  }
+  // A group invites all its members; anyone picked individually (and every co-host) is invited too.
+  const cohostPick = [...document.querySelectorAll('input[name=coh]:checked')].map(i => i.value);
+  const g = groupId ? S.groups.get(groupId) : null;
+  invitedUids = [...new Set([...((g && g.memberUids) || []), ...compose.invitees, ...cohostPick, myUid()])];
+  invitedPhones = compose.phoneInvitees.map(p => p.e164);
+  invitedPhoneNames = Object.fromEntries(compose.phoneInvitees.map(p => [p.e164, p.name || ""]));
   const phoneInviteesSnapshot = [...compose.phoneInvitees];
   const cohostUids = [...document.querySelectorAll('input[name=coh]:checked')].map(i => i.value).filter(u => u !== myUid());
   const questions = compose.questions.filter(q => q.q.trim());
@@ -2757,7 +2779,7 @@ async function createEvent() {
     location: stopsOut.length ? (stopsOut[0].place || el("cWhere").value.trim()) : el("cWhere").value.trim(), stops: stopsOut, food: stopsOut.length ? "" : el("cFood") ? el("cFood").value.trim() : "", notes: el("cNotes").value.trim(),
     capacity: Number(el("cCap").value) || 0, approval: !!el("cApproval").checked,
     tz: (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { return ""; } })(),
-    allowPlus: !!(el("cPlusOn") && el("cPlusOn").checked), plusMax: el("cPlusMax") ? Number(el("cPlusMax").value) || 0 : 0,
+    allowPlus: !!(el("cPlusOn") && el("cPlusOn").checked), plusMax: plusMaxVal("c"),
     ...(compose.kind === "meeting" ? {} : { dayBring: compose.bringOn !== false, dayCarpool: compose.carOn !== false }),
     questions, rsvps: { [myUid()]: "going" }, plusOnes: {}, hypes: {}, answers: {},
     // The event's own unguessable id is the access token behind the "add people" flow
@@ -2931,7 +2953,7 @@ function eventInner(ev) {
     ${manage ? `<button class="btn-th ghost small" id="addPeopleBtn">＋ Add people</button>` : ""}
     ${manage && (ev.questions || []).length ? `<button class="btn-th ghost small" id="viewAnswers">View RSVP answers</button>` : ""}
     ${manage && (ev.invitedUids || []).length > 1 && !(ev.invitedUids || []).filter(u => u !== me && !(ev.rsvps || {})[u]).length ? `<div class="dot-note">${dot("party", 44)}<span>Everyone has answered.</span></div>` : ""}
-    ${manage && (ev.invitedUids || []).filter(u => u !== me && !(ev.rsvps || {})[u]).length ? `<button class="btn-th ghost small" id="nudgeBtn">Nudge ${(ev.invitedUids || []).filter(u => u !== me && !(ev.rsvps || {})[u]).length} who haven't answered</button>` : ""}
+    ${manage && (ev.invitedUids || []).filter(u => u !== me && !(ev.rsvps || {})[u]).length ? `<button class="btn-th accent small nudge-btn" id="nudgeBtn">🔔 Nudge ${(ev.invitedUids || []).filter(u => u !== me && !(ev.rsvps || {})[u]).length} who haven't answered</button>` : ""}
     </div>
   </div>`; })()}
 
@@ -3293,7 +3315,7 @@ function wireEventPage(ev) {
     inp.onblur = save;
   });
   if (el("viewAnswers")) el("viewAnswers").onclick = () => showAnswers(ev);
-  if (el("nudgeBtn")) el("nudgeBtn").onclick = () => nudge(ev, el("nudgeBtn"));
+  if (el("nudgeBtn")) el("nudgeBtn").onclick = () => nudge(ev, el("nudgeBtn"), true);
   const share = $("[data-share]"); if (share) share.onclick = () => shareEvent(ev);
   if (el("addPeopleBtn")) el("addPeopleBtn").onclick = () => openEventInviteDialog(ev);
   document.querySelectorAll("[data-textinvite]").forEach(b => b.onclick = () => { location.href = smsLink([b.dataset.textinvite], eventInviteText({ ...ev, openLink: true })); });
@@ -3648,7 +3670,7 @@ function editEvent(ev) {
     <span class="field-label" style="margin-top:10px">Co-hosts (can edit &amp; manage)</span><div class="check-grid">${contactChecks("ecoh", new Set(ev.cohostUids || []))}</div>`,
     "Save", async () => {
       const cohostUids = [...document.querySelectorAll("input[name=ecoh]:checked")].map(i => i.value).filter(u => u !== ev.hostId);
-      try { await updateDoc(doc(db, "events", ev.id), { cohostUids, ...(cohostUids.length ? { invitedUids: arrayUnion(...cohostUids) } : {}), title: el("eTitle").value.trim(), date: el("eDate").value, ...(() => { const st = sortStops(cleanStops(E.stops)); return st.length >= 2 ? { stops: st, time: (st.find(x => x.time) || {}).time || el("eTime").value, location: st[0].place || el("eWhere").value.trim(), food: "" } : { stops: [], time: el("eTime").value, location: el("eWhere").value.trim() }; })(), ...(el("eFood") && cleanStops(E.stops).length < 2 ? { food: el("eFood").value.trim() } : {}), notes: el("eNotes").value.trim(), allowPlus: el("ePlusOn").checked, plusMax: Number(el("ePlusMax").value) || 0, ...(el("eBringOn") ? { dayBring: el("eBringOn").checked, dayCarpool: el("eCarOn").checked } : {}), ...readRepeat("e") }); closeDialog(); toast("Saved"); } catch (e) { toast(e.message); }
+      try { await updateDoc(doc(db, "events", ev.id), { cohostUids, ...(cohostUids.length ? { invitedUids: arrayUnion(...cohostUids) } : {}), title: el("eTitle").value.trim(), date: el("eDate").value, ...(() => { const st = sortStops(cleanStops(E.stops)); return st.length >= 2 ? { stops: st, time: (st.find(x => x.time) || {}).time || el("eTime").value, location: st[0].place || el("eWhere").value.trim(), food: "" } : { stops: [], time: el("eTime").value, location: el("eWhere").value.trim() }; })(), ...(el("eFood") && cleanStops(E.stops).length < 2 ? { food: el("eFood").value.trim() } : {}), notes: el("eNotes").value.trim(), allowPlus: el("ePlusOn").checked, plusMax: plusMaxVal("e"), ...(el("eBringOn") ? { dayBring: el("eBringOn").checked, dayCarpool: el("eCarOn").checked } : {}), ...readRepeat("e") }); closeDialog(); toast("Saved"); } catch (e) { toast(e.message); }
     });
   attachPlaces(el("eWhere"));
   stopCtx = ectx; wireStops(); wireRepeat("e"); wirePlusFields("e");
@@ -4623,7 +4645,7 @@ function wireMeeting(ev) {
   if (el("invToggle")) el("invToggle").onclick = () => { const c = el("invCard"); const open = !c.classList.contains("open"); c.classList.toggle("open", open); el("invToggle").setAttribute("aria-expanded", open); try { localStorage.setItem("friendlyInvOpen:" + ev.id, open ? "1" : "0"); } catch {} };
   if (el("guestToggle")) el("guestToggle").onclick = () => { const c = el("guestCard"); const open = !c.classList.contains("open"); c.classList.toggle("open", open); el("guestToggle").setAttribute("aria-expanded", open); try { localStorage.setItem("friendlyGuestOpen:" + ev.id, open ? "1" : "0"); } catch {} };
   document.querySelectorAll("[data-uninvitephone]").forEach(b => b.onclick = () => uninviteEventPhone(ev, b.dataset.uninvitephone));
-  const nd = $("[data-nudge]"); if (nd) nd.onclick = () => nudge(ev, nd);
+  const nd = $("[data-nudge]"); if (nd) nd.onclick = () => nudge(ev, nd, true);
   const ed = $("[data-edit]"); if (ed) ed.onclick = () => editEvent(ev);
   const dp = $("[data-dup]"); if (dp) dp.onclick = () => duplicateEvent(ev);
   const dl = $("[data-del]"); if (dl) dl.onclick = () => delEvent(ev);
@@ -4632,13 +4654,20 @@ function wireMeeting(ev) {
   S.evSubs.push(onSnapshot(subCol(pseudo, "comments"), snap => { S.comments = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.createdAt - b.createdAt); const w = el("wall"); if (w) withInputKept(() => { w.innerHTML = wallInner(pseudo, "Notes & questions"); wireWall(pseudo); }); }, err => toast(err.message)));
 }
 // Host asks the guests who haven't answered to RSVP (Cloud Function delivers).
-async function nudge(ev, btn) {
+async function nudge(ev, btn, ask) {
   const pending = (ev.invitedUids || []).filter(u => u !== myUid() && !(ev.rsvps || {})[u]);
   if (!pending.length) return toast("Everyone has answered already.");
+  if (ask) {
+    const names = pending.map(u => esc(first(nameOf(u)) || "a guest"));
+    const list = names.length > 4 ? [...names.slice(0, 3), `${names.length - 3} more`] : names;
+    const who = list.length === 1 ? list[0] : list.length === 2 ? list.join(" and ") : list.slice(0, -1).join(", ") + ", and " + list[list.length - 1];
+    return dialog(`<h3>Nudge ${pending.length} ${pending.length === 1 ? "person" : "people"}?</h3><p>${who} will get a reminder to RSVP to “${esc(ev.title)}”.</p>`, "Send nudge", () => { closeDialog(); nudge(ev, btn, false); });
+  }
+  const label = btn ? btn.textContent : "";
   if (btn) { btn.disabled = true; btn.textContent = "Nudging…"; }
   try { await addDoc(collection(db, "nudges"), { eventId: ev.id, by: myUid(), createdAt: Date.now() }); toast("Nudged " + pending.length + " " + (pending.length === 1 ? "person" : "people")); }
   catch (e) { toast(e.message); }
-  if (btn) { btn.disabled = false; btn.textContent = "Nudge non-responders"; }
+  if (btn) { btn.disabled = false; btn.textContent = label; }
 }
 function meetingCard(ev) {
   // Same size as an event tile so the grid stays even; a plain surface, a coral edge and a
@@ -4842,7 +4871,7 @@ function draftsBody() {
   <div class="section-head"><h1 style="margin:0">Drafts</h1><button class="btn primary small" data-go="#/new">＋ New event</button></div>
   <p class="muted sm" style="margin:-4px 0 14px">Plans you saved without sending. Nobody sees them until you create the event.</p>
   ${ds.length ? `<div class="card">${ds.map(d => `<div class="member-row"><span class="li">${esc(d.emoji || "📝")}</span><div style="flex:1;min-width:0"><b>${esc(d.title || "Untitled")}</b><div class="muted sm">${d.kind === "meeting" ? "Meeting · " : ""}${d.date ? esc(fmtDay({ date: d.date })) + " · " : ""}saved ${ago(d.updatedAt)}</div></div><span class="btnrow" style="gap:6px"><button class="btn small primary" data-opendraft="${d.id}">Continue</button><button class="btn ghost small" data-deldraft="${d.id}" title="Delete draft">✕</button></span></div>`).join("")}</div>`
-    : emptyState("📝", "No drafts", "Tap “Save as draft” while making an event to finish it later.", "sleepy")}`;
+    : emptyState("📝", "No drafts", "Tap “Save draft” while making an event to finish it later.", "sleepy")}`;
 }
 function wireDrafts() {
   document.querySelectorAll("[data-opendraft]").forEach(b => b.onclick = () => { const d = (S.drafts || []).find(x => x.id === b.dataset.opendraft); if (d) openDraft(d); });
