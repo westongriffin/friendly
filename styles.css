@@ -925,3 +925,11 @@ html{background:var(--bg)}
 /* Narrow phones (iPhone mini/SE width): the logo never wraps; the profile chip shows just the photo */
 .topbar .brand{white-space:nowrap;flex:none}
 @media (max-width:389px){.topbar .me-chip > span:not(.avatar){display:none}.topbar .me-chip{padding:3px}}
+/* Text invites: the iPhone auto-send (Shortcut) card */
+.auto-card{background:#FFF6E3;border:1px solid #FFE1A6;border-radius:14px;padding:12px 12px 6px;margin-top:10px;font-size:14px}
+.auto-card p{margin:4px 0 10px;color:var(--ink)}
+.new-tag{display:inline-block;background:var(--sun);color:#2A2019;border-radius:6px;font-size:10px;font-weight:700;padding:1px 6px;margin-left:6px;vertical-align:2px}
+.linkish{display:block;margin:6px auto 0;background:none;border:0;padding:6px;color:var(--muted);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+p .linkish{display:inline;margin:0;padding:0;color:var(--accent)}
+.sent-banner{margin-top:10px;text-align:center;font-weight:700;color:#1F8A5B;background:#F1FAF5;border:1px solid #CDEBDC;border-radius:999px;padding:10px}
+.sent-ok{font-size:13px;font-weight:700;color:#1F8A5B}

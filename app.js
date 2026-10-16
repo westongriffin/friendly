@@ -1733,17 +1733,49 @@ const groupInviteText = g => `Hey! I added you to our group "${g.name}" on Frien
 // hidden->visible round trip, not just any visibilitychange fire) it opens
 // person 2, and so on. The message itself is editable up front so there's one
 // clear place to review it before anything goes out.
+// Auto-send on iPhone: Friendly's "Friendly Invites" Shortcut takes {m: message, p: [numbers]}, texts each
+// number from the user's own phone (one text per person), then opens Friendly again. Off until the
+// Shortcut's iCloud link is set. Whether it's installed can't be detected, so a device remembers it
+// after the first send that comes back.
+const INVITES_SHORTCUT_URL = "";
+const AUTO_SEND = NATIVE && !IS_ANDROID && !!INVITES_SHORTCUT_URL;
+const autoSendReady = v => { try { if (v === undefined) return localStorage.getItem("friendlyAutoSend") === "1"; if (v) localStorage.setItem("friendlyAutoSend", "1"); else localStorage.removeItem("friendlyAutoSend"); } catch { return false; } };
+const shortcutRunUrl = (numbers, body) => "shortcuts://run-shortcut?name=" + encodeURIComponent("Friendly Invites") + "&input=text&text=" + encodeURIComponent(JSON.stringify({ m: body, p: numbers.map(n => n.replace(/[^+\d]/g, "")) }));
 function openTextInviteDialog(texted, text) {
   let idx = -1, active = false, wasHidden = false;
-  const rowsHtml = () => texted.map((p, i) => `<div class="member-row" data-row="${i}"><div style="flex:1;min-width:0"><b>${esc(p.name)}</b><div class="muted sm mono">${esc(p.e164)}</div></div>${i < idx ? `<span class="muted sm">✓ Sent</span>` : i === idx && active ? `<span class="sm" style="font-weight:700;color:var(--accent)">Sending…</span>` : `<button type="button" class="btn small" data-textone="${i}">Text</button>`}</div>`).join("");
+  // auto-send states: "offer" (setup card), "added" (back from the Add Shortcut screen), "ready", "sent", "off"
+  let auto = AUTO_SEND && texted.length > 1 ? (autoSendReady() ? "ready" : "offer") : "off", pending = null;
+  const n = texted.length;
+  const rowsHtml = () => texted.map((p, i) => `<div class="member-row" data-row="${i}"><div style="flex:1;min-width:0"><b>${esc(p.name)}</b><div class="muted sm mono">${esc(p.e164)}</div></div>${i < idx ? `<span class="sent-ok">✓ Sent</span>` : i === idx && active ? `<span class="sm" style="font-weight:700;color:var(--accent)">Sending…</span>` : `<button type="button" class="btn small" data-textone="${i}">Text</button>`}</div>`).join("");
+  const autoHtml = () => auto === "offer" ? `<div class="auto-card"><b>⚡ Send all ${n} at once</b><span class="new-tag">NEW</span>
+      <p>Add Friendly's free iPhone Shortcut one time (about 5 seconds). After that, every invite goes out in one tap, from your number.</p>
+      <button type="button" class="btn primary" id="autoSetup" style="width:100%">Set up auto-send</button>
+      <button type="button" class="linkish" id="autoSkip">Not now</button></div>`
+    : auto === "added" ? `<div class="auto-card"><b>Added it?</b>
+      <p>Tap below and Shortcuts texts all ${n} from your number, then brings you back here. The first time, iPhone asks permission: tap Always Allow.</p>
+      <button type="button" class="btn primary" id="autoRun" style="width:100%">⚡ Send all ${n} now</button>
+      <button type="button" class="linkish" id="autoSetup">Open the setup again</button></div>`
+    : auto === "ready" ? `<button type="button" class="btn primary" id="autoRun" style="width:100%;margin-top:10px">⚡ Send all ${n} at once</button>`
+    : auto === "sent" ? `<div class="sent-banner">✓ Sent to all ${n} from your number</div><p class="muted sm" style="margin:6px 0 0">They're in your Messages too, so replies come straight to you. <button type="button" class="linkish" id="autoUndo">Didn't go through? Send one at a time</button></p>`
+    : "";
+  const oneAtATime = auto === "ready" || auto === "added" || auto === "offer";
   dialog(`<h3>Text your invite</h3>
-    <p class="muted" style="margin-top:-6px">Edit the message if you want, then send it to everyone one at a time -- iPhone only lets you send from Messages yourself, so this walks you through each person: it opens Messages, you tap Send, and coming back here opens the next one.</p>
+    <p class="muted" style="margin-top:-6px">${auto === "off" ? "Edit the message if you want, then send it to everyone one at a time -- iPhone only lets you send from Messages yourself, so this walks you through each person: it opens Messages, you tap Send, and coming back here opens the next one." : "Edit the message if you want, then send it to everyone. The texts come from your own number."}</p>
     <label class="field"><span>Message</span><textarea id="txtMsg" maxlength="480">${esc(text)}</textarea></label>
-    <button type="button" class="btn primary" id="textAll" style="width:100%;margin:10px 0 12px">💬 Send to all ${texted.length}, one at a time</button>
+    <div id="autoBox">${autoHtml()}</div>
+    <button type="button" class="btn ${oneAtATime ? "" : "primary"}" id="textAll" style="width:100%;margin:10px 0 12px">💬 Send to all ${n}, one at a time${oneAtATime ? " instead" : ""}</button>
     <div class="stack" id="txtRows">${rowsHtml()}</div>
     <p class="muted sm" style="margin:10px 0 0">You can always come back and text stragglers from the "Invited" list.</p>`, null, null);
   const currentText = () => el("txtMsg").value;
   const renderRows = () => { const box = el("txtRows"); if (box) box.innerHTML = rowsHtml(); wireRowButtons(); };
+  function renderAuto() {
+    const box = el("autoBox"); if (!box) return; box.innerHTML = autoHtml();
+    const all = el("textAll"); if (all) { all.style.display = auto === "sent" ? "none" : ""; all.classList.toggle("primary", auto === "off"); if (!active && idx < 0) all.textContent = `💬 Send to all ${n}, one at a time${auto === "off" ? "" : " instead"}`; }
+    if (el("autoSetup")) el("autoSetup").onclick = () => { pending = "setup"; location.href = INVITES_SHORTCUT_URL; };
+    if (el("autoSkip")) el("autoSkip").onclick = () => { auto = "off"; renderAuto(); };
+    if (el("autoRun")) el("autoRun").onclick = () => { pending = "run"; location.href = shortcutRunUrl(texted.map(p => p.e164), currentText()); };
+    if (el("autoUndo")) el("autoUndo").onclick = () => { autoSendReady(false); auto = "off"; idx = -1; renderRows(); renderAuto(); };
+  }
   function wireRowButtons() { document.querySelectorAll("[data-textone]").forEach(b => b.onclick = () => { const p = texted[+b.dataset.textone]; location.href = smsLink([p.e164], currentText()); }); }
   function advance() {
     idx++;
@@ -1752,14 +1784,17 @@ function openTextInviteDialog(texted, text) {
     setTimeout(() => { location.href = smsLink([texted[idx].e164], currentText()); }, 350);
   }
   const onVis = () => {
-    if (!active) return;
-    if (document.visibilityState === "hidden") { wasHidden = true; return; }
-    if (document.visibilityState === "visible" && wasHidden) { wasHidden = false; advance(); }
+    if (document.visibilityState === "hidden") { if (active || pending) wasHidden = true; return; }
+    if (document.visibilityState !== "visible" || !wasHidden) return;
+    wasHidden = false;
+    if (pending === "setup") { pending = null; auto = "added"; renderAuto(); return; }
+    if (pending === "run") { pending = null; autoSendReady(true); auto = "sent"; idx = texted.length; renderRows(); renderAuto(); return; }
+    if (active) advance();
   };
   document.addEventListener("visibilitychange", onVis);
   const cancelBtn = el("dlgCancel"); if (cancelBtn) cancelBtn.addEventListener("click", () => document.removeEventListener("visibilitychange", onVis), { once: true });
-  el("textAll").onclick = () => { if (active) return; active = true; idx = -1; advance(); };
-  wireRowButtons();
+  el("textAll").onclick = () => { if (active) return; if (auto !== "off" && auto !== "sent") { auto = "off"; renderAuto(); } active = true; idx = -1; advance(); };
+  wireRowButtons(); renderAuto();
 }
 async function acceptInvite(gid, btn) {
   const g = S.pendingInvites.get(gid) || (S.pendingInvitesPhone && S.pendingInvitesPhone.get(gid)); if (!g) return;
