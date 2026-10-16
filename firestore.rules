@@ -292,11 +292,23 @@ service cloud.firestore {
         allow create: if canReadEvent() && request.resource.data.authorId == uid();
         allow delete: if isAdmin() || isEventHost() || (signedIn() && resource.data.authorId == uid());
       }
-      // Photos — event guests add and view; remove your own.
+      // Photos — event guests add and view; react; remove your own. The doc carries a small preview
+      // (slimEventPhoto moves the full image to photoFull/{photoId}); commentCount is kept by the server.
       match /photos/{photoId} {
         allow read: if canReadEvent();
         allow create: if canReadEvent() && request.resource.data.addedBy == uid();
+        allow update: if canReadEvent() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']);
         allow delete: if isAdmin() || (signedIn() && resource.data.addedBy == uid());
+        // Comments on one photo — guests post; delete your own (hosts and admins: anyone's).
+        match /comments/{commentId} {
+          allow read: if canReadEvent();
+          allow create: if canReadEvent() && request.resource.data.authorId == uid();
+          allow delete: if isAdmin() || isEventHost() || (signedIn() && resource.data.authorId == uid());
+        }
+      }
+      match /photoFull/{photoId} {
+        allow read: if canReadEvent();
+        allow write: if false;
       }
       // Polls — host adds; any guest can vote (updates only the votes map).
       match /polls/{pollId} {

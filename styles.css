@@ -943,3 +943,28 @@ p .linkish{display:inline;margin:0;padding:0;color:var(--accent)}
 .today-x::before{content:"";position:absolute;inset:-8px}   /* ~48pt touch target around the 32pt circle */
 .today-x:active{background:rgba(42,32,25,.16)}
 .today-card{padding-right:48px}
+/* Photo viewer: one photo full screen with reactions and its own comments */
+.photo-tile{position:relative}
+.ph-badges{position:absolute;left:6px;bottom:6px;display:flex;gap:4px;pointer-events:none}
+.ph-badges span{background:rgba(20,14,10,.62);color:#fff;font-size:11px;font-weight:700;border-radius:999px;padding:2px 7px;line-height:1.5}
+.photo-viewer{position:fixed;inset:0;z-index:1050;background:#0d0a08;color:#fff;display:flex;flex-direction:column;padding:calc(env(safe-area-inset-top) + 8px) 0 env(safe-area-inset-bottom)}
+.pv-top{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 14px 10px}
+.pv-who{display:flex;align-items:center;gap:10px;min-width:0}
+.pv-who b{font-size:15px}
+.pv-sub{font-size:12px;color:rgba(255,255,255,.62)}
+.pv-x{width:40px;height:40px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;font-size:17px;font-weight:700;flex:none;cursor:pointer}
+.pv-img{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:0 8px}
+.pv-img img{max-width:100%;max-height:100%;object-fit:contain;border-radius:10px}
+.pv-panel{flex:none;background:#1a1411;border-radius:18px 18px 0 0;padding:12px 14px 10px;max-height:46vh;display:flex;flex-direction:column}
+.pv-reacts{display:flex;gap:8px;overflow-x:auto;padding-bottom:10px}
+.pv-react{flex:none;display:inline-flex;align-items:center;gap:5px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#fff;border-radius:999px;padding:6px 11px;font-size:17px;cursor:pointer}
+.pv-react span{font-size:13px;font-weight:700}
+.pv-react.on{background:rgba(255,107,87,.28);border-color:var(--accent)}
+.pv-comments{flex:1 1 auto;overflow-y:auto;min-height:44px;display:flex;flex-direction:column;gap:10px;padding:2px 0 10px}
+.pv-c{display:flex;gap:9px;align-items:flex-start;font-size:14px;line-height:1.4}
+.pv-c-body{min-width:0;overflow-wrap:anywhere}
+.pv-del{background:none;border:0;padding:0;color:rgba(255,255,255,.62);font:inherit;text-decoration:underline;cursor:pointer}
+.pv-empty{color:rgba(255,255,255,.55);font-size:13px;margin:4px 0}
+.pv-form{display:flex;gap:8px}
+.pv-form input{flex:1;min-width:0;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);color:#fff;border-radius:999px;padding:10px 14px;font:inherit;font-size:16px}
+.pv-form input::placeholder{color:rgba(255,255,255,.5)}

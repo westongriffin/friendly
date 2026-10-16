@@ -737,13 +737,14 @@ const tailOf = url => routeTail(url).split("?")[0];
 // tapped notification can cold-start the app.
 let focusKey = "";
 function focusRoute() {
-  const q = S.route.q || {}; if (!q.to && !q.c) return;
+  const q = S.route.q || {}; if (!q.to && !q.c && !q.photo) return;
   const key = location.hash; if (focusKey === key) return; focusKey = key;
   let tries = 0;
   const tick = () => {
     if (location.hash !== key) return;
     if (!S.user || !S.ready || document.querySelector(".splash")) { if (tries++ < 400) setTimeout(tick, 250); return; }
     tries++;
+    if (q.photo) { const ev = S.events.get(S.route.id), p = (S.photos || []).find(x => x.id === q.photo); if (ev && p) { openPhoto(ev, p); return; } if (tries < 60) setTimeout(tick, 250); return; }
     const msg = q.c && document.querySelector(`[data-cmsg="${CSS.escape(q.c)}"]`);
     const sec = q.to && document.getElementById(q.to);
     const target = msg || ((!q.c || tries > 16) && sec);   // give a message 4 seconds to load, then settle for its section
@@ -3080,6 +3081,51 @@ function wallParticipants(ev) {
     : ev._col && ev._col[0] === "expenses" ? ((S.expenses.get(ev.id) || {}).involved || []) : (ev.invitedUids || []);
   return ids.filter(u => u !== myUid()).map(u => ({ uid: u, name: first(nameOf(u)) })).filter(p => p.name !== "Someone");
 }
+// ----- One photo, full screen: the full-size image, reactions, and its own comments -----
+const photoFullCache = new Map();
+const photoBadges = p => { const r = Object.values(p.reactions || {}).reduce((t, v) => t + (Array.isArray(v) ? v.length : 0), 0), c = p.commentCount || 0;
+  return r || c ? `<span class="ph-badges">${r ? `<span>❤️ ${r}</span>` : ""}${c ? `<span>💬 ${c}</span>` : ""}</span>` : ""; };
+function closePhoto() { const v = el("photoViewer"); if (!v) return; (v._unsubs || []).forEach(fn => fn()); v.remove(); if (!el("appDialog")) unlockScroll(); }
+function openPhoto(ev, p) {
+  closePhoto();
+  const me = myUid(), host = ev.hostId === me || (ev.cohostUids || []).includes(me) || isAdmin();
+  const box = document.createElement("div"); box.className = "photo-viewer"; box.id = "photoViewer"; box._unsubs = [];
+  box.innerHTML = `<div class="pv-top"><div class="pv-who">${avatar(p.addedBy)}<div><b>${esc(first(nameOf(p.addedBy)))}</b><div class="pv-sub">${esc(ev.title || "")}${p.createdAt ? " · " + esc(ago(p.createdAt)) : ""}</div></div></div><button type="button" class="pv-x" id="pvClose" aria-label="Close">✕</button></div>
+    <div class="pv-img"><img id="pvImg" src="${esc(photoFullCache.get(p.id) || p.img)}" alt=""></div>
+    <div class="pv-panel"><div class="pv-reacts" id="pvReacts"></div>
+      <div class="pv-comments" id="pvComments"><p class="pv-empty">Loading comments…</p></div>
+      <form class="pv-form" id="pvForm"><input id="pvText" placeholder="Add a comment…" maxlength="500" autocomplete="off" enterkeyhint="send"><button class="btn primary small" type="submit">Post</button></form></div>`;
+  document.body.appendChild(box); lockScroll();
+  el("pvClose").onclick = closePhoto;
+  const pref = doc(db, "events", ev.id, "photos", p.id);
+  let cur = p;
+  const paintReacts = () => {
+    const r = cur.reactions || {}, box2 = el("pvReacts"); if (!box2) return;
+    box2.innerHTML = QUICK_REACTS.slice(0, 6).map(e => { const k = rkey(e), who = r[k] || [], on = who.includes(me);
+      return `<button type="button" class="pv-react ${on ? "on" : ""}" data-pr="${k}" title="${esc(who.map(u => first(nameOf(u))).join(", "))}">${e}${who.length ? `<span>${who.length}</span>` : ""}</button>`; }).join("");
+    box2.querySelectorAll("[data-pr]").forEach(b => b.onclick = () => { const k = b.dataset.pr, on = ((cur.reactions || {})[k] || []).includes(me);
+      updateDoc(pref, { [`reactions.${k}`]: on ? arrayRemove(me) : arrayUnion(me) }).catch(e => toast(e.message)); });
+  };
+  paintReacts();
+  box._unsubs.push(onSnapshot(pref, d => { if (!d.exists()) { closePhoto(); toast("That photo was removed."); return; } cur = { id: d.id, ...d.data() }; paintReacts(); }, () => {}));
+  box._unsubs.push(onSnapshot(query(collection(db, "events", ev.id, "photos", p.id, "comments"), orderBy("createdAt")), snap => {
+    const list = el("pvComments"); if (!list) return;
+    const rows = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(visibleContent);
+    list.innerHTML = rows.length ? rows.map(c => `<div class="pv-c">${avatar(c.authorId, "sm")}<div class="pv-c-body"><b>${esc(first(c.authorName || nameOf(c.authorId)))}</b> ${renderText(c.text || "", c.mentions)}<div class="pv-sub">${esc(ago(c.createdAt))}${c.authorId === me || host ? ` · <button type="button" class="pv-del" data-pcdel="${c.id}">Delete</button>` : ""}</div></div></div>`).join("")
+      : `<p class="pv-empty">No comments yet. Say something nice.</p>`;
+    list.querySelectorAll("[data-pcdel]").forEach(b => b.onclick = () => deleteDoc(doc(db, "events", ev.id, "photos", p.id, "comments", b.dataset.pcdel)).catch(e => toast(e.message)));
+    list.scrollTop = list.scrollHeight;
+  }, () => { const list = el("pvComments"); if (list) list.innerHTML = `<p class="pv-empty">Comments aren't available right now.</p>`; }));
+  if (p.full && !photoFullCache.has(p.id)) getDoc(doc(db, "events", ev.id, "photoFull", p.id)).then(d => { if (!d.exists()) return; photoFullCache.set(p.id, d.data().img); const im = el("pvImg"); if (im) im.src = d.data().img; }).catch(() => {});
+  el("pvForm").onsubmit = async e => {
+    e.preventDefault(); const t = el("pvText"), text = t.value.trim(); if (!text) return;
+    t.value = "";
+    try { await addDoc(collection(db, "events", ev.id, "photos", p.id, "comments"), { text, authorId: me, authorName: (S.profile && S.profile.name) || "", createdAt: Date.now() }); }
+    catch (err) { t.value = text; toast(err.message); }
+  };
+}
+document.addEventListener("keydown", e => { if (e.key === "Escape" && el("photoViewer")) closePhoto(); });
+window.addEventListener("hashchange", closePhoto);
 function lightbox(src) { const box = document.createElement("div"); box.className = "lightbox"; box.innerHTML = `<img src="${esc(src)}" alt="">`; box.onclick = () => box.remove(); document.body.appendChild(box); }
 function wallInner(ev, title = "Party wall") {
   const all = S.comments.filter(c => !c.kind && visibleContent(c)); const me = myUid();
@@ -3484,7 +3530,7 @@ function addSongDialog(ev) {
 // ----- Photo wall -----
 function photosInner(ev) {
   const ps = S.photos.filter(visibleContent);
-  const tiles = ps.map(p => `<div class="photo-tile"><img src="${esc(p.img)}" data-photo="${p.id}" alt="" loading="lazy">${p.addedBy === myUid() || isAdmin() ? `<button class="photo-act" data-delphoto="${p.id}" title="Remove">✕</button>` : `<button class="photo-act" data-more="photo|${p.id}" title="Report">⚑</button>`}</div>`).join("");
+  const tiles = ps.map(p => `<div class="photo-tile"><img src="${esc(p.img)}" data-photo="${p.id}" alt="" loading="lazy">${photoBadges(p)}${p.addedBy === myUid() || isAdmin() ? `<button class="photo-act" data-delphoto="${p.id}" title="Remove">✕</button>` : `<button class="photo-act" data-more="photo|${p.id}" title="Report">⚑</button>`}</div>`).join("");
   return `<div class="glass-head">Photos <span>${ps.length}</span></div><div class="photo-grid"><button class="photo-add" id="addPhoto">＋</button>${tiles || ""}</div>${ps.length ? "" : `<p class="muted-th" style="margin-top:8px">Share pics from the night.</p>`}`;
 }
 function wirePhotos(ev) {
@@ -3493,7 +3539,7 @@ function wirePhotos(ev) {
     try { const img = await compressImage(f, 1400, 0.8); await addDoc(collection(db, "events", ev.id, "photos"), { img, addedBy: myUid(), createdAt: Date.now() }); }
     catch (e) { toast("Couldn't add photo: " + e.message); }
   };
-  document.querySelectorAll("[data-photo]").forEach(im => im.onclick = () => lightbox(im.src));
+  document.querySelectorAll("[data-photo]").forEach(im => im.onclick = () => { const p = S.photos.find(x => x.id === im.dataset.photo); if (p) openPhoto(ev, p); });
   document.querySelectorAll("[data-delphoto]").forEach(b => b.onclick = () => { if (confirm("Remove this photo?")) deleteDoc(doc(subCol(ev, "photos"), b.dataset.delphoto)).catch(e => toast(e.message)); });
   document.querySelectorAll("#photosCard [data-more]").forEach(b => b.onclick = () => { const [kind, id] = b.dataset.more.split("|"); moderationMenu(ev, kind, id); });
 }
@@ -4788,9 +4834,9 @@ async function renderPreview(root, id) {
 
 // ---------- MEMORIES (photo archive across my events) ----------
 S.memories = S.memories || new Map();   // eventId -> photos[]
-async function loadMemories() {
+async function loadMemories(all) {
   const evs = [...S.events.values()].sort((a, b) => b.date.localeCompare(a.date));
-  await Promise.all(evs.filter(ev => !S.memories.has(ev.id)).map(async ev => {
+  await Promise.all(evs.filter(ev => all || !S.memories.has(ev.id)).map(async ev => {
     try { const snap = await getDocs(collection(db, "events", ev.id, "photos")); S.memories.set(ev.id, snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(visibleContent)); }
     catch { S.memories.set(ev.id, []); }
   }));
@@ -4800,7 +4846,7 @@ function photosPageBody() {
   const evs = [...S.events.values()].filter(ev => (S.memories.get(ev.id) || []).length).sort((a, b) => b.date.localeCompare(a.date));
   const ago1 = yearAgoEvents().filter(ev => (S.memories.get(ev.id) || []).length);
   const section = (ev, label) => `<div class="section-head" style="margin-top:18px"><h2>${label ? label + " · " : ""}${esc(ev.emoji || "")} ${esc(ev.title)}</h2><a class="muted sm" data-go="#/e/${ev.id}">${esc(fmtWhen(ev))} ›</a></div>
-    <div class="photo-grid mem-grid">${(S.memories.get(ev.id) || []).map(p => `<img src="${esc(p.img)}" data-mem="${p.id}" alt="" loading="lazy">`).join("")}</div>`;
+    <div class="photo-grid mem-grid">${(S.memories.get(ev.id) || []).map(p => `<div class="photo-tile"><img src="${esc(p.img)}" data-mem="${p.id}" data-mev="${ev.id}" alt="" loading="lazy">${photoBadges(p)}</div>`).join("")}</div>`;
   return `<button class="link-back" data-go="#/profile">‹ Profile</button>
   <div class="section-head"><h2>Memories</h2><span class="muted sm">${evs.reduce((t, ev) => t + S.memories.get(ev.id).length, 0)} photos</span></div>
   ${S._memLoading ? `<p class="muted">Gathering photos…</p>` : ""}
@@ -4808,13 +4854,14 @@ function photosPageBody() {
   ${evs.length ? evs.map(ev => section(ev)).join("") : (S._memLoading ? "" : emptyState("📸", "No photos yet", "Photos added to your events' photo walls show up here, newest first.", "sleepy"))}`;
 }
 function wirePhotosPage() {
-  document.querySelectorAll("[data-mem]").forEach(im => im.onclick = () => lightbox(im.src));
-  // Fetch only events not cached yet; re-render only if that fetched something
-  // (otherwise render -> wire -> load -> render would loop forever).
+  document.querySelectorAll("[data-mem]").forEach(im => im.onclick = () => { const ev = S.events.get(im.dataset.mev), p = (S.memories.get(im.dataset.mev) || []).find(x => x.id === im.dataset.mem); if (ev && p) openPhoto(ev, p); });
+  // Each visit re-checks every event (photos added since the last look used to stay missing until a restart);
+  // events that arrived since are fetched too. The 20-second window keeps render -> wire -> load from looping.
   const missing = [...S.events.values()].some(ev => !S.memories.has(ev.id));
-  if (S._memLoading || !missing) return;
+  const stale = Date.now() - (S._memFreshAt || 0) > 20000;
+  if (S._memLoading || (!missing && !stale)) return;
   S._memLoading = true;
-  loadMemories().then(() => { S._memLoading = false; if (S.route.name === "photos") render(); });
+  loadMemories(stale).then(() => { S._memLoading = false; S._memFreshAt = Date.now(); if (S.route.name === "photos") render(); });
 }
 
 // ---------- sprint 3b helpers: countdown, group tab, simplify, search, drafts, duplicate, magic link ----------

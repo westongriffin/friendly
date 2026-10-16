@@ -710,6 +710,44 @@ exports.slimEventCover = onDocumentWritten({ document: "events/{id}", region: "u
   try { await slimCover(e.data.after.ref, e.data.after.data()); } catch (err) { logger.error("slimEventCover " + e.params.id + ": " + err.message); }
 });
 
+// ---- Event photos: small previews, full image on demand, comments ----
+// Photo walls and Memories download every photo doc, so the doc keeps a ~480px preview and the full image
+// moves to events/{e}/photoFull/{p} (fetched when someone opens the photo).
+const PHOTO_SLIM_OVER = 70000;
+exports.slimEventPhoto = onDocumentWritten({ document: "events/{eid}/photos/{pid}", region: "us-central1", memory: "512MiB" }, async e => {
+  const { eid, pid } = e.params, fullRef = db.doc(`events/${eid}/photoFull/${pid}`);
+  if (!e.data.after.exists) {   // photo removed: its full image and its comments go too
+    await fullRef.delete().catch(() => {});
+    await db.recursiveDelete(db.collection(`events/${eid}/photos/${pid}/comments`)).catch(() => {});
+    return;
+  }
+  const img = e.data.after.get("img");
+  if (typeof img !== "string" || img.length <= PHOTO_SLIM_OVER) return;
+  try {
+    const m = /^data:image\/[a-z+]+;base64,(.+)$/i.exec(img); if (!m) return;
+    const out = await sharp(Buffer.from(m[1], "base64")).rotate().resize({ width: 480, height: 480, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 70, mozjpeg: true }).toBuffer();
+    const thumb = "data:image/jpeg;base64," + out.toString("base64");
+    if (thumb.length >= img.length) return;
+    await fullRef.set({ img, createdAt: Date.now() });
+    await e.data.after.ref.update({ img: thumb, full: true });
+  } catch (err) { logger.error("slimEventPhoto " + eid + "/" + pid + ": " + err.message); }
+});
+// A comment on a photo: keep the count on the photo and tell whoever posted it.
+exports.onPhotoComment = onDocumentCreated({ document: "events/{eid}/photos/{pid}/comments/{cid}", ...PUSH }, async e => {
+  const c = e.data && e.data.data(); if (!c) return;
+  const { eid, pid } = e.params;
+  const pref = db.doc(`events/${eid}/photos/${pid}`);
+  await pref.update({ commentCount: FieldValue.increment(1) }).catch(() => {});
+  const [p, ev] = await Promise.all([pref.get(), db.doc("events/" + eid).get()]);
+  const owner = p.exists && p.get("addedBy");
+  if (owner && owner !== c.authorId)
+    await notify([owner], `${firstName(c.authorName || "Someone")} commented on your photo`, `“${String(c.text || "").slice(0, 120)}” · ${ev.exists ? ev.get("title") : "your event"}`,
+      `/#/e/${eid}?photo=${pid}`, { type: "comment", actorId: c.authorId });
+});
+exports.onPhotoCommentDeleted = onDocumentDeleted({ document: "events/{eid}/photos/{pid}/comments/{cid}" }, async e => {
+  await db.doc(`events/${e.params.eid}/photos/${e.params.pid}`).update({ commentCount: FieldValue.increment(-1) }).catch(() => {});
+});
+
 // ---- Recurring events: the next occurrence is created the day after one passes ----
 // ev.repeat: weekly | biweekly | monthly | custom (repeatEvery 1-30 × repeatUnit day|week|month); ev.repeatUntil ends the series.
 function addPeriod(date, ev) {
