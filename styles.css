@@ -933,3 +933,8 @@ html{background:var(--bg)}
 p .linkish{display:inline;margin:0;padding:0;color:var(--accent)}
 .sent-banner{margin-top:10px;text-align:center;font-weight:700;color:#1F8A5B;background:#F1FAF5;border:1px solid #CDEBDC;border-radius:999px;padding:10px}
 .sent-ok{font-size:13px;font-weight:700;color:#1F8A5B}
+/* Events home: the Past section starts collapsed (its events load in the background) */
+.past-head{width:100%;margin-top:26px;background:none;border:0;padding:6px 0;color:inherit;font:inherit;text-align:left;cursor:pointer;justify-content:flex-start}
+.past-head h2{margin:0}
+.past-chev{margin-left:auto;font-size:22px;line-height:1;color:var(--muted);transition:transform .2s}
+.past-head[aria-expanded="true"] .past-chev{transform:rotate(90deg)}

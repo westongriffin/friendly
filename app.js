@@ -851,11 +851,42 @@ function subscribeAll(u) {
     S.activity = snap.docs.map(d => ({ id: d.id, ...d.data() })); render();
   }));
 
-  // events where I'm directly invited
-  add(on("events", query(collection(db, "events"), where("invitedUids", "array-contains", u.uid)), snap => {
-    snap.docChanges().forEach(c => { if (c.type === "removed") S.events.delete(c.doc.id); else { const ev = { id: c.doc.id, ...c.doc.data() }; S.events.set(ev.id, ev); noteNames(ev); } });
-    render();
+  // events where I'm directly invited: upcoming ones now, past ones a moment after everything else is in
+  S.evSrc = new Map(); S.events = new Map(); S.evCut = todayStr(); S.pastOn = false; S.pastLoaded = false; S.pastOpen = false;
+  clearTimeout(S._pastTimer); S._pastTimer = setTimeout(startPast, 8000);
+  const invUp = (full) => add(onSnapshot(full ? query(collection(db, "events"), where("invitedUids", "array-contains", u.uid))
+    : query(collection(db, "events"), where("invitedUids", "array-contains", u.uid), where("date", ">=", S.evCut)), snap => {
+    takeEvents("inv", snap); if (full) S.pastLoaded = true;
+    render(); if (!snap.metadata.fromCache) schedulePast();
+  }, err => {
+    // Without its index (just deployed, still building) the dated query fails: fall back to loading everything.
+    console.warn("listener events:", err.code || err.message);
+    if (!full && err.code === "failed-precondition") { S.pastOn = true; invUp(true); }
   }));
+  invUp(false);
+}
+// Events reach us through several listeners (invited/group × upcoming/past). Each keeps its own set and
+// S.events is their union, so one listener dropping an event (say its date moved into the past) can't erase
+// what another one holds.
+function takeEvents(src, snap) {
+  if (!S.evSrc) S.evSrc = new Map();
+  const m = S.evSrc.get(src) || new Map(); S.evSrc.set(src, m);
+  snap.docChanges().forEach(c => { if (c.type === "removed") m.delete(c.doc.id); else { const ev = { id: c.doc.id, ...c.doc.data() }; m.set(ev.id, ev); noteNames(ev); } });
+  mergeEvents();
+}
+function dropEvents(src) { if (S.evSrc && S.evSrc.delete(src)) mergeEvents(); }
+function mergeEvents() { const all = new Map(); for (const m of S.evSrc.values()) for (const [id, ev] of m) all.set(id, ev); S.events = all; }
+// Past events load in the background once the upcoming ones are in (or right away when something needs them:
+// opening the Past section, the calendar view, or a link to a past event).
+function schedulePast() { if (!S.pastOn && !S._pastSoon) S._pastSoon = setTimeout(() => { S._pastSoon = null; startPast(); }, 1500); }
+function startPast() {
+  if (S.pastOn || !S.user) return;
+  S.pastOn = true; clearTimeout(S._pastTimer);
+  const u = S.user;
+  S.subs.push(onSnapshot(query(collection(db, "events"), where("invitedUids", "array-contains", u.uid), where("date", "<", S.evCut)), snap => {
+    takeEvents("invPast", snap); S.pastLoaded = true; render();
+  }, err => { console.warn("listener past events:", err.code || err.message); S.pastLoaded = true; render(); }));
+  resubscribeEvents(u);
 }
 // Tear down every listener before signing out; otherwise the SDK re-sends
 // them without auth and logs a burst of permission-denied errors.
@@ -863,30 +894,32 @@ function stopListening() { S.subs.forEach(fn => fn()); S.subs = []; cleanupEvent
 // Remember the guest names an event carries, for guests outside my groups.
 function noteNames(ev) { S.nameHints = S.nameHints || new Map(); for (const [uid, n] of Object.entries(ev.names || {})) if (n) S.nameHints.set(uid, n); }
 
-// events tied to any of my groups (re-subscribed when group set changes)
+// events tied to any of my groups (re-subscribed when the group set changes, or when past events switch on)
 function resubscribeEvents(u) {
   const gids = [...S.groups.keys()].slice(0, 30);
-  const key = gids.sort().join(",");
+  const key = gids.slice().sort().join(",") + "|" + (S.pastOn ? "all" : "up");
   if (key === S.eventSubKey) return;
   S.eventSubKey = key;
-  if (S._groupEventsUnsub) { S._groupEventsUnsub(); S._groupEventsUnsub = null; }
+  (S._groupEventsUnsubs || []).forEach(fn => fn()); S._groupEventsUnsubs = [];
+  dropEvents("grp"); dropEvents("grpPast");
   if (!gids.length) return;
-  const subscribe = attempt => {
-    S._groupEventsUnsub = onSnapshot(query(collection(db, "events"), where("groupId", "in", gids)), snap => {
-      snap.docChanges().forEach(c => { if (c.type === "removed") S.events.delete(c.doc.id); else { const ev = { id: c.doc.id, ...c.doc.data() }; S.events.set(ev.id, ev); noteNames(ev); } });
-      render();
-    }, err => {
-      // Right after creating or joining a group, the local groups snapshot fires
-      // before the server has the membership write, so the rule check for this
-      // query can fail once. A dead listener would hide every group event, so
-      // retry a few times.
-      S._groupEventsUnsub = null;
-      if (attempt < 4 && S.eventSubKey === key) setTimeout(() => { if (S.eventSubKey === key && !S._groupEventsUnsub) subscribe(attempt + 1); }, 1500 * (attempt + 1));
+  const subscribe = (src, q, attempt, onFail) => {
+    let unsub = null;
+    unsub = onSnapshot(q, snap => { takeEvents(src, snap); render(); }, err => {
+      // Right after creating or joining a group, the local groups snapshot fires before the server has the
+      // membership write, so the rule check for this query can fail once. A dead listener would hide every
+      // group event, so retry a few times.
+      if (err && err.code === "failed-precondition" && onFail) return onFail();
+      if (attempt < 4 && S.eventSubKey === key) setTimeout(() => { if (S.eventSubKey === key) subscribe(src, q, attempt + 1, onFail); }, 1500 * (attempt + 1));
       else console.warn("group events listener failed:", err && err.message);
     });
+    S._groupEventsUnsubs.push(() => unsub && unsub());
   };
-  subscribe(0);
-  S.subs.push(() => S._groupEventsUnsub && S._groupEventsUnsub());
+  const base = collection(db, "events");
+  const fullQ = query(base, where("groupId", "in", gids));
+  subscribe("grp", query(base, where("groupId", "in", gids), where("date", ">=", S.evCut || todayStr())), 0, () => subscribe("grp", fullQ, 0));
+  if (S.pastOn) subscribe("grpPast", query(base, where("groupId", "in", gids), where("date", "<", S.evCut || todayStr())), 0, () => {});
+  if (!S._groupEventsHooked) { S._groupEventsHooked = true; S.subs.push(() => { (S._groupEventsUnsubs || []).forEach(fn => fn()); S._groupEventsUnsubs = []; S.eventSubKey = null; S._groupEventsHooked = false; }); }
 }
 
 function rebuildContacts() {
@@ -1448,7 +1481,8 @@ function homeBody() {
   <div class="section-head"><h2>${homeView === "calendar" ? "Calendar" : "Upcoming"}</h2><span class="btnrow head-tools"><button class="icon-btn" id="viewToggle" title="${homeView === "calendar" ? "Show as cards" : "Show as a calendar"}" aria-label="${homeView === "calendar" ? "Show as cards" : "Show as a calendar"}">${homeView === "calendar" ? "🗂" : "📅"}</button><button class="icon-btn" data-go="#/drafts" title="Drafts" aria-label="Drafts${(S.drafts || []).length ? ", " + S.drafts.length + " saved" : ""}">📝${(S.drafts || []).length ? `<span class="badge">${S.drafts.length}</span>` : ""}</button><button class="btn primary small" data-go="#/new">＋ New event</button></span></div>
   ${filterBar}
   ${homeView === "calendar" ? calendarBody([...upcoming, ...past]) : `<div class="ev-grid">${upcoming.length ? upcoming.map(eventCard).join("") : emptyState("🗓️", "No plans yet", "Create your first event: pick a theme and invite the crew.", "sleepy") + (window.Blip && !isDemo() ? `<div style="text-align:center;margin:-6px 0 14px"><button type="button" class="btn tell-dot inline" id="homeTell">${dot("happy", 26)} Or just tell Dot the plan</button></div>` : "")}</div>
-  ${past.length ? `<div class="section-head" style="margin-top:26px"><h2>Past</h2></div><div class="ev-grid dim">${past.map(eventCard).join("")}</div>` : ""}`}`;
+  ${past.length || !S.pastLoaded ? `<button type="button" class="section-head past-head" id="pastToggle" aria-expanded="${!!S.pastOpen}"><h2>Past</h2><span class="muted sm">${S.pastLoaded ? past.length + (past.length === 1 ? " event" : " events") : ""}</span><span class="past-chev" aria-hidden="true">›</span></button>
+  ${S.pastOpen ? (S.pastLoaded ? `<div class="ev-grid dim">${past.map(eventCard).join("")}</div>` : `<p class="muted sm" style="margin:6px 2px">Loading past events…</p>`) : ""}` : ""}`}`;
 }
 function emptyState(emoji, title, sub, mood) { const art = mood && window.Blip ? window.Blip.svg({ mood, size: 84 }) : `<div class="big">${emoji}</div>`; return `<div class="card empty">${art}<b>${esc(title)}</b><p class="muted">${esc(sub)}</p></div>`; }
 
@@ -1485,6 +1519,8 @@ function wireHome() {
   document.querySelectorAll("[data-filter]").forEach(b => b.onclick = () => { homeFilter = b.dataset.filter; calDay = null; render(); });
   document.querySelectorAll("[data-bplan]").forEach(b => b.onclick = () => { const x = upcomingBirthdays(400).find(y => y.uid === b.dataset.bplan); if (x) planBirthday(x); });
   document.querySelectorAll("[data-bdismiss]").forEach(b => b.onclick = () => { try { const d = JSON.parse(localStorage.getItem("friendlyBdayDismissed") || "[]"); d.push(b.dataset.bdismiss); localStorage.setItem("friendlyBdayDismissed", JSON.stringify(d.slice(-40))); } catch {} render(); });
+  if (el("pastToggle")) el("pastToggle").onclick = () => { S.pastOpen = !S.pastOpen; if (S.pastOpen) startPast(); render(); };
+  if (homeView === "calendar") startPast();
   if (el("viewToggle")) el("viewToggle").onclick = () => { homeView = homeView === "calendar" ? "cards" : "calendar"; try { localStorage.setItem("friendlyHomeView", homeView); } catch {} render(); };
   if (el("calPrev")) el("calPrev").onclick = () => { calYM = { y: calYM.m === 0 ? calYM.y - 1 : calYM.y, m: (calYM.m + 11) % 12 }; calDay = null; render(); };
   if (el("calNext")) el("calNext").onclick = () => { calYM = { y: calYM.m === 11 ? calYM.y + 1 : calYM.y, m: (calYM.m + 1) % 12 }; calDay = null; render(); };
@@ -2849,6 +2885,7 @@ function planCardHtml(ev, plain) {
 function renderEventPage(root, id) {
   cleanupEvent();
   const ev = S.events.get(id);
+  if (!ev) startPast();
   if (!ev) { root.innerHTML = shell(`<div class="card empty">${dot("thinking", 72)}<b>Loading event…</b><p class="muted">If this stays, you may not have access.</p><button class="btn" data-go="#/">Home</button></div>`); wireShell(); getDoc(doc(db, "events", id)).then(d => { if (d.exists()) { S.events.set(id, { id, ...d.data() }); render(); } }).catch(() => {}); return; }
   if (ev.kind === "meeting") { root.innerHTML = shell(meetingBody(ev)); wireShell(); wireMeeting(ev); return; }
   const th = themeOf(ev.theme, ev.customTheme);
