@@ -906,3 +906,12 @@ html{background:var(--bg)}
 .app-dialog[open]{position:fixed;inset:0;margin:auto;height:fit-content;z-index:1001}
 .dlg-backdrop{position:fixed;inset:0;background:rgba(30,16,10,.5);z-index:1000}
 #toast{z-index:1100}
+/* Day of setup: "I'm driving" sits under Carpool as an indented row, same style as the switches above */
+.day-sub{margin-left:30px}
+/* Add people: typing a person in is its own box; the people being added are a clear, tinted list */
+.inv-manual{border:1px solid var(--line);border-radius:14px;padding:12px;margin-top:12px;background:var(--surface2)}
+.inv-manual .two{margin-bottom:8px}
+.inv-picked:has(.inv-picked-head){border:1.5px solid var(--good);border-radius:14px;padding:8px;background:var(--good-bg)}
+.inv-picked-head{font-weight:700;color:var(--good);font-size:14px;padding:2px 6px 6px}
+.inv-hit.picked{background:var(--surface);margin-bottom:4px;cursor:default}
+.picked-check{width:26px;height:26px;border-radius:50%;background:var(--good);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-weight:700;flex:none}

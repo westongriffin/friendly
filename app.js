@@ -660,6 +660,14 @@ async function resolveCity(input) {
 // ---------- state ----------
 // The intro is a flat 6 seconds, every time.
 const BOOT_AT = Date.now(), SPLASH_MIN = 6000, SPLASH_MAX = 6000; let splashTimer = null, splashHold = false;
+// Dot's intro plays only when someone has been away from the app for 10 minutes or more (first launch included).
+// Reopening sooner, even after closing the app, goes straight in. friendlyLastSeen is refreshed while the app is open.
+const AWAY_FOR_INTRO = 10 * 60 * 1000;
+const lastSeenAt = (() => { try { return Number(localStorage.getItem("friendlyLastSeen")) || 0; } catch { return 0; } })();
+const markSeen = () => { try { localStorage.setItem("friendlyLastSeen", String(Date.now())); } catch {} };
+const SKIP_INTRO = lastSeenAt && Date.now() - lastSeenAt < AWAY_FOR_INTRO;
+markSeen(); setInterval(() => { if (!document.hidden) markSeen(); }, 30000);
+window.addEventListener("pagehide", markSeen);
 const S = {
   user: null, profile: null, ready: false,
   groups: new Map(), pendingInvites: new Map(), events: new Map(),
@@ -927,9 +935,9 @@ function mountSplash(root, msg) {
 // The intro plays again whenever the app comes back to the foreground after being away a while, as an overlay on top of the live app.
 let hiddenAt = 0;
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) { hiddenAt = Date.now(); return; }
-  const away = hiddenAt ? Date.now() - hiddenAt : 0; hiddenAt = 0;
-  if (away > 15 * 60 * 1000 && S.ready && window.Blip && !document.querySelector(".splash")) replaySplash();   // away 15 minutes or more
+  if (document.hidden) { hiddenAt = Date.now(); markSeen(); return; }
+  const away = hiddenAt ? Date.now() - hiddenAt : 0; hiddenAt = 0; markSeen();
+  if (away >= AWAY_FOR_INTRO && S.ready && window.Blip && !document.querySelector(".splash")) replaySplash();   // away 10 minutes or more
 });
 function replaySplash() {
   const o = document.createElement("div"); o.className = "splash splash-replay"; o.innerHTML = splashInner("Getting everyone here…"); document.body.appendChild(o);
@@ -948,6 +956,7 @@ function renderNow() {
   const root = el("app");
   // The intro runs its own course (logo, Dot forms, a beat of rest) and then always gets out of the way.
   // It never waits on data: if the account hasn't loaded yet, the app appears with placeholders instead.
+  if (SKIP_INTRO) S._introOver = true;
   if (!S._introOver && Date.now() - BOOT_AT < SPLASH_MIN) {
     if (!splashTimer) splashTimer = setTimeout(() => { splashTimer = null; render(); }, SPLASH_MIN - (Date.now() - BOOT_AT) + 20);
     mountSplash(root, "Getting everyone here…"); return; }
@@ -1602,14 +1611,18 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
     if (excludeKeys.size) { const k = await phoneKey(e164); if (excludeKeys.has(k)) return say(`${first(excludeKeys.get(k) || "") || "They"} is already on the list.`); }
     const hit = byPhone(e164); picked.push({ name: name || (hit ? hit[1].name : "") || "", phone, e164, uid: hit ? hit[0] : null }); renderPicked();
   };
-  const renderPicked = () => { const box = el("invChosen"); if (box) box.innerHTML = picked.map((p, i) => `<div class="inv-hit"><div style="flex:1;min-width:0"><b>${esc(p.name || p.e164)}</b><div class="muted sm">${p.uid ? knownLabel : phoneLabel}${p.e164 ? " · " + esc(p.e164) : ""}</div></div><button type="button" class="btn ghost small" data-unpick="${i}">✕</button></div>`).join("") || `<p class="muted sm">Nobody picked yet.</p>`; box.querySelectorAll("[data-unpick]").forEach(b => b.onclick = () => { picked.splice(+b.dataset.unpick, 1); renderPicked(); }); };
+  const renderPicked = () => {
+    const box = el("invChosen"); if (!box) return;
+    box.innerHTML = picked.length ? `<div class="inv-picked-head">✓ Adding ${picked.length} ${picked.length === 1 ? "person" : "people"}</div>` + picked.map((p, i) => `<div class="inv-hit picked"><span class="picked-check">✓</span><div style="flex:1;min-width:0"><b>${esc(p.name || p.e164)}</b><div class="muted sm">${p.uid ? knownLabel : phoneLabel}${p.e164 ? " · " + esc(p.e164) : ""}</div></div><button type="button" class="btn ghost small" data-unpick="${i}" aria-label="Remove">✕</button></div>`).join("") : `<p class="muted sm" style="margin:0">Nobody picked yet.</p>`;
+    box.querySelectorAll("[data-unpick]").forEach(b => b.onclick = () => { const gone = picked.splice(+b.dataset.unpick, 1)[0]; renderPicked(); if (gone && el("invBook")) paintBook(el("invBookQ") ? el("invBookQ").value : ""); if (el("invResults") && el("invSearch")) el("invSearch").dispatchEvent(new Event("input")); });
+  };
   dialog(`<h3>${esc(title)}</h3>
     <p class="muted" style="margin-top:-6px">${esc(blurb)}</p>
     ${isDemo() ? `<p class="muted sm">Inviting by phone number is off in the demo, so it never texts a real person -- add Jordan or Casey below instead.</p>` : nativeContacts || webPicker ? `<button type="button" class="btn primary" id="invPick" style="width:100%">📇 Choose from contacts</button>` : `<p class="muted sm">Picking from your address book works in the Friendly iPhone app. Here, type a name and number:</p>`}
-    ${isDemo() ? "" : `<div class="two" style="margin-top:10px"><label class="field"><span>Name</span><input id="invName" placeholder="Jo Park" maxlength="40" autocomplete="off"></label><label class="field"><span>Phone</span><input id="invPhone" inputmode="tel" placeholder="+1 555 123 4567" autocomplete="off"></label></div>
-    <button type="button" class="btn small" id="invAddManual">＋ Add to the list</button>`}
+    ${isDemo() ? "" : `<div class="inv-manual"><span class="field-label" style="margin:0 0 6px">Not in your contacts? Type them in</span><div class="two"><label class="field"><span>Name</span><input id="invName" placeholder="Jo Park" maxlength="40" autocomplete="off"></label><label class="field"><span>Phone</span><input id="invPhone" inputmode="tel" placeholder="+1 555 123 4567" autocomplete="off"></label></div>
+    <button type="button" class="btn small" id="invAddManual">＋ Add to the list</button></div>`}
     <p class="muted sm" id="invNote" hidden style="margin:8px 0 0;color:var(--bad)"></p>
-    <div class="inv-chosen" id="invChosen" style="margin-top:12px"></div>
+    <div class="inv-chosen inv-picked" id="invChosen" style="margin-top:12px"></div>
     ${known.length ? `<details class="adv" style="margin-top:12px"><summary>Friends from your other groups</summary><input class="inv-search" id="invSearch" placeholder="Search by name…" autocomplete="off" style="margin-top:8px"><div class="inv-results" id="invResults"></div></details>` : ""}`,
     submitLabel, async () => {
       const direct = picked.filter(p => p.uid); const texted = picked.filter(p => !p.uid);
@@ -1640,16 +1653,27 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
     });
   };
   const bookNote = t => { const n = el("invNote"); if (n) { n.textContent = t; n.hidden = !t; } };
+  // Loads the phone's address book once per app session (cached), with a time limit on every step so the
+  // button can't silently hang: it says what it's doing at once, and offers Try again if the phone is slow.
+  const withTimeout = (pr, ms, what) => Promise.race([pr, new Promise((_, no) => setTimeout(() => no(new Error(what + " took too long")), ms))]);
+  const slowLog = (ms, n, err) => { try { if (isAdmin() && (ms > 6000 || err)) addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `contacts load ${ms}ms, ${n} contacts${err ? ", error: " + err : ""}`, route: location.hash, version: APP_V + " / " + (nativeVersion || ""), platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now() }).catch(() => {}); } catch {} };
   async function openBook() {
-    const C = nativeContacts;
-    let perm = null; try { perm = await C.checkPermissions(); if (perm && perm.contacts !== "granted" && perm.contacts !== "limited") perm = await C.requestPermissions(); } catch {}
-    if (!perm || (perm.contacts !== "granted" && perm.contacts !== "limited")) return false;
-    el("invPick").textContent = "Loading your contacts…"; el("invPick").disabled = true;
-    const r = await C.getContacts({ projection: { name: true, phones: true } });
-    const seen = new Set();
-    book = ((r && r.contacts) || []).map(c => { const phone = phoneOfContact(c); return { name: nameOfContact(c).trim(), phone, e164: toE164(phone) }; })
-      .filter(c => c.e164 && !seen.has(c.e164) && seen.add(c.e164)).sort((a, b) => (a.name || "~").localeCompare(b.name || "~"));
-    el("invPick").outerHTML = `<div class="book"><input type="search" class="inv-search" id="invBookQ" placeholder="Search your contacts…" autocomplete="off"><div class="book-list" id="invBook"></div></div>`;
+    const C = nativeContacts, btn = el("invPick"), t0 = Date.now();
+    if (btn) { btn.textContent = "Opening your contacts…"; btn.disabled = true; }
+    if (!window.__friendlyBook) {
+      let perm = null;
+      try { perm = await withTimeout(C.checkPermissions(), 6000, "Checking contacts access"); if (perm && perm.contacts !== "granted" && perm.contacts !== "limited") perm = await C.requestPermissions(); } catch {}
+      if (!perm || (perm.contacts !== "granted" && perm.contacts !== "limited")) { if (btn) { btn.disabled = false; btn.textContent = "📇 Choose from contacts"; } return false; }
+      if (btn) btn.textContent = "Loading your contacts…";
+      const r = await withTimeout(C.getContacts({ projection: { name: true, phones: true } }), 25000, "Loading your contacts");
+      const seen = new Set();
+      window.__friendlyBook = ((r && r.contacts) || []).map(c => { const phone = phoneOfContact(c); return { name: nameOfContact(c).trim(), phone, e164: toE164(phone) }; })
+        .filter(c => c.e164 && !seen.has(c.e164) && seen.add(c.e164)).sort((a, b) => (a.name || "~").localeCompare(b.name || "~"));
+      slowLog(Date.now() - t0, window.__friendlyBook.length);
+    }
+    book = window.__friendlyBook;
+    const b2 = el("invPick"); if (!b2) return true;
+    b2.outerHTML = `<div class="book"><input type="search" class="inv-search" id="invBookQ" placeholder="Search your contacts…" autocomplete="off"><div class="book-list" id="invBook"></div></div>`;
     el("invBookQ").oninput = e => paintBook(e.target.value);
     paintBook(""); return true;
   }
@@ -1665,7 +1689,7 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
         const notes = []; await addPicked(nameOfContact(c), phoneOfContact(c), notes); if (notes.length) bookNote(notes.join(" "));
       }
       else { const rows = await navigator.contacts.select(["name", "tel"], { multiple: true }); const notes = []; for (const r of rows) await addPicked((r.name || [])[0] || "", (r.tel || [])[0] || "", notes); if (notes.length) bookNote(notes.join(" ")); }
-    } catch (e) { const m = String((e && e.message) || e || ""); if (el("invPick")) { el("invPick").disabled = false; el("invPick").textContent = "📇 Choose from contacts"; } bookNote(/cancel/i.test(m) || !m ? "" : "Couldn't read your contacts: " + m); }
+    } catch (e) { const m = String((e && e.message) || e || ""); slowLog(0, 0, m); if (el("invPick")) { el("invPick").disabled = false; el("invPick").textContent = "📇 Try again"; } bookNote(/cancel/i.test(m) || !m ? "" : "Couldn't read your contacts: " + m); }
   };
   if (el("invSearch")) {
     const renderResults = q => { const ql = q.toLowerCase(); const hits = known.filter(([u, i]) => !picked.some(p => p.uid === u) && (i.name || "").toLowerCase().includes(ql)); el("invResults").innerHTML = hits.slice(0, 8).map(([u, i]) => `<div class="inv-hit" data-choose="${u}">${avatar(u)}<div><b>${esc(i.name || "Friend")}</b></div><span class="add">Add</span></div>`).join("") || `<p class="muted sm">No one else to add.</p>`; };
@@ -1780,7 +1804,7 @@ async function leaveGroup(g) {
 const compose = { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji",
   title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false,
   questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "" };
-function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", repeat: "", stops: [], _restored: false, _fromDraft: false, _plan: null, _draftId: null, plusOn: null, plusMax: 0, bring: [], bringOn: true, carOn: true, drive: false, seats: 3 }); }
+function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", repeat: "", stops: [], _restored: false, _fromDraft: false, _plan: null, _draftId: null, plusOn: null, plusMax: 0, bring: [], bringOn: true, carOn: true, drive: false, seats: 3 }); clearTimeout(draftTimer); }
 // ---- "Let me plan it": say the plan, Dot drafts it, you review it in the composer. Nothing is created or sent until you tap Create.
 function planContext(text, mode, ctx) {
   const d = new Date(), pad = n => String(n).padStart(2, "0");
@@ -2407,6 +2431,7 @@ function composeBody() {
       <button type="button" class="${compose.kind !== "meeting" ? "on" : ""}" data-kind="event">🎉 Event</button>
       <button type="button" class="${compose.kind === "meeting" ? "on" : ""}" data-kind="meeting">📅 Meeting</button>
     </div>
+    ${!compose._draftId && (S.drafts || []).length ? `<p class="muted sm" style="margin:-4px 0 10px">You have ${S.drafts.length} saved draft${S.drafts.length === 1 ? "" : "s"} · <a data-go="#/drafts" style="color:var(--accent);font-weight:600">Open Drafts</a></p>` : ""}
     ${compose._fromDraft ? `<p class="muted sm" style="margin:-4px 0 10px">Restored your draft · <a id="discardDraft" style="color:var(--accent);font-weight:600">Discard</a></p>` : ""}
     ${compose._plan ? planCard() : (window.Blip && !isDemo() && !compose._fromDraft && !compose.title ? `<button type="button" class="btn tell-dot" id="composeTell">${dot("happy", 26)} Or just tell Dot: “Taco night Friday at 7, invite the crew, bring a side.”</button>` : "")}
     <p class="muted sm draft-status" id="draftStatus" style="margin:-4px 0 10px;min-height:1.4em"></p>
@@ -4702,12 +4727,34 @@ function wireSearch() {
   wireResults();
 }
 // ---------- drafts (the composer remembers what you typed) ----------
+// Every event in progress is kept in 📝 Drafts on the account automatically (a couple of seconds after each
+// change), so it's never "hidden" behind New event. Creating the event removes the draft.
+let draftTimer = null;
+// Leaving New event: anything with a name is saved to Drafts right away, and the form is cleared so the next
+// "+ New event" starts fresh (the half-finished one waits in 📝 Drafts).
+let prevHash = location.hash;
+window.addEventListener("hashchange", () => {
+  const was = prevHash; prevHash = location.hash;
+  if (was !== "#/new" || location.hash === "#/new") return;
+  if ((compose.title || "").trim() && S.user && !isDemo() && !compose._created) {
+    clearTimeout(draftTimer);
+    if (!compose._draftId) compose._draftId = newId();
+    let json = composeJson(); if (json.length > 900000) json = JSON.stringify({ ...JSON.parse(json), cover: null, coverTab: "emoji" });
+    setDoc(doc(db, "users", myUid(), "drafts", compose._draftId), { json, title: compose.title.trim(), emoji: compose.emoji || "🎉", date: compose.date || "", kind: compose.kind || "event", updatedAt: Date.now() }).catch(() => {});
+    toast("Saved to 📝 Drafts on the Events page");
+  }
+  resetCompose(); compose._restored = true;
+});
 function saveDraft() {
-  try {
-    if (!(compose.title || compose.notes)) return;
-    localStorage.setItem("friendlyDraft", JSON.stringify({ ...compose, invitees: [...compose.invitees], cohosts: [...compose.cohosts], _restored: undefined, _fromDraft: undefined }));
-    const s = el("draftStatus"); if (s) s.textContent = "✓ Draft saved";
-  } catch {}
+  if (!(compose.title || "").trim() || !S.user || isDemo()) return;
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => {
+    if (location.hash !== "#/new" || !(compose.title || "").trim() || (el("createEventBtn") && el("createEventBtn").disabled)) return;
+    if (!compose._draftId) compose._draftId = newId();
+    let json = composeJson(); if (json.length > 900000) json = JSON.stringify({ ...JSON.parse(json), cover: null, coverTab: "emoji" });   // a huge cover photo won't fit
+    setDoc(doc(db, "users", myUid(), "drafts", compose._draftId), { json, title: compose.title.trim(), emoji: compose.emoji || "🎉", date: compose.date || "", kind: compose.kind || "event", updatedAt: Date.now() })
+      .then(() => { const s = el("draftStatus"); if (s) s.textContent = "✓ Saved to Drafts"; }).catch(() => {});
+  }, 1500);
 }
 // Drafts you save on purpose live on your account (users/{uid}/drafts), so they're on every device.
 const composeJson = () => JSON.stringify({ ...compose, invitees: [...compose.invitees], cohosts: [...compose.cohosts], _restored: undefined, _fromDraft: undefined, _draftId: undefined, _plan: undefined });
@@ -4755,7 +4802,7 @@ function composeDayInner() {
     </div>
     <label class="switch"><input type="checkbox" id="cCarOn" ${c.carOn === false ? "" : "checked"}><span>🚗 Carpool</span></label>
     <div class="${c.carOn === false ? "hidden" : ""}" style="margin:8px 0 0">
-      <label class="cbox"><input type="checkbox" id="cDrive" ${c.drive ? "checked" : ""}> I'm driving and have room</label>
+      <label class="switch day-sub"><input type="checkbox" id="cDrive" ${c.drive ? "checked" : ""}><span>I'm driving and have room</span></label>
       <label class="field ${c.drive ? "" : "hidden"}" style="margin-top:6px"><span>Open seats</span><select id="cSeats">${[1, 2, 3, 4, 5, 6].map(n => `<option ${Number(c.seats || 3) === n ? "selected" : ""}>${n}</option>`).join("")}</select></label>
     </div>`;
 }
@@ -4771,10 +4818,16 @@ function wireComposeDay() {
   el("cBringItem").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); add(); } };
   card.querySelectorAll("[data-bringx]").forEach(b => b.onclick = () => { compose.bring.splice(Number(b.dataset.bringx), 1); redraw(); });
 }
+// The old device-only autosave moves into the account's Drafts once, instead of reappearing inside New event.
 function restoreDraft() {
-  if (compose._restored || compose.title) return; compose._restored = true;
-  try { const d = JSON.parse(localStorage.getItem("friendlyDraft") || "null"); if (!d || !(d.title || d.notes)) return;
-    Object.assign(compose, d, { invitees: new Set(d.invitees || []), cohosts: new Set(d.cohosts || []), cover: d.cover || null, questions: d.questions || [] }); compose._fromDraft = true; } catch {}
+  if (compose._restored) return; compose._restored = true;
+  try {
+    const raw = localStorage.getItem("friendlyDraft"); if (!raw || !S.user) return;
+    localStorage.removeItem("friendlyDraft");
+    const d = JSON.parse(raw); if (!d || !(d.title || "").trim()) return;
+    let json = JSON.stringify({ ...d, _restored: undefined, _fromDraft: undefined, _draftId: undefined }); if (json.length > 900000) json = JSON.stringify({ ...d, cover: null, coverTab: "emoji" });
+    setDoc(doc(db, "users", myUid(), "drafts", newId()), { json, title: d.title.trim(), emoji: d.emoji || "🎉", date: d.date || "", kind: d.kind || "event", updatedAt: Date.now() }).catch(() => {});
+  } catch {}
 }
 function duplicateEvent(ev) {
   resetCompose(); compose._restored = true;
