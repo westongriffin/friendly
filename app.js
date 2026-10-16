@@ -315,7 +315,7 @@ function showLogoTip(custom, sug) {
   wrap.style.left = r.left + "px"; wrap.style.top = r.top + "px";
   wrap.innerHTML = `<div class="logo-tip-dot">${dot(sug ? "thinking" : "happy", 56)}</div><div class="logo-tip-bubble">${esc(tip)}${sug ? `<div class="tip-actions"><button type="button" class="btn primary small" id="tipDo">${esc(sug.label)}</button><button type="button" class="btn small" id="tipSkip">Not now</button></div>` : ""}</div>`;
   document.body.appendChild(wrap);
-  dotEl.classList.add("away");
+  document.body.classList.add("dot-out");
   requestAnimationFrame(() => wrap.classList.add("out"));
   let acted = false, dismissed = false;
   const hide = e => {
@@ -323,7 +323,7 @@ function showLogoTip(custom, sug) {
     if (e) dismissed = true;                                        // a tap away is a dismissal; a timeout is not
     clearTimeout(logoTipTimer); document.removeEventListener("click", hide, true);
     wrap.classList.remove("out"); wrap.classList.add("back");
-    setTimeout(() => { wrap.remove(); const d = el("brandDot"); if (d) d.classList.remove("away"); }, 420);
+    setTimeout(() => { wrap.remove(); document.body.classList.remove("dot-out"); }, 420);
     if (sug) { dotMarkSeen(sug, dismissed && !acted); dotCurrent = null; const d = el("brandDot"); if (d) d.classList.remove("has-tip"); }
   };
   if (sug) {
@@ -461,9 +461,9 @@ function dotWave() {
   const r = dotEl.getBoundingClientRect();
   const w = document.createElement("div"); w.id = "logoWave"; w.style.left = r.left + "px"; w.style.top = r.top + "px";
   w.innerHTML = window.Blip.svg({ mood: "happy", size: 64, wave: true });
-  document.body.appendChild(w); dotEl.classList.add("away");
+  document.body.appendChild(w); document.body.classList.add("dot-out");
   requestAnimationFrame(() => w.classList.add("out"));
-  setTimeout(() => { w.classList.remove("out"); w.classList.add("back"); setTimeout(() => { w.remove(); const d = el("brandDot"); if (d) d.classList.remove("away"); }, 450); }, 2300);
+  setTimeout(() => { w.classList.remove("out"); w.classList.add("back"); setTimeout(() => { w.remove(); document.body.classList.remove("dot-out"); }, 450); }, 2300);
 }
 document.addEventListener("click", () => { const x = el("edgeDot"); if (x && x.classList.contains("in")) { x.classList.remove("in"); x.querySelector(".edge-art").innerHTML = dot("idle", 66); } });
 window.addEventListener("offline", () => toast("You're offline. Changes will send when you're back.", null, null, "oops"));
@@ -788,7 +788,7 @@ onAuthStateChanged(auth, async u => {
   if (pendingJoin) location.hash = "#/join/" + pendingJoin;
   else if (/^(#\/?|#\/(money|groups|activity|photos|search|profile))$/.test(location.hash)) location.hash = "#/";
   if (NATIVE) registerPush(u.uid);
-  setTimeout(reportContactsTrace, 4000);
+  setTimeout(reportContactsTrace, 4000); setTimeout(reportFreezeTrace, 4500);
 });
 
 function subscribeAll(u) {
@@ -979,8 +979,30 @@ function withInputKept(fn) {
   n.focus({ preventScroll: true });
   try { if (snap.s != null) n.setSelectionRange(snap.s, snap.e); } catch {}
 }
+// Freeze black box (admins). A ring of recent steps (redraws with route and time taken, visibility changes) plus a
+// heartbeat, saved every second. When the page's code stalls 3+ seconds while on screen, that's logged; the next
+// sign-in reports any session that stalled, so a freeze on a phone tells us what was running.
+const FZ_KEY = "friendlyFreezeTrace";
+const fz = { log: [], tick: Date.now(), stalled: false,
+  add(s) { this.log.push(new Date().toTimeString().slice(0, 8) + " " + s); if (this.log.length > 50) this.log.shift(); },
+  save() { try { localStorage.setItem(FZ_KEY, JSON.stringify({ hb: Date.now(), stalled: this.stalled, log: this.log, v: APP_V + " / " + (nativeVersion || ""), route: location.hash })); } catch {} } };
+setInterval(() => { const now = Date.now(), gap = now - fz.tick; fz.tick = now; if (gap > 3000 && gap < 90000 && !document.hidden) { fz.stalled = true; fz.add(`STALL ${Math.round(gap / 100) / 10}s on ${location.hash || "#/"}`); } fz.save(); }, 1000);
+document.addEventListener("visibilitychange", () => { fz.tick = Date.now(); fz.add("app " + document.visibilityState); fz.save(); });
+window.addEventListener("hashchange", () => fz.add("go " + location.hash.slice(0, 60)));
+window.addEventListener("pagehide", () => { fz.add("page closed"); fz.save(); });
+function reportFreezeTrace() {
+  let tr = null; try { tr = JSON.parse(localStorage.getItem("friendlyFreezePrev") || "null"); localStorage.removeItem("friendlyFreezePrev"); } catch {}
+  // Report a session that stalled, or one that ended while on screen (its last step isn't going to the background
+  // or closing): that's a force-quit during a hang, or a crash.
+  const lastStep = String((tr && tr.log && tr.log[tr.log.length - 1]) || "");
+  const endedOnScreen = tr && tr.log && tr.log.length && !/ (app hidden|page closed)$/.test(lastStep);
+  if (!tr || !(tr.stalled || endedOnScreen) || !isAdmin()) return;
+  addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `freeze trace (previous session ${tr.stalled ? "stalled" : "ended while on screen"}, last heartbeat ${new Date(tr.hb).toTimeString().slice(0, 8)}):\n` + tr.log.join("\n"), route: tr.route, version: tr.v, platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now(), tracedAt: tr.hb }).catch(() => {});
+}
+try { const prev = localStorage.getItem(FZ_KEY); if (prev) localStorage.setItem("friendlyFreezePrev", prev); } catch {}
 function render() {
   clearTimeout(renderTimer); renderTimer = 0;
+  const fzT0 = performance.now();
   // Background data never rebuilds a screen you're filling in or chatting on: the New event form (its draft
   // autosave answers back as a snapshot, and the rebuild closed sections and jumped the form) and a message
   // thread (its own listener paints new messages).
@@ -990,6 +1012,7 @@ function render() {
   withInputKept(renderNow); restoreKept();
   if (openKeys.size) document.querySelectorAll("#app details").forEach(d => { if (openKeys.has(detailsKey(d))) d.open = true; });
   try { syncBadge(); } catch {}
+  const fzMs = performance.now() - fzT0; if (fzMs > 40) fz.add(`redraw ${(S.route && S.route.name) || "?"} ${Math.round(fzMs)}ms${S._bgRender ? " (background)" : ""}`);
 }
 const detailsKey = d => d.id || (location.hash.split("?")[0] + "|" + ((d.querySelector("summary") || {}).textContent || "").trim());
 // Data arriving from the server redraws through here: a burst of snapshots (a dozen listeners, each answering
@@ -1527,7 +1550,7 @@ function eventCard(ev) {
   const pills = `${isNewEvent(ev) ? `<span class="new-pill">New</span>` : ""}${rsvpDot}`;
   return `
   <a class="ev-card t-${esc(th.id)} ${ev.cover ? "has-cover" : ""} ${ev._unjoined ? "unjoined" : ""}" data-ev="${ev.id}" style="--th-accent:${esc(th.accent)};--th-ink:${esc(th.ink)};--th-on-accent:${esc(th.onAccent)}">
-    ${ev.cover ? `<img class="cover-img" src="${esc(ev.cover)}" alt="" decoding="sync">` : `<div class="ev-card-bg"></div>`}
+    ${ev.cover ? `<img class="cover-img" src="${esc(ev.cover)}" alt="">` : `<div class="ev-card-bg"></div>`}
     <div class="ev-card-body">
       ${pills ? `<div class="ev-pills">${pills}</div>` : ""}
       ${ev.cover ? "" : `<div class="ev-card-emoji">${esc(ev.emoji || "🎉")}</div>`}
