@@ -919,3 +919,6 @@ html{background:var(--bg)}
 .head-tools{gap:8px;flex-wrap:nowrap;align-items:center}
 .icon-btn{position:relative;width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:var(--surface);display:inline-flex;align-items:center;justify-content:center;font-size:17px;cursor:pointer;flex:none;padding:0}
 .icon-btn .badge{position:absolute;top:-4px;right:-4px}
+/* Narrow phones (iPhone mini/SE width): the logo never wraps; the profile chip shows just the photo */
+.topbar .brand{white-space:nowrap;flex:none}
+@media (max-width:389px){.topbar .me-chip span{display:none}.topbar .me-chip{padding:3px}}
