@@ -1527,7 +1527,7 @@ function eventCard(ev) {
   const pills = `${isNewEvent(ev) ? `<span class="new-pill">New</span>` : ""}${rsvpDot}`;
   return `
   <a class="ev-card t-${esc(th.id)} ${ev.cover ? "has-cover" : ""} ${ev._unjoined ? "unjoined" : ""}" data-ev="${ev.id}" style="--th-accent:${esc(th.accent)};--th-ink:${esc(th.ink)};--th-on-accent:${esc(th.onAccent)}">
-    ${ev.cover ? `<img class="cover-img" src="${esc(ev.cover)}" alt="" loading="lazy">` : `<div class="ev-card-bg"></div>`}
+    ${ev.cover ? `<img class="cover-img" src="${esc(ev.cover)}" alt="" decoding="sync">` : `<div class="ev-card-bg"></div>`}
     <div class="ev-card-body">
       ${pills ? `<div class="ev-pills">${pills}</div>` : ""}
       ${ev.cover ? "" : `<div class="ev-card-emoji">${esc(ev.emoji || "🎉")}</div>`}

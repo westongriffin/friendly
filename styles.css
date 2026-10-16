@@ -14,6 +14,7 @@
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;max-width:100%} html{overflow-x:hidden} body{overflow-x:clip}
 html{-webkit-text-size-adjust:100%}
+html{-webkit-tap-highlight-color:transparent}
 body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5;
   -webkit-font-smoothing:antialiased;overscroll-behavior-y:none;position:relative}
 #app{overflow-x:clip;max-width:100%}
@@ -228,7 +229,10 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .ev-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px}
 .ev-grid.dim{opacity:.72}
 .ev-card{position:relative;border-radius:18px;overflow:hidden;min-height:200px;display:block;box-shadow:var(--shadow);border:1px solid rgba(0,0,0,.06);isolation:isolate;transition:transform .12s,box-shadow .12s}
-.ev-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-lg)}
+/* Hover lift only where there's a real pointer: on iPhone a tapped card kept its hover state, and the swipe-back
+   snapshot showed it lifted with a gray tap highlight. A light press-in gives touch feedback instead. */
+@media (hover:hover){.ev-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-lg)}}
+.ev-card:active{transform:scale(.985)}
 .ev-card-bg{position:absolute;inset:0;background:var(--paint,#eee);background-size:var(--bgsize,cover);z-index:-1}
 /* Text sits at the bottom of the tile over a scrim; status pills sit top-right, so nothing overlaps the title. */
 .ev-card-body{padding:14px;height:100%;display:flex;flex-direction:column;color:var(--th-ink,#222)}
