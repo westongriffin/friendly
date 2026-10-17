@@ -2079,8 +2079,9 @@ function openPlanDialog(mode = "event", ctx = {}) {
   }
 }
 // Names -> friends: a unique full-name match, else a unique first-name match. Anything else is reported, never guessed.
-function matchFriends(names) {
-  const contacts = [...S.contacts.entries()].filter(([uid, c]) => uid !== myUid() && c && c.name);
+function matchFriends(names, extra) {
+  const pool = new Map(S.contacts); for (const [u, i] of extra || []) if (!pool.has(u)) pool.set(u, i);
+  const contacts = [...pool.entries()].filter(([uid, c]) => uid !== myUid() && c && c.name && c.name !== "Someone");
   const uids = [], unmatched = [];
   for (const raw of (names || []).slice(0, 30)) {
     const n = String(raw).trim().toLowerCase(); if (!n) continue;
@@ -2486,9 +2487,10 @@ function applyExpense(x, ctx) {
   if (el("xDesc")) el("xDesc").value = x.desc || "";
   if (el("xAmt") && x.amount > 0) el("xAmt").value = String(x.amount);
   const payer = el("xPayer");
-  if (payer && x.paidBy) { const m = matchFriends([x.paidBy]); if (m.uids.length) payer.value = m.uids[0]; else notes.push(`I couldn't tell who "${x.paidBy}" is, so I left you as the payer.`); }
+  const guests = ctx.eventId ? expensePeople(ctx.eventId, null).main : [];
+  if (payer && x.paidBy) { const m = matchFriends([x.paidBy], guests); if (m.uids.length) payer.value = m.uids[0]; else notes.push(`I couldn't tell who "${x.paidBy}" is, so I left you as the payer.`); }
   if (!x.splitEveryone && (x.splitWith || []).length) {
-    const m = matchFriends(x.splitWith); const set = new Set([...m.uids, payer ? payer.value : myUid()]);
+    const m = matchFriends(x.splitWith, guests); const set = new Set([...m.uids, payer ? payer.value : myUid()]);
     document.querySelectorAll('#appDialog input[name=spl]').forEach(i => { i.checked = set.has(i.value); });
     if (m.unmatched.length) notes.push(`I couldn't find ${m.unmatched.join(", ")} in your friends. Tick them below if they're listed under another name.`);
   }
@@ -4005,7 +4007,36 @@ function payZelle(uid, cents) {
 }
 const PAY_METHODS = { venmo: "Venmo", apple: "Apple Cash", zelle: "Zelle", cashapp: "Cash App" };
 const payPrefOptions = sel => `<option value="" ${!sel ? "selected" : ""}>No preference</option>` + Object.entries(PAY_METHODS).map(([k, v]) => `<option value="${k}" ${sel === k ? "selected" : ""}>${v}</option>`).join("");
-const payerOptions = (people, sel) => people.map(([u, i]) => `<option value="${u}" ${u === (sel || myUid()) ? "selected" : ""}>${esc(first(i.name))}</option>`).join("");
+const payerOptions = (people, sel) => { const opt = ([u, i]) => `<option value="${u}" ${u === (sel || myUid()) ? "selected" : ""}>${esc(first(i.name))}</option>`; const main = Array.isArray(people) ? people : people.main, others = Array.isArray(people) ? [] : people.others; return main.map(opt).join("") + (others.length ? `<optgroup label="More people">${others.map(opt).join("")}</optgroup>` : ""); };
+// Who an expense can be between. From an event: that event's guests, whether or not you share a group with them
+// (their names travel with the event), Going first and pre-checked; from a group: its members; from Money:
+// everyone you know. Anyone else you know is offered under "More people", collapsed.
+function expensePeople(eventId, restrict) {
+  const me = myUid(), info = u => S.contacts.get(u) || { name: nameOf(u) };
+  const ev = eventId ? S.events.get(eventId) : null;
+  let main = [], checked = new Set(), tags = new Map();
+  if (ev) {
+    const r = ev.rsvps || {}, rank = u => u === me ? 0 : r[u] === "going" ? 1 : r[u] === "maybe" ? 2 : !r[u] ? 3 : 4;
+    main = [...new Set([me, ...(ev.invitedUids || [])])].sort((x, y) => rank(x) - rank(y)).map(u => [u, info(u)]);
+    main.forEach(([u]) => { if (u === me || r[u] === "going") checked.add(u); else tags.set(u, r[u] === "no" ? "can't go" : r[u] === "maybe" ? "maybe" : r[u] ? r[u] : "no answer"); });
+  } else if (restrict) {
+    main = [...new Set([me, ...restrict])].map(u => [u, info(u)]); main.forEach(([u]) => checked.add(u));
+  } else {
+    main = [...S.contacts.entries()]; main.forEach(([u]) => checked.add(u));
+  }
+  const inMain = new Set(main.map(([u]) => u));
+  const others = [...S.contacts.entries()].filter(([u]) => !inMain.has(u));
+  const box = (pp, what) => `<div class="check-grid" id="xSplit">${pp.main.map(([u, i]) => `<label class="cbox"><input type="checkbox" name="spl" value="${u}" ${pp.checked.has(u) ? "checked" : ""}>${esc(first(i.name))}${pp.tags.get(u) ? ` <span class="muted sm">${esc(pp.tags.get(u))}</span>` : ""}</label>`).join("")}</div>${pp.others.length ? `<details class="adv" style="margin-top:8px"><summary>More people <span class="muted sm">${pp.others.length} not on this ${what}</span></summary><div class="check-grid" style="margin-top:8px">${pp.others.map(([u, i]) => `<label class="cbox"><input type="checkbox" name="spl" value="${u}">${esc(first(i.name))}</label>`).join("")}</div></details>` : ""}`;
+  return { main, others, checked, tags, box };
+}
+// Everyone who can appear in a payback: people you know plus anyone on one of your expenses (a guest who joined
+// an event by link, say).
+function moneyPeople(...must) {
+  const m = new Map(S.contacts);
+  for (const x of S.expenses.values()) for (const u of x.involved || []) if (u && !m.has(u)) m.set(u, { name: nameOf(u) });
+  for (const u of must) if (u && !m.has(u)) m.set(u, { name: nameOf(u) });
+  return [...m.entries()];
+}
 // An expense between exactly the members of one group belongs to that group,
 // even when it was added from the Money tab instead of the group page.
 function matchGroupId(involved) {
@@ -4015,13 +4046,13 @@ function matchGroupId(involved) {
 }
 const inGroup = (x, g) => x.groupId === g.id || (!x.groupId && (x.involved || []).length >= 2 && [...new Set(x.involved)].sort().join("|") === [...new Set(g.memberUids || [])].sort().join("|"));
 function openExpense(eventId, restrict, groupId) {
-  const people = [...S.contacts.entries()];
+  const people = expensePeople(eventId, restrict);
   dialog(`<h3>Add expense</h3>
     ${window.Blip && !isDemo() ? `<button type="button" class="btn small tell-dot" id="xTell">${dot("happy", 24)} Or just tell me: “Dinner was 120, I paid, split with Sam and Alex.”</button>` : ""}
     <label class="field"><span>What was it?</span><input id="xDesc" maxlength="80" placeholder="Pizza & drinks"></label>
     <div class="two"><label class="field"><span>Amount ($)</span><input id="xAmt" inputmode="decimal" placeholder="42.50"></label>
     <label class="field"><span>Paid by</span><select id="xPayer">${payerOptions(people)}</select></label></div>
-    <span class="field-label">Split between</span><div class="check-grid" id="xSplit">${people.map(([u, i]) => `<label class="cbox"><input type="checkbox" name="spl" value="${u}" ${!restrict || restrict.includes(u) ? "checked" : ""}>${esc(first(i.name))}</label>`).join("")}</div>
+    <span class="field-label">Split between</span>${people.box(people, eventId ? "event" : "group")}
     <button type="button" class="btn small" id="xScan" style="margin-top:12px">📷 Scan a receipt to itemize</button>
     <p class="muted sm" style="margin-top:6px">Snap the receipt, assign each line to whoever had it. Tax and tip split in proportion.</p>`,
     "Add expense", async () => {
@@ -4076,7 +4107,8 @@ function computeShares(items, tax, tip) {
   return { shares, subtotal, total };
 }
 function itemizeDialog(eventId, restrict, seed, data, receipt, groupId) {
-  const people = [...S.contacts.entries()].filter(([u]) => !restrict || restrict.includes(u) || u === seed.paidBy);
+  const pp = expensePeople(eventId, restrict);
+  const people = [...pp.main, ...pp.others.filter(([u]) => u === seed.paidBy)];
   const items = (data.items || []).map(it => ({ name: String(it.name || "Item").slice(0, 60), cents: toCents(it.price), uids: new Set() }));
   const st = { tax: toCents(data.tax), tip: toCents(data.tip) };
   const chips = it => people.map(([u, i]) => `<button type="button" class="${it.uids.has(u) ? "on" : ""}" data-who="${u}">${esc(first(i.name))}</button>`).join("");
@@ -4086,7 +4118,7 @@ function itemizeDialog(eventId, restrict, seed, data, receipt, groupId) {
       <div class="who">${chips(it)}<button type="button" class="all" data-all="1">everyone</button></div></div>`;
   dialog(`<h3>Itemize${data.merchant ? " · " + esc(data.merchant) : ""}</h3>
     <div class="two"><label class="field"><span>What was it?</span><input id="xDesc" maxlength="80" value="${esc(seed.desc || data.merchant || "")}" placeholder="Dinner"></label>
-    <label class="field"><span>Paid by</span><select id="xPayer">${payerOptions(people, seed.paidBy)}</select></label></div>
+    <label class="field"><span>Paid by</span><select id="xPayer">${payerOptions(pp, seed.paidBy)}</select></label></div>
     <p class="muted sm" style="margin:-2px 0 6px">Tap who had each line. Tax and tip are split in proportion to what each person ordered.</p>
     <div id="itz">${items.map(rowHtml).join("")}</div>
     <button type="button" class="btn small" id="itzAdd" style="margin-top:8px">＋ Add a line</button>
@@ -4125,7 +4157,7 @@ function itemizeDialog(eventId, restrict, seed, data, receipt, groupId) {
   wireRows(); renderSum();
 }
 function openSettle(from, to, amount) {
-  const people = [...S.contacts.entries()];
+  const people = moneyPeople(from, to);
   const opts = sel => people.map(([u, i]) => `<option value="${u}" ${u === sel ? "selected" : ""}>${esc(first(i.name))}</option>`).join("");
   dialog(`<h3>Mark as paid</h3><p class="muted" style="margin-top:-6px">Log a payback so balances update. You can undo it right after.</p>
     <div class="two"><label class="field"><span>From</span><select id="sFrom">${opts(from || myUid())}</select></label>
