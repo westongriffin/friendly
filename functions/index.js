@@ -1254,7 +1254,21 @@ exports.resetDemoDataNightly = onSchedule({ schedule: "17 4 * * *", timeZone: "A
 
 // Someone nudged the guests who haven't answered.
 exports.onNudge = onDocumentCreated({ document: "nudges/{id}", ...PUSH }, async e => {
-  const n = e.data && e.data.data(); if (!n || !n.eventId) return;
+  const n = e.data && e.data.data(); if (!n) return;
+  // A reminder about one person's share of an expense, from whoever paid or added it; at most one per 12 hours.
+  if (n.expenseId) {
+    const x = (await db.doc("expenses/" + n.expenseId).get()).data(); if (!x || !n.to) return;
+    if (n.by !== x.paidBy && n.by !== x.addedBy) return;
+    if (!(x.split || []).includes(n.to) || n.to === x.paidBy || String(n.to).startsWith("ph:")) return;
+    const key = "x_" + n.expenseId + "_" + n.to, logRef = db.doc("nudgeLog/" + key), last = (await logRef.get()).get("at") || 0;
+    if (Date.now() - last < 12 * 3600e3) { await e.data.ref.update({ sent: 0, at: Date.now(), skipped: "too soon" }); return; }
+    const share = x.shares ? (x.shares[n.to] || 0) : Math.round(x.amountCents / ((x.split || []).length || 1));
+    const nm = await names([n.by, x.paidBy]);
+    await notify([n.to], firstName(nm[n.by]) + " sent a reminder: " + (x.desc || "an expense"), `Your share is ${dollars(share)} · pay ${firstName(nm[x.paidBy])} from the expense or the Money tab.`, "/#/x/" + n.expenseId, { type: "money", actorId: n.by });
+    await logRef.set({ at: Date.now() }); await e.data.ref.update({ sent: 1, at: Date.now() });
+    return;
+  }
+  if (!n.eventId) return;
   const evSnap = await db.doc("events/" + n.eventId).get(); const ev = evSnap.data(); if (!ev) return;
   if (n.by !== ev.hostId && !(ev.cohostUids || []).includes(n.by)) return;
   const targets = (ev.invitedUids || []).filter(u => u !== ev.hostId && !(ev.rsvps || {})[u]);

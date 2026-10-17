@@ -4035,7 +4035,12 @@ function expenseBody(id) {
     <div><h1>${esc(x.desc || "Expense")}</h1><div class="muted">${fmt$(x.amountCents)} · ${esc(nameOf(x.paidBy))} paid${ev ? " · " + esc(ev.title) : ""} · ${new Date(x.createdAt).toLocaleDateString()}</div></div></div>
   ${x.receipt ? `<div class="btnrow" style="margin-top:12px"><button class="btn small" id="viewReceipt">🧾 View receipt</button></div>` : ""}
   <div class="section-head"><h2>${x.shares ? "Who owes what" : `Split ${n} way${n > 1 ? "s" : ""}`}</h2></div>
-  <div class="card">${(x.split || []).map(u => `<div class="member-row">${avatar(u, "lg")}<div style="flex:1;min-width:0"><b>${esc(nameOf(u))}${u === myUid() ? " (you)" : ""}</b></div><span class="amt sm">${fmt$(x.shares ? (x.shares[u] || 0) : share)}</span></div>`).join("")}</div>
+  <div class="card">${(x.split || []).map(u => {
+    const me = myUid(), cents = x.shares ? (x.shares[u] || 0) : share, paid = (x.paid || {})[u], payer = u === x.paidBy, canManage = me === x.paidBy || me === x.addedBy;
+    const status = payer ? `<span class="pill ok">Paid the bill</span>` : paid ? `<span class="pill ok">Paid${paid.at ? " · " + new Date(paid.at).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : ""}</span>` : `<span class="pill due">Unpaid</span>`;
+    const acts = payer || !cents ? "" : paid ? (canManage || paid.by === me ? `<button class="btn ghost small" data-munpaid="${esc(u)}">Mark unpaid</button>` : "")
+      : `${canManage && u !== me ? `<button class="btn small" data-remind="${esc(u)}">${isGuest(u) ? "💬 Text" : "🔔 Remind"}</button>` : ""}${canManage || u === me ? `<button class="btn small" data-mpaid="${esc(u)}">${u === me ? "I paid" : "Mark paid"}</button>` : ""}`;
+    return `<div class="member-row x-person">${avatar(u, "lg")}<div style="flex:1;min-width:0"><b>${esc(nameOf(u))}${u === me ? " (you)" : ""}</b><div class="x-status">${status}</div></div><div class="x-acts"><span class="amt sm">${fmt$(cents)}</span>${acts ? `<div class="btnrow" style="gap:6px;justify-content:flex-end">${acts}</div>` : ""}</div></div>`; }).join("")}</div>
   ${(x.items || []).length ? `<div class="section-head" style="margin-top:22px"><h2>Receipt${x.merchant ? " · " + esc(x.merchant) : ""}</h2></div>
   <div class="card">${x.items.map(it => `<div class="member-row"><div style="flex:1;min-width:0"><b>${esc(it.name)}</b><div class="muted sm">${(it.uids || []).map(u => esc(first(nameOf(u)))).join(", ") || "unassigned"}</div></div><span class="amt sm">${fmt$(it.cents)}</span></div>`).join("")}
     ${x.tax ? `<div class="member-row"><div style="flex:1"><b>Tax</b><div class="muted sm">split in proportion</div></div><span class="amt sm">${fmt$(x.tax)}</span></div>` : ""}
@@ -4046,6 +4051,26 @@ function wireExpensePage() {
   const x = S.expenses.get(S.route.id); if (!x) return;
   const pseudo = { id: x.id, _col: ["expenses", x.id], _manage: false, title: x.desc };
   if (el("viewReceipt")) el("viewReceipt").onclick = () => lightbox(x.receipt);
+  const share = u => x.shares ? (x.shares[u] || 0) : Math.round(x.amountCents / ((x.split || []).length || 1));
+  // Paid: a payback for this expense (so balances move) plus a mark on the expense itself (so everyone on it sees the status).
+  document.querySelectorAll("[data-mpaid]").forEach(b => b.onclick = async () => {
+    const u = b.dataset.mpaid; b.disabled = true;
+    const sid = await markPaid(u, x.paidBy, share(u), x.desc || "", x.id); if (!sid) { b.disabled = false; return; }
+    updateDoc(doc(db, "expenses", x.id), { [`paid.${u}`]: { at: Date.now(), by: myUid(), sid } }).catch(e => toast(e.message));
+  });
+  document.querySelectorAll("[data-munpaid]").forEach(b => b.onclick = async () => {
+    const u = b.dataset.munpaid, p = (x.paid || {})[u] || {}; b.disabled = true;
+    if (p.sid && S.settlements.has(p.sid)) await deleteDoc(doc(db, "settlements", p.sid)).catch(() => {});
+    updateDoc(doc(db, "expenses", x.id), { [`paid.${u}`]: deleteField() }).then(() => toast("Marked unpaid")).catch(e => toast(e.message));
+  });
+  document.querySelectorAll("[data-remind]").forEach(b => b.onclick = async () => {
+    const u = b.dataset.remind;
+    if (isGuest(u)) return textGuest(u, share(u), "owed");
+    if (!confirm(`Remind ${first(nameOf(u))} about their ${fmt$(share(u))} for ${x.desc || "this"}?`)) return; fz.tick = Date.now();
+    b.disabled = true; b.textContent = "Reminding…";
+    try { await addDoc(collection(db, "nudges"), { expenseId: x.id, to: u, by: myUid(), createdAt: Date.now() }); b.textContent = "Reminded ✓"; toast(`${first(nameOf(u))} will get a reminder.`); }
+    catch (e) { b.disabled = false; b.textContent = "🔔 Remind"; toast(e.message); }
+  });
   S.comments = [];
   S.evSubs.push(onSnapshot(subCol(pseudo, "comments"), snap => {
     S.comments = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.createdAt - b.createdAt);
@@ -4055,11 +4080,13 @@ function wireExpensePage() {
 function payVenmo(uid, cents, txn) { const v = payInfoOf(uid).venmo; if (!v) return; window.open(`https://venmo.com/${encodeURIComponent(v.replace(/^@/, ""))}?txn=${txn}&amount=${(cents / 100).toFixed(2)}&note=${encodeURIComponent("Friendly 🤝")}`, "_blank"); if (txn === "pay") markPaid(myUid(), uid, cents, "Venmo"); else toast("Request sent in Venmo."); }
 // Marks a payment as made. Undo is offered right away, and every settlement can
 // be removed later from the Activity list too.
-async function markPaid(from, to, cents, note) {
+async function markPaid(from, to, cents, note, expenseId) {
   const ref = doc(db, "settlements", newId());
-  try { await setDoc(ref, { from, to, amountCents: cents, involved: [from, to], note: note || "", addedBy: myUid(), createdAt: Date.now() }); }
-  catch (e) { return toast(e.message); }
-  toast(note ? `Opened ${note} · marked as paid` : "Marked as paid", "Undo", () => deleteDoc(ref).then(() => toast("Undone")).catch(e => toast(e.message)));
+  try { await setDoc(ref, { from, to, amountCents: cents, involved: [...new Set([from, to, myUid()])], note: note || "", expenseId: expenseId || null, addedBy: myUid(), createdAt: Date.now() }); }
+  catch (e) { toast(e.message); return null; }
+  const undo = () => deleteDoc(ref).then(() => { if (expenseId) updateDoc(doc(db, "expenses", expenseId), { [`paid.${from}`]: deleteField() }).catch(() => {}); toast("Undone"); }).catch(e => toast(e.message));
+  toast(expenseId ? `${first(nameOf(from))} marked as paid` : note ? `Opened ${note} · marked as paid` : "Marked as paid", "Undo", undo);
+  return ref.id;
 }
 // A text to someone who isn't on Friendly: what they owe you and how to pay you, or what you owe them.
 function textGuest(id, cents, dir) {

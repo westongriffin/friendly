@@ -998,3 +998,9 @@ body.replaying #app *{animation-play-state:paused!important}
 .guest-add .two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .guest-add input{width:100%;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;background:#fff}
 .cbox .muted{font-weight:400}
+
+/* Expense page: who has paid. */
+.x-status{margin-top:3px}
+.pill.ok{background:#E6F6EC;border-color:#BFE7CB;color:#1F6B3A}
+.pill.due{background:#FFF1EE;border-color:#FFD2C9;color:#B4412F}
+.x-acts{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
