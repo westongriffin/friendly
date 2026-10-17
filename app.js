@@ -600,7 +600,14 @@ function imagenViaFirestore(prompt) {
     }, err => done(reject, err));
   });
 }
-function pickFile(accept = "image/*") { return new Promise(res => { const i = document.createElement("input"); i.type = "file"; i.accept = accept; i.onchange = () => res(i.files[0] || null); i.click(); }); }
+// `what` names the flow (receipt, wall photo, ...) for the freeze trace, and a marker stays in storage while the
+// camera or photo picker is open: iOS can kill the page behind the camera, and the reload then picks the flow back up.
+const pickerMark = (what, stage) => { try { if (what) localStorage.setItem("friendlyPicker", JSON.stringify({ what, stage, route: location.hash, t: Date.now() })); else localStorage.removeItem("friendlyPicker"); } catch {} };
+function pickFile(accept = "image/*", what = "photo") { return new Promise(res => { const i = document.createElement("input"); i.type = "file"; i.accept = accept;
+  pickerMark(what, "picker open"); fz.add(`photo picker opened (${what})`); fz.save();
+  i.onchange = () => { const f = i.files[0] || null; fz.add(f ? `photo picked (${what}, ${Math.round(f.size / 1024)} KB)` : `photo picker closed (${what})`); fz.save(); if (f) { pickerMark(what, "processing"); setTimeout(() => pickerMark(null), 30000); } else pickerMark(null); res(f); };
+  i.oncancel = () => { fz.add(`photo picker cancelled (${what})`); fz.save(); pickerMark(null); res(null); };
+  i.click(); }); }
 // Comments/polls live under events by default; groups and expenses reuse the
 // same components by passing a pseudo-event with `_col: ["groups", id]` etc.
 function subCol(ev, name) { return collection(db, ...(ev._col || ["events", ev.id]), name); }
@@ -996,7 +1003,15 @@ let KILLED_RELOAD = false, killedAfterS = 0, sameView = false;
 try { sameView = sessionStorage.getItem("friendlyView") === "1"; sessionStorage.setItem("friendlyView", "1"); } catch {}
 if (typeof window.__killedReloadAt === "number" && Date.now() - window.__killedReloadAt < 60000) KILLED_RELOAD = true;
 try { const prev = localStorage.getItem(FZ_KEY); if (prev) { localStorage.setItem("friendlyFreezePrev", prev); const p = JSON.parse(prev); const last = String((p.log || []).slice(-1)[0] || ""); killedAfterS = Math.round((Date.now() - (p.hb || 0)) / 1000); const deepHash = !!location.hash && location.hash !== "#/"; if ((sameView || deepHash) && p.hb && killedAfterS < 8 && !/ (app hidden|page closed)$/.test(last)) KILLED_RELOAD = true; } } catch {}
-fz.add((KILLED_RELOAD ? "boot after iOS killed the page " : "boot ") + (location.hash || "#/").slice(0, 60)); fz.save();
+// The camera covers the page, so the page's last word before such a kill is "app hidden" (which otherwise means a
+// normal trip to the background): the picker marker tells the two apart. The flow resumes once signed in.
+let KILL_PICKER = null;
+try { const pk = JSON.parse(localStorage.getItem("friendlyPicker") || "null"); localStorage.removeItem("friendlyPicker");
+  if (pk && sameView) { const prev = JSON.parse(localStorage.getItem("friendlyFreezePrev") || "null"), log = (prev && prev.log) || [];
+    const i = log.map(s => / photo picker opened /.test(s)).lastIndexOf(true), age = Date.now() - (pk.t || 0);
+    const quiet = i >= 0 && log.slice(i + 1).every(s => / (app hidden|app visible|photo picked .*|redraw .*|STALL .*)$/.test(s));
+    if (quiet && age < (pk.stage === "picker open" ? 15 * 60000 : 45000)) { KILL_PICKER = pk; KILLED_RELOAD = true; } } } catch {}
+fz.add((KILLED_RELOAD ? (KILL_PICKER ? "boot after iOS killed the page under the camera " : "boot after iOS killed the page ") : "boot ") + (location.hash || "#/").slice(0, 60)); fz.save();
 setInterval(() => { const now = Date.now(), gap = now - fz.tick; fz.tick = now; if (gap > 3000 && gap < 90000 && !document.hidden) { fz.stalled = true; fz.add(`STALL ${Math.round(gap / 100) / 10}s on ${location.hash || "#/"}`); } fz.save(); }, 1000);
 document.addEventListener("visibilitychange", () => { fz.tick = Date.now(); fz.add("app " + document.visibilityState); fz.save(); });
 window.addEventListener("hashchange", () => fz.add("go " + location.hash.slice(0, 60)));
@@ -1008,6 +1023,13 @@ function reportFreezeTrace() {
   const lastStep = String((tr && tr.log && tr.log[tr.log.length - 1]) || "");
   const endedOnScreen = tr && tr.log && tr.log.length && !/ (app hidden|page closed)$/.test(lastStep);
   if (!tr || !myUid()) return;
+  if (KILL_PICKER) {
+    addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `page killed by iOS while the camera/photo picker was open (${KILL_PICKER.what}, ${KILL_PICKER.stage}, ${Math.round((Date.now() - KILL_PICKER.t) / 1000)}s after it opened, ${deviceLine()}), on ${KILL_PICKER.route || "?"}; last steps:\n` + (tr.log || []).slice(-8).join("\n"), route: KILL_PICKER.route, version: tr.v, platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now(), tracedAt: tr.hb }).catch(() => {});
+    const m = /^#\/e\/([^?]+)/.exec(KILL_PICKER.route || "");
+    toast("Friendly had to reload while the camera was open. Please take that photo again.");
+    if (KILL_PICKER.what === "receipt" && m) setTimeout(() => { if (location.hash.split("?")[0] === "#/e/" + m[1] && !el("appDialog") && S.events.get(m[1])) openExpense(m[1]); }, 1200);
+    return;
+  }
   if (KILLED_RELOAD) { addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `page killed by iOS and reloaded ${killedAfterS}s after its last heartbeat (${deviceLine()}), on ${tr.route || "?"}; last steps:\n` + (tr.log || []).slice(-8).join("\n"), route: tr.route, version: tr.v, platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now(), tracedAt: tr.hb }).catch(() => {}); return; }
   if (!(tr.stalled || endedOnScreen)) return;
   addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `freeze trace (previous session ${tr.stalled ? "stalled" : "ended while on screen"}, last heartbeat ${new Date(tr.hb).toTimeString().slice(0, 8)}, ${deviceLine()}):\n` + tr.log.join("\n"), route: tr.route, version: tr.v, platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now(), tracedAt: tr.hb }).catch(() => {});
@@ -1160,7 +1182,7 @@ function wireOnboarding() {
   el("onboardForm").onsubmit = e => { e.preventDefault(); finish(); };
   el("obSkip").onclick = () => updateDoc(doc(db, "users", myUid()), { onboarded: true }).catch(e => toast(e.message));
   el("obPhotoBtn").onclick = async () => {
-    const f = await pickFile(); if (!f) return;
+    const f = await pickFile("image/*", "profile photo"); if (!f) return;
     const cropped = await openCropDialog(f); if (!cropped) return;
     toast("Updating photo…");
     try { const photo = await compressImage(cropped, 320, 0.82), photoSm = await compressImage(cropped, 160, 0.8); await updateDoc(doc(db, "users", myUid()), { photo, photoSm }); toast("Photo updated"); }
@@ -1843,13 +1865,13 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
   // Loads the phone's address book once per app session (cached), with a time limit on every step so the
   // button can't silently hang: it says what it's doing at once, and offers Try again if the phone is slow.
   const withTimeout = (pr, ms, what) => Promise.race([pr, new Promise((_, no) => setTimeout(() => no(new Error(what + " took too long")), ms))]);
-  const slowLog = (ms, n, err) => { try { if (myUid() && (ms > 6000 || err)) addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `contacts load ${ms}ms, ${n} contacts${err ? ", error: " + err : ""}`, route: location.hash, version: APP_V + " / " + (nativeVersion || ""), platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now() }).catch(() => {}); } catch {} };
+  const slowLog = (ms, n, err, permMs = 0) => { try { if (myUid() && (ms > 2500 || permMs > 5000 || err)) addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `contacts: address book read took ${ms}ms for ${n} contacts; ${permMs}ms on the access check/permission screen before it${err ? "; error: " + err : ""}. Steps: ` + ctTrace.steps.join(" · "), route: location.hash, version: APP_V + " / " + (nativeVersion || ""), platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now() }).catch(() => {}); } catch {} };
   async function openBook() {
-    const C = nativeContacts, btn = el("invPick"), t0 = Date.now();
+    const C = nativeContacts, btn = el("invPick");
     if (btn) { btn.textContent = "Opening your contacts…"; btn.disabled = true; }
     ctTrace.step(window.__friendlyBook ? "book cached" : "book load");
     if (!window.__friendlyBook) {
-      let perm = null;
+      let perm = null; const tPerm = Date.now();
       try {
         ctTrace.step("asking iOS for access status");
         perm = await withTimeout(C.checkPermissions(), 6000, "Checking contacts access");
@@ -1866,7 +1888,7 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
       const seen = new Set();
       window.__friendlyBook = ((r && r.contacts) || []).map(c => { const phone = phoneOfContact(c); return { name: nameOfContact(c).trim(), phone, e164: toE164(phone) }; })
         .filter(c => c.e164 && !seen.has(c.e164) && seen.add(c.e164)).sort((a, b) => (a.name || "~").localeCompare(b.name || "~"));
-      slowLog(Date.now() - t0, window.__friendlyBook.length);
+      slowLog(Date.now() - t1, window.__friendlyBook.length, null, t1 - tPerm);
     }
     book = window.__friendlyBook;
     const b2 = el("invPick"); if (!b2) return true;
@@ -2902,7 +2924,7 @@ function wireCover() {
   document.querySelectorAll("#cEmoji button").forEach(b => b.onclick = () => { compose.emoji = b.dataset.e; document.querySelectorAll("#cEmoji button").forEach(x => x.classList.remove("on")); b.classList.add("on"); const em = el("cPvEmoji"); if (em) em.textContent = b.dataset.e; });
   if (el("coverRemove")) el("coverRemove").onclick = () => { compose.cover = null; refreshCoverUI(); };
   if (el("coverDrop")) el("coverDrop").onclick = async () => {
-    const f = await pickFile(); if (!f) return;
+    const f = await pickFile("image/*", "cover"); if (!f) return;
     const cropped = await openCropDialog(f, { shape: "rect", ratio: 16 / 9, outW: 1280, outH: 720, title: "Crop your cover photo" }); if (!cropped) return;
     el("coverDrop").textContent = "Processing…";
     try { compose.cover = await compressImage(cropped, 1600, 0.82); refreshCoverUI(); } catch (e) { toast("Couldn't read that image: " + e.message); el("coverDrop").textContent = "📷 Tap to upload a photo"; }
@@ -3276,7 +3298,7 @@ function wireWall(ev) {
   const cr = el("cancelReply"); if (cr) cr.onclick = () => { replyTo = null; el("replyChip").hidden = true; };
   document.querySelectorAll(".wall-img").forEach(im => im.onclick = () => lightbox(im.src));
   const ph = el("wallPhoto"); if (ph) ph.onclick = async () => {
-    const file = await pickFile(); if (!file) return; toast("Adding photo…");
+    const file = await pickFile("image/*", "wall photo"); if (!file) return; toast("Adding photo…");
     try { await addDoc(subCol(ev, "comments"), { authorId: myUid(), authorName: S.profile.name, text: "", img: await compressImage(file, 1200, 0.8), ...parentPatch(ev), createdAt: Date.now() }); replyTo = null; }
     catch (e) { toast("Couldn't add photo: " + e.message); }
   };
@@ -3640,7 +3662,7 @@ function photosInner(ev) {
 }
 function wirePhotos(ev) {
   if (el("addPhoto")) el("addPhoto").onclick = async () => {
-    const f = await pickFile(); if (!f) return; toast("Uploading photo…");
+    const f = await pickFile("image/*", "event photo"); if (!f) return; toast("Uploading photo…");
     try { const img = await compressImage(f, 1400, 0.8); await addDoc(collection(db, "events", ev.id, "photos"), { img, addedBy: myUid(), createdAt: Date.now() }); }
     catch (e) { toast("Couldn't add photo: " + e.message); }
   };
@@ -4083,11 +4105,12 @@ function requestViaFirestore(col, payload, timeoutMs = 90000, onUpdate) {
 }
 async function scanReceipt(eventId, restrict, seed, groupId) {
   if (isDemo()) return toast("Receipt scanning is off in the demo -- try Add expense instead.");
-  const f = await pickFile("image/*"); if (!f) return;
+  const f = await pickFile("image/*", "receipt"); if (!f) return;
   toast("Reading the receipt…", null, null, "thinking");
   try {
     const image = await compressImage(f, 2000, 0.85);
     const thumb = await compressImage(f, 1000, 0.72);   // kept on the expense for reference
+    pickerMark(null); fz.add("receipt sent to be read"); fz.save();
     const res = await requestViaFirestore("receiptRequests", { image });
     itemizeDialog(eventId, restrict, seed, res.data || {}, thumb, groupId);
   } catch (e) { toast("Couldn't read that receipt: " + e.message); }
@@ -4275,7 +4298,7 @@ function wireProfile() {
   const nr = el("notifRow"); if (nr) nr.onclick = () => { location.href = "app-settings:"; };
   document.querySelectorAll("[data-notifpref]").forEach(cb => cb.onchange = () => updateDoc(doc(db, "users", myUid()), { [`notifPrefs.${cb.dataset.notifpref}`]: cb.checked }).catch(e => toast(e.message)));
   el("photoBtn").onclick = async () => {
-    const f = await pickFile(); if (!f) return;
+    const f = await pickFile("image/*", "profile photo"); if (!f) return;
     const cropped = await openCropDialog(f); if (!cropped) return;
     toast("Updating photo…");
     try {
@@ -4628,7 +4651,7 @@ function wireDm(fid) {
       document.querySelectorAll("[data-fx]").forEach(b => b.onclick = () => { closeDialog(); submitText(b.dataset.fx); });
     };
     el("dmPhoto").onclick = async () => {
-      const file = await pickFile(); if (!file) return; toast("Sending photo…");
+      const file = await pickFile("image/*", "message photo"); if (!file) return; toast("Sending photo…");
       try { await sendDm(fid, { text: "", photo: await compressImage(file, 1400, 0.8) }); } catch (e) { toast("Couldn't send that photo: " + e.message); }
     };
     if (el("dmGif")) el("dmGif").onclick = () => openGifPicker(null, gif => sendDm(fid, { text: "", gif }));
@@ -4780,7 +4803,7 @@ function openBugDialog(fromShake) {
         closeDialog(); toast("Thanks! The team has it.", null, null, "happy");
       } catch (e) { toast(e.message); }
     });
-  el("bugShot").onclick = async () => { const f = await pickFile(); if (!f) return; try { shot = await compressImage(f, 1400, 0.75); el("bugShotNote").textContent = "✓ Screenshot attached"; } catch (e) { toast(e.message); } };
+  el("bugShot").onclick = async () => { const f = await pickFile("image/*", "screenshot"); if (!f) return; try { shot = await compressImage(f, 1400, 0.75); el("bugShotNote").textContent = "✓ Screenshot attached"; } catch (e) { toast(e.message); } };
   setTimeout(() => el("bugText") && el("bugText").focus(), 50);
 }
 function wireBugs() {
