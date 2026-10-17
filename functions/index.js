@@ -1409,6 +1409,35 @@ exports.onExpensePay = onDocumentWritten({ document: "expenses/{id}" }, async e 
   const up = {}; snaps.forEach((s, i) => { up["pay." + missing[i]] = payOf(s.exists ? s.data() : null); });
   await e.data.after.ref.update(up).catch(err => logger.warn("onExpensePay " + err.message));
 });
+// A payback recorded from the Money tab (no expense named) is applied to that pair's unpaid expenses, oldest
+// first, so each expense's Paid marks agree with the balances. Removing a payback takes its marks back.
+exports.onSettlementWritten = onDocumentWritten({ document: "settlements/{id}" }, async e => {
+  const before = e.data.before.exists ? e.data.before.data() : null, after = e.data.after.exists ? e.data.after.data() : null;
+  const s = after || before; if (!s || !s.from || !s.to || (before && after)) return;   // creates and deletes only
+  if (s.expenseId) {
+    const ref = db.doc("expenses/" + s.expenseId), x = (await ref.get()).data(); if (!x) return;
+    const mark = (x.paid || {})[s.from];
+    if (after && !mark) await ref.update({ ["paid." + s.from]: { at: s.createdAt || Date.now(), by: s.addedBy || s.from, sid: e.params.id } });
+    if (!after && mark && mark.sid === e.params.id) await ref.update({ ["paid." + s.from]: FieldValue.delete() });
+    return;
+  }
+  await allocatePaybacks(s.from, s.to);
+});
+async function allocatePaybacks(from, to) {
+  if (!from || !to || from === to) return 0;
+  const [xs, ss] = await Promise.all([db.collection("expenses").where("involved", "array-contains", from).get(), db.collection("settlements").where("involved", "array-contains", from).get()]);
+  const pool = ss.docs.filter(d => d.get("from") === from && d.get("to") === to && !d.get("expenseId"));
+  let left = pool.reduce((n, d) => n + (d.get("amountCents") || 0), 0); const sid = pool.length ? pool.map(d => d.id).sort().join("+").slice(0, 60) : "";
+  const owed = xs.docs.filter(d => d.get("paidBy") === to && (d.get("split") || []).includes(from)).sort((a, b) => (a.get("createdAt") || 0) - (b.get("createdAt") || 0));
+  let changed = 0;
+  for (const d of owed) {
+    const x = d.data(), share = x.shares ? (x.shares[from] || 0) : Math.round((x.amountCents || 0) / ((x.split || []).length || 1)), mark = (x.paid || {})[from];
+    if (mark && !mark.auto) continue;   // marked by hand or by a payback that named this expense
+    if (share > 0 && left >= share) { left -= share; if (!mark) { await d.ref.update({ ["paid." + from]: { at: Date.now(), by: from, sid, auto: true } }); changed++; } }
+    else if (mark) { await d.ref.update({ ["paid." + from]: FieldValue.delete() }); changed++; }
+  }
+  return changed;
+}
 exports.onUserPhone = onDocumentWritten({ document: "users/{uid}" }, async e => {
   const before = e.data.before.exists ? e.data.before.data() : {}, after = e.data.after.exists ? e.data.after.data() : null;
   if (!after) return;
