@@ -1,6 +1,9 @@
 <!doctype html>
 <html lang="en">
 <head>
+<script>/* Capacitor's console bridge reports a failed post to the app with console.error, which is itself the bridge: an endless
+loop that pins the page (frozen welcome screen). Re-entrant console calls are dropped here, before anything else runs. */
+(function(){try{var o=window.console;if(!o||!window.webkit)return;var g=Object.create(o),busy=false;["log","warn","error","info","debug"].forEach(function(m){if(typeof o[m]!=="function")return;g[m]=function(){if(busy){window.__consoleLoop=(window.__consoleLoop||0)+1;try{var x=arguments[0];window.__consoleLoopMsg=String(x&&x.message||x).slice(0,160);}catch(e){}return;}busy=true;try{return o[m].apply(o,arguments);}catch(e){}finally{busy=false;}};});window.console=g;window.__consoleGuard=1;}catch(e){}})();</script>
 <meta charset="utf-8">
 <style>html{background:#BFE7C6}.splash{position:fixed;inset:0;display:grid;place-content:center;justify-items:center;background:linear-gradient(160deg,#BFE7C6,#7CC79B 55%,#1F5A3A);color:rgba(255,255,255,.88);font:500 14px system-ui,sans-serif}.splash p{margin:0}</style>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5">

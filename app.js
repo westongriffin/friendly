@@ -44,6 +44,7 @@ try {
     if (migrateLS && LS.ok) for (const [k, v] of LS.m) dogSay({ kv: [k, v] });
     prevTrace = d.prev.trace || null; prevCt = d.prev.ct || null; bootDiagResolve(true); };
   dog.postMessage({ vis: document.visibilityState === "visible" });
+  setTimeout(() => { if (typeof S !== "undefined" && S && !S._authKnown) { S._authKnown = true; if (typeof openPendingNotif === "function") openPendingNotif(); } }, 3000);
 } catch (e) { console.warn("storage worker unavailable:", e.message); }
 setTimeout(() => bootDiagResolve(false), 2500);
 bootDiag.then(ok => { if (!ok) console.warn("storage worker did not answer; device settings will not persist this session"); });
@@ -217,7 +218,12 @@ async function registerPush(uid) {
     if (perm.receive !== "granted") perm = await Push.requestPermissions();
     if (perm.receive !== "granted") return;
     Push.addListener("registration", async t => { try { await updateDoc(doc(db, "users", uid), { pushTokens: arrayUnion(t.value) }); } catch {} });
-    Push.addListener("pushNotificationActionPerformed", a => { S._notifTapAt = Date.now(); try { fz.add("notification tap"); if (endReplay) endReplay(true); } catch {} const url = a && a.notification && a.notification.data && a.notification.data.url; if (url) { location.hash = routeTail(url); focusRoute(); } });
+    // A tap that starts the app cold arrives before sign-in is known. Going to the screen right then renders it
+    // signed-out first (the public preview, with its background animation) and again a moment later; the tap is
+    // held until auth answers (a few hundred ms), then the screen is opened once.
+    Push.addListener("pushNotificationActionPerformed", a => { S._notifTapAt = Date.now(); try { fz.add("notification tap"); if (endReplay) endReplay(true); } catch {} const url = a && a.notification && a.notification.data && a.notification.data.url; if (!url) return;
+      if (!S._authKnown) { S._pendingNotif = url; fz.add("notification tap held until sign-in is known"); return; }
+      location.hash = routeTail(url); focusRoute(); });
     await Push.register();
   } catch {}
 }
@@ -815,8 +821,10 @@ function focusRoute() {
 window.go = path => { location.hash = path; };
 
 // ---------- auth ----------
+const openPendingNotif = () => { const url = S._pendingNotif; if (!url) return; S._pendingNotif = null; fz.add("opening the held notification"); setTimeout(() => { location.hash = routeTail(url); focusRoute(); }, 0); };
 onAuthStateChanged(auth, async u => {
   dogSay({ uid: (u && u.uid) || "" });
+  S._authKnown = true; setTimeout(openPendingNotif, 0);
   if (u) { try { LS.set("friendlyKnown", "1"); } catch {} }
   S.subs.forEach(fn => fn()); S.subs = [];
   S.user = u;
@@ -1076,7 +1084,10 @@ bootDiag.then(() => {
     if (KILLED_RELOAD) { fz.add(KILL_PICKER ? "this is a reload after iOS killed the page under the camera" : "this is a reload after iOS killed the page"); if (S && S.user) S._introOver = true; }
   } catch {}
 });
-setInterval(() => { const now = Date.now(), gap = now - fz.tick; fz.tick = now; if (gap > 3000 && gap < 90000 && !document.hidden) { fz.stalled = true; fz.add(`STALL ${Math.round(gap / 100) / 10}s on ${location.hash || "#/"}`); } fz.save(); dogSay({ beat: 1 }); }, 1000);
+let consoleLoopSeen = 0;
+setInterval(() => { const now = Date.now(), gap = now - fz.tick; fz.tick = now; if (gap > 3000 && gap < 90000 && !document.hidden) { fz.stalled = true; fz.add(`STALL ${Math.round(gap / 100) / 10}s on ${location.hash || "#/"}`); }
+  if ((window.__consoleLoop || 0) > consoleLoopSeen) { if (consoleLoopSeen === 0 || window.__consoleLoop > consoleLoopSeen * 10) fz.add(`console bridge loop stopped (${window.__consoleLoop}x): ${window.__consoleLoopMsg || "?"}`); consoleLoopSeen = window.__consoleLoop; }
+  fz.save(); dogSay({ beat: 1 }); }, 1000);
 document.addEventListener("visibilitychange", () => { fz.tick = Date.now(); fz.add("app " + document.visibilityState); fz.save(); dogSay({ vis: document.visibilityState === "visible" }); });
 window.addEventListener("hashchange", () => fz.add("go " + location.hash.slice(0, 60)));
 window.addEventListener("pagehide", () => { fz.add("page closed"); fz.save(); });
