@@ -17,13 +17,34 @@
 <meta name="apple-mobile-web-app-title" content="Friendly">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Instrument+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@500;600&family=Fraunces:opsz,wght@9..144,500;9..144,600&family=DM+Serif+Display&family=Syne:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Unbounded:wght@600;700&family=Pacifico&family=Caprasimo&family=Righteous&family=Bungee&family=VT323&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Instrument+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@500;600&family=Fraunces:opsz,wght@9..144,500;9..144,600&family=DM+Serif+Display&family=Syne:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Unbounded:wght@600;700&family=Pacifico&family=Caprasimo&family=Righteous&family=Bungee&family=VT323&display=swap" media="print" onload="this.media='all'"><noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Instrument+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@500;600&family=Fraunces:opsz,wght@9..144,500;9..144,600&family=DM+Serif+Display&family=Syne:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Unbounded:wght@600;700&family=Pacifico&family=Caprasimo&family=Righteous&family=Bungee&family=VT323&display=swap"></noscript>
+<style>body{margin:0;background:#BFE7C6}</style>
 <script>
-// Load the app at the version named in version.json, fetched fresh every open.
-// The page itself may sit in a 10-minute CDN or WebView cache; the versioned
-// asset URLs never do, so this keeps every device on the newest build.
-(function(){var v="61";try{var x=new XMLHttpRequest();x.open("GET","./version.json?t="+Date.now(),false);x.send();var j=JSON.parse(x.responseText);if(j&&j.v)v=String(j.v);}catch(e){}
-document.write('<link rel="stylesheet" href="./styles.css?v='+v+'"><script src="./blip.js?v='+v+'"><\/script><script type="module" src="./app.js?v='+v+'"><\/script>');})();
+// Load the app at the version named in version.json, fetched fresh every open (the page itself may sit in a
+// 10-minute CDN or WebView cache; the versioned asset URLs never do). The check never blocks: it waits at most
+// 1.5 seconds and otherwise starts with the last version this device saw. It used to be a synchronous request,
+// which froze the app on the green screen for as long as a slow network took to answer (and the font
+// stylesheet above blocked startup the same way, so it now loads in the background too).
+(function(){
+  var known = "61"; try { known = localStorage.getItem("friendlyV") || known; } catch (e) {}
+  var started = false;
+  function start(v) {
+    if (started) return; started = true; v = String(v || known);
+    try { localStorage.setItem("friendlyV", v); } catch (e) {}
+    var go = false, scripts = function () { if (go) return; go = true;
+      var b = document.createElement("script"); b.src = "./blip.js?v=" + v; b.async = false; document.head.appendChild(b);
+      var a = document.createElement("script"); a.type = "module"; a.src = "./app.js?v=" + v; a.async = false; document.head.appendChild(a); };
+    var l = document.createElement("link"); l.rel = "stylesheet"; l.href = "./styles.css?v=" + v; l.onload = scripts; l.onerror = scripts; document.head.appendChild(l);
+    setTimeout(scripts, 3000);   // styles first so nothing shows unstyled, but never wait on them forever
+  }
+  var timer = setTimeout(function () { start(known); }, 1500);
+  try {
+    fetch("./version.json?t=" + Date.now(), { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (j) {
+      if (!j || !j.v) return;
+      if (!started) { clearTimeout(timer); start(j.v); } else { try { localStorage.setItem("friendlyV", String(j.v)); } catch (e) {} }
+    }).catch(function () {});
+  } catch (e) { start(known); }
+})();
 </script>
 </head>
 <body>

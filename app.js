@@ -5171,6 +5171,7 @@ function unlockScroll() {
 window.closeDialog = closeDialog;
 
 // register service worker
-if ("serviceWorker" in navigator) addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {}));
+// The page's load event may already have fired (index.html now loads this script after a non-blocking version check).
+if ("serviceWorker" in navigator) { const reg = () => navigator.serviceWorker.register("./sw.js").catch(() => {}); if (document.readyState === "complete") reg(); else addEventListener("load", reg); }
 
 render();
