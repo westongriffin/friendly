@@ -988,13 +988,14 @@ const fz = { log: [], tick: Date.now(), stalled: false,
   add(s) { this.log.push(new Date().toTimeString().slice(0, 8) + " " + s); if (this.log.length > 50) this.log.shift(); },
   save() { try { localStorage.setItem(FZ_KEY, JSON.stringify({ hb: Date.now(), stalled: this.stalled, log: this.log, v: APP_V + " / " + (nativeVersion || ""), route: location.hash })); } catch {} } };
 // iOS kills the page to get memory back (in the background, or when a system screen like the contacts permission
-// comes up); the app reloads it at once. Such a reload boots within a second or two of the dead page's last
-// heartbeat, while a force-quit and relaunch takes far longer, so the heartbeat age tells the two apart.
-let KILLED_RELOAD = false, killedAfterS = 0;
-// The native app stamps window.__killedReloadAt on a reload it made after iOS killed the page (PageGuard in the
-// iPhone app, from the build after 1.0.3); older builds are recognised from the heartbeat age below.
+// comes up); the app reloads it at once. Telling that reload apart from a fresh launch: per-session storage lives
+// with the web view, so it survives a kill-and-reload and is empty after a force-quit and relaunch; a fresh launch
+// also always starts at the root with no screen address. The native app (from the build after 1.0.3) stamps
+// window.__killedReloadAt as well. A reload that boots within seconds of the dead page's last heartbeat is a kill.
+let KILLED_RELOAD = false, killedAfterS = 0, sameView = false;
+try { sameView = sessionStorage.getItem("friendlyView") === "1"; sessionStorage.setItem("friendlyView", "1"); } catch {}
 if (typeof window.__killedReloadAt === "number" && Date.now() - window.__killedReloadAt < 60000) KILLED_RELOAD = true;
-try { const prev = localStorage.getItem(FZ_KEY); if (prev) { localStorage.setItem("friendlyFreezePrev", prev); const p = JSON.parse(prev); const last = String((p.log || []).slice(-1)[0] || ""); killedAfterS = Math.round((Date.now() - (p.hb || 0)) / 1000); KILLED_RELOAD = KILLED_RELOAD || !!(p.hb && killedAfterS < 8 && !/ (app hidden|page closed)$/.test(last)); } } catch {}
+try { const prev = localStorage.getItem(FZ_KEY); if (prev) { localStorage.setItem("friendlyFreezePrev", prev); const p = JSON.parse(prev); const last = String((p.log || []).slice(-1)[0] || ""); killedAfterS = Math.round((Date.now() - (p.hb || 0)) / 1000); const deepHash = !!location.hash && location.hash !== "#/"; if ((sameView || deepHash) && p.hb && killedAfterS < 8 && !/ (app hidden|page closed)$/.test(last)) KILLED_RELOAD = true; } } catch {}
 fz.add((KILLED_RELOAD ? "boot after iOS killed the page " : "boot ") + (location.hash || "#/").slice(0, 60)); fz.save();
 setInterval(() => { const now = Date.now(), gap = now - fz.tick; fz.tick = now; if (gap > 3000 && gap < 90000 && !document.hidden) { fz.stalled = true; fz.add(`STALL ${Math.round(gap / 100) / 10}s on ${location.hash || "#/"}`); } fz.save(); }, 1000);
 document.addEventListener("visibilitychange", () => { fz.tick = Date.now(); fz.add("app " + document.visibilityState); fz.save(); });
