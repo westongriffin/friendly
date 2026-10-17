@@ -1359,9 +1359,30 @@ async function claimPhoneInvites(uid, phone, name) {
     await g.ref.update({ invitedPhones: FieldValue.arrayRemove(phone), ["invitedPhoneNames." + phone]: FieldValue.delete() }).catch(() => {});
   return n;
 }
+// Pay handles ride on each expense (`pay.{uid}`), so the people on it can settle up even when they share no
+// group with the person they owe (an event guest who paid, say). Groups carry a copy too, but that one is
+// written once at join time; this one is refreshed from the profile whenever it changes.
+const PAY_KEYS = ["venmo", "zelle", "cashapp", "payPref", "phone"];
+const payOf = u => { const o = {}; for (const k of PAY_KEYS) o[k] = String((u && u[k]) || ""); return o; };
+const samePay = (x, y) => PAY_KEYS.every(k => String((x && x[k]) || "") === String((y && y[k]) || ""));
+exports.onExpensePay = onDocumentWritten({ document: "expenses/{id}" }, async e => {
+  const after = e.data.after.exists ? e.data.after.data() : null; if (!after) return;
+  const uids = [...new Set((after.involved || []).filter(u => typeof u === "string" && u && !u.startsWith("demo-")))]; if (!uids.length) return;
+  const have = after.pay || {}; const missing = uids.filter(u => !have[u]); if (!missing.length) return;   // a profile change comes through onUserPhone
+  const snaps = await db.getAll(...missing.map(u => db.doc("users/" + u)));
+  const up = {}; snaps.forEach((s, i) => { up["pay." + missing[i]] = payOf(s.exists ? s.data() : null); });
+  await e.data.after.ref.update(up).catch(err => logger.warn("onExpensePay " + err.message));
+});
 exports.onUserPhone = onDocumentWritten({ document: "users/{uid}" }, async e => {
   const before = e.data.before.exists ? e.data.before.data() : {}, after = e.data.after.exists ? e.data.after.data() : null;
-  if (!after || !after.phoneE164 || after.phoneE164 === before.phoneE164) return;
+  if (!after) return;
+  if (!samePay(before, after)) {
+    const q = await db.collection("expenses").where("involved", "array-contains", e.params.uid).get();
+    const pay = payOf(after); let n = 0;
+    for (let i = 0; i < q.docs.length; i += 400) { const b = db.batch(); q.docs.slice(i, i + 400).forEach(d => { if (!samePay((d.get("pay") || {})[e.params.uid], pay)) { b.update(d.ref, { ["pay." + e.params.uid]: pay }); n++; } }); await b.commit(); }
+    if (n) logger.info(`onUserPhone: refreshed pay handles on ${n} expense(s) for ${e.params.uid}`);
+  }
+  if (!after.phoneE164 || after.phoneE164 === before.phoneE164) return;
   const n = await claimPhoneInvites(e.params.uid, after.phoneE164, after.name);
   if (n) logger.info(`onUserPhone: linked ${n} texted event invite(s) to ${e.params.uid}`);
 });

@@ -987,3 +987,8 @@ body.replaying #app *{animation-play-state:paused!important}
 .scan-prog b{display:block;font-size:14px}
 .scan-prog .btn{flex:none}
 .oops{color:#B4412F}
+
+/* The receipt button in Add expense: the main way to itemize, so it reads as one. */
+.btn.scan{display:flex;width:100%;justify-content:center;margin-top:14px;padding:12px 14px;border:2px solid var(--accent);background:#FFF3F0;color:var(--accent-strong);font-weight:700;border-radius:14px}
+.btn.scan:active{background:#FFE4DE}
+.ledger[data-xrow]{cursor:pointer}

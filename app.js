@@ -373,7 +373,7 @@ function dotSuggestions() {
     }
     if ([...S.expenses.values()].some(x => x.paidBy === me) && !(S.profile.venmo || S.profile.zelle || S.profile.cashapp || "").trim())
       push("venmo", "me", "Add a way to get paid back (Venmo, Zelle, or Cash App) so friends can settle in one tap.", "Add it", () => go("#/profile"));
-    if (S.expenses.size) for (const p of pairwise()) { if (p.to === me && (S.contacts.get(p.from) || {}).venmo && p.amount >= 500) { push("request", p.from, `${first(nameOf(p.from))} owes you ${fmt$(p.amount)}. One tap to request it.`, "Request", () => payVenmo(p.from, p.amount, "charge")); break; } }
+    if (S.expenses.size) for (const p of pairwise()) { if (p.to === me && payInfoOf(p.from).venmo && p.amount >= 500) { push("request", p.from, `${first(nameOf(p.from))} owes you ${fmt$(p.amount)}. One tap to request it.`, "Request", () => payVenmo(p.from, p.amount, "charge")); break; } }
     const hosted = [...S.events.values()].filter(e => e.hostId === me);
     if (hosted.length >= 2 && !S.profile.calToken)
       push("calendar", "me", "Connect your calendar and every plan lands on it automatically.", "Connect", () => openCalendarDialog(hosted.find(e => e.date >= today) || hosted[0]));
@@ -957,6 +957,15 @@ function rebuildContacts() {
   for (const f of (S.friends || new Map()).values())
     for (const [uid, info] of Object.entries(f.people || {})) if (!m.has(uid)) m.set(uid, { name: info.name, photo: info.photo || "" });
   S.contacts = m;
+}
+// Someone's pay handles: the freshest copy an expense you share with them carries (the server keeps those in
+// step with their profile), else what a shared group recorded when they joined.
+function payInfoOf(uid) {
+  const base = S.contacts.get(uid) || {}; let best = null, when = -1;
+  for (const x of S.expenses.values()) { const p = x.pay && x.pay[uid]; if (p && (x.createdAt || 0) > when) { best = p; when = x.createdAt || 0; } }
+  if (!best) return base;
+  const o = { ...base }; for (const k of ["venmo", "zelle", "cashapp", "payPref", "phone"]) if (best[k]) o[k] = best[k]; else if (!o[k]) o[k] = "";
+  return o;
 }
 // Names come from shared groups (contacts); guests who joined an event by link
 // are only known by the names the event carries (see noteNames).
@@ -1718,6 +1727,7 @@ function wireGroupPage() {
   });
   if (el("gExpense")) el("gExpense").onclick = () => openExpense(null, g.memberUids, g.id);
   document.querySelectorAll("[data-xopen]").forEach(b => b.onclick = () => go("#/x/" + b.dataset.xopen));
+  document.querySelectorAll("[data-xrow]").forEach(d => d.onclick = e => { if (e.target.closest("button,a")) return; go("#/x/" + d.dataset.xrow); });
   if (el("delGroup")) el("delGroup").onclick = () => deleteGroup(g);
   if (el("leaveGroup")) el("leaveGroup").onclick = () => leaveGroup(g);
   document.querySelectorAll("[data-uninvite]").forEach(b => b.onclick = () => uninvite(g, b.dataset.uninvite));
@@ -3954,7 +3964,7 @@ function moneyBody() {
     <div class="card tile owed"><span class="muted sm">Owed to you</span><div class="amt">${fmt$(owed)}</div></div></div>
   ${!mine.length && rows.length ? `<div class="card empty compact">${dot("party", 72)}<b>All squared up</b><p class="muted">Nobody owes anybody. Nice.</p></div>` : ""}
   ${mine.length ? `<div class="section-head"><h2>Settle up</h2>${pairs.length > 1 ? `<button class="btn small ${S.simplePay ? "primary" : ""}" id="simplePay" title="Combine debts into the fewest payments">${S.simplePay ? "✓ Fewest payments" : "Fewest payments"}</button>` : ""}</div><div class="stack">${mine.map(p => {
-    const other = S.contacts.get(p.from === me ? p.to : p.from) || {};
+    const other = payInfoOf(p.from === me ? p.to : p.from);
     let pay = "";
     if (p.from === me) {
       const btns = {
@@ -3974,13 +3984,14 @@ function moneyBody() {
   <div class="card">${rows.length ? rows.map(r => {
     if (r.kind === "s") return `<div class="ledger"><div class="li pay">⤴</div><div style="flex:1"><b>${esc(nameOf(r.from))} paid ${esc(nameOf(r.to))}</b><div class="muted sm">${r.note ? esc(r.note) + " · " : ""}${new Date(r.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(r.amountCents)}</span>${r.addedBy === me ? `<button class="btn ghost small" data-dels="${r.id}">✕</button>` : ""}</div>`;
     const n = (r.split || []).length || 1;
-    return `<div class="ledger"><div class="li">🧾</div><div style="flex:1"><b>${esc(r.desc)}</b><div class="muted sm">${esc(nameOf(r.paidBy))} paid · ${r.shares ? "itemized, " + n + " people" : `split ${n} way${n > 1 ? "s" : ""}`} · ${new Date(r.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(r.amountCents)}</span><button class="btn ghost small" data-xopen="${r.id}" title="Details & discussion">💬</button>${r.addedBy === me ? `<button class="btn ghost small" data-dele="${r.id}" title="Delete" style="margin-left:6px">✕</button>` : ""}</div>`;
+    return `<div class="ledger" data-xrow="${r.id}"><div class="li">🧾</div><div style="flex:1"><b>${esc(r.desc)}</b><div class="muted sm">${esc(nameOf(r.paidBy))} paid · ${r.shares ? "itemized, " + n + " people" : `split ${n} way${n > 1 ? "s" : ""}`} · ${new Date(r.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(r.amountCents)}</span><button class="btn ghost small" data-xopen="${r.id}" title="Details & discussion">💬</button>${r.addedBy === me ? `<button class="btn ghost small" data-dele="${r.id}" title="Delete" style="margin-left:6px">✕</button>` : ""}</div>`;
   }).join("") : emptyState("💸", "No shared costs yet", "Add an expense after your next hangout.", "happy")}</div>`;
 }
 function wireMoney() {
   el("addExpense").onclick = () => openExpense(null, null);
   if (el("simplePay")) el("simplePay").onclick = () => { S.simplePay = !S.simplePay; render(); };
   document.querySelectorAll("[data-xopen]").forEach(b => b.onclick = () => go("#/x/" + b.dataset.xopen));
+  document.querySelectorAll("[data-xrow]").forEach(d => d.onclick = e => { if (e.target.closest("button,a")) return; go("#/x/" + d.dataset.xrow); });
   document.querySelectorAll("[data-venmo]").forEach(b => b.onclick = () => payVenmo(b.dataset.venmo, +b.dataset.amt, "pay"));
   document.querySelectorAll("[data-request]").forEach(b => b.onclick = () => payVenmo(b.dataset.request, +b.dataset.amt, "charge"));
   document.querySelectorAll("[data-apple]").forEach(b => b.onclick = () => payApple(b.dataset.apple, +b.dataset.amt));
@@ -4030,7 +4041,7 @@ function wireExpensePage() {
     const b = el("wall"); if (b) withInputKept(() => { b.innerHTML = wallInner(pseudo, "Discussion"); wireWall(pseudo); });
   }, e => toast(e.message)));
 }
-function payVenmo(uid, cents, txn) { const v = (S.contacts.get(uid) || {}).venmo; if (!v) return; window.open(`https://venmo.com/${encodeURIComponent(v.replace(/^@/, ""))}?txn=${txn}&amount=${(cents / 100).toFixed(2)}&note=${encodeURIComponent("Friendly 🤝")}`, "_blank"); if (txn === "pay") markPaid(myUid(), uid, cents, "Venmo"); else toast("Request sent in Venmo."); }
+function payVenmo(uid, cents, txn) { const v = payInfoOf(uid).venmo; if (!v) return; window.open(`https://venmo.com/${encodeURIComponent(v.replace(/^@/, ""))}?txn=${txn}&amount=${(cents / 100).toFixed(2)}&note=${encodeURIComponent("Friendly 🤝")}`, "_blank"); if (txn === "pay") markPaid(myUid(), uid, cents, "Venmo"); else toast("Request sent in Venmo."); }
 // Marks a payment as made. Undo is offered right away, and every settlement can
 // be removed later from the Activity list too.
 async function markPaid(from, to, cents, note) {
@@ -4039,11 +4050,11 @@ async function markPaid(from, to, cents, note) {
   catch (e) { return toast(e.message); }
   toast(note ? `Opened ${note} · marked as paid` : "Marked as paid", "Undo", () => deleteDoc(ref).then(() => toast("Undone")).catch(e => toast(e.message)));
 }
-function payApple(uid, cents) { const p = (S.contacts.get(uid) || {}).phone; if (!p) return; const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?"; location.href = "sms:" + p.replace(/[^+\d]/g, "") + sep + "body=" + encodeURIComponent(`Sending $${(cents / 100).toFixed(2)} Apple Cash for our Friendly tab 🤝`); markPaid(myUid(), uid, cents, "Apple Cash"); }
-function payCashApp(uid, cents) { const t = ((S.contacts.get(uid) || {}).cashapp || "").replace(/^\$/, ""); if (!t) return; window.open(`https://cash.app/$${encodeURIComponent(t)}/${(cents / 100).toFixed(2)}`, "_blank"); markPaid(myUid(), uid, cents, "Cash App"); }
+function payApple(uid, cents) { const p = payInfoOf(uid).phone; if (!p) return; const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?"; location.href = "sms:" + p.replace(/[^+\d]/g, "") + sep + "body=" + encodeURIComponent(`Sending $${(cents / 100).toFixed(2)} Apple Cash for our Friendly tab 🤝`); markPaid(myUid(), uid, cents, "Apple Cash"); }
+function payCashApp(uid, cents) { const t = (payInfoOf(uid).cashapp || "").replace(/^\$/, ""); if (!t) return; window.open(`https://cash.app/$${encodeURIComponent(t)}/${(cents / 100).toFixed(2)}`, "_blank"); markPaid(myUid(), uid, cents, "Cash App"); }
 // Zelle lives inside each bank's app and has no payment links, so the best we can do is hand over the handle.
 function payZelle(uid, cents) {
-  const z = (S.contacts.get(uid) || {}).zelle; if (!z) return;
+  const z = payInfoOf(uid).zelle; if (!z) return;
   const done = () => dialog(`<h3>Pay with Zelle</h3><p>Send <b>${fmt$(cents)}</b> to <b>${esc(first(nameOf(uid)))}</b> in your bank app. Their Zelle is <b class="mono">${esc(z)}</b>${navigator.clipboard ? " (copied)" : ""}.</p><p class="muted sm">When it's sent, mark it paid so the balance clears for both of you.</p>`, "I sent it", () => { closeDialog(); markPaid(myUid(), uid, cents, "Zelle"); });
   if (navigator.clipboard) navigator.clipboard.writeText(z).then(done, done); else done();
 }
@@ -4064,7 +4075,7 @@ function expensePeople(eventId, restrict) {
   } else if (restrict) {
     main = [...new Set([me, ...restrict])].map(u => [u, info(u)]); main.forEach(([u]) => checked.add(u));
   } else {
-    main = [...S.contacts.entries()]; main.forEach(([u]) => checked.add(u));
+    main = [...S.contacts.entries()];   // from the Money tab: nobody is picked for you
   }
   const inMain = new Set(main.map(([u]) => u));
   const others = [...S.contacts.entries()].filter(([u]) => !inMain.has(u));
@@ -4095,8 +4106,8 @@ function openExpense(eventId, restrict, groupId) {
     <div class="two"><label class="field"><span>Amount ($)</span><input id="xAmt" inputmode="decimal" placeholder="42.50"></label>
     <label class="field"><span>Paid by</span><select id="xPayer">${payerOptions(people)}</select></label></div>
     <span class="field-label">Split between</span>${people.box(people, eventId ? "event" : "group")}
-    <div id="xScanBox"><button type="button" class="btn small" id="xScan" style="margin-top:12px">📷 Scan a receipt to itemize</button>
-    <p class="muted sm" style="margin-top:6px">Snap the receipt, assign each line to whoever had it. Tax and tip split in proportion.</p></div>`,
+    <div id="xScanBox"><button type="button" class="btn scan" id="xScan">📷 Scan or upload a receipt to itemize</button>
+    <p class="muted sm" style="margin-top:6px">Snap it or pick a photo, then assign each line to whoever had it. Tax and tip split in proportion.</p></div>`,
     "Add expense", async () => {
       const amount = parseAmount(el("xAmt").value); if (!amount) return toast("Enter a valid amount.");
       const split = [...document.querySelectorAll('input[name=spl]:checked')].map(i => i.value); if (!split.length) return toast("Pick who splits it.");
