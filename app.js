@@ -33,8 +33,8 @@ onmessage=e=>{const d=e.data||{};last=Date.now();strikes=0;
   if(d.uid!==undefined)uid=d.uid;if(d.v)v=d.v;if(typeof d.vis==="boolean")vis=d.vis;if(d.route!==undefined&&d.route!==route){route=d.route;dirty=true;}if(d.stalled)stalled=true;
   if(d.kv){const k=d.kv[0],val=d.kv[1];tx("readwrite",s=>{val===null?s.delete(k):s.put(val,k);}).catch(()=>{});}
   if(d.ct!==undefined)tx("readwrite",s=>{d.ct===null?s.delete("__ct"):s.put(d.ct,"__ct");}).catch(()=>{});
-  if(hungAt){fetch(U,{method:"POST",body:JSON.stringify({kind:"resumed",uid,v,hungFor:Math.round((Date.now()-hungAt)/1000),steps:steps.slice(-10)})}).catch(()=>{});hungAt=0;}};
-setInterval(()=>{if(!vis||hungAt)return;const gap=Date.now()-last;if(gap>6000){if(++strikes<2)return;hungAt=last;fetch(U,{method:"POST",body:JSON.stringify({kind:"hung",uid,v,gapS:Math.round(gap/1000),steps:steps.slice(-10)})}).catch(()=>{});}else strikes=0;},1000);`;
+  if(hungAt){fetch(U,{method:"POST",body:JSON.stringify({kind:"resumed",uid,v,vis,route,hungFor:Math.round((Date.now()-hungAt)/1000),steps:steps.slice(-10)})}).catch(()=>{});hungAt=0;}};
+setInterval(()=>{if(hungAt||(!vis&&v.indexOf("native")<0))return;const gap=Date.now()-last;if(gap>6000){if(++strikes<2)return;hungAt=last;fetch(U,{method:"POST",body:JSON.stringify({kind:"hung",uid,v,vis,route,gapS:Math.round(gap/1000),steps:steps.slice(-10)})}).catch(()=>{});}else strikes=0;},1000);`;
 // ---- Device storage and the watchdog thread ----
 // On iPhone, writing localStorage is a blocking call into WebKit's storage process, and that call can deadlock
 // against a Firestore database transaction that is waiting on this same page: the page freezes for good (taps
@@ -1077,7 +1077,7 @@ const fz = { log: [], tick: Date.now(), stalled: false,
 let KILLED_RELOAD = false, killedAfterS = 0, sameView = false, KILL_PICKER = null;
 try { sameView = sessionStorage.getItem("friendlyView") === "1"; sessionStorage.setItem("friendlyView", "1"); } catch {}
 if (typeof window.__killedReloadAt === "number" && Date.now() - window.__killedReloadAt < 60000) KILLED_RELOAD = true;
-fz.add((KILLED_RELOAD ? "boot after iOS killed the page " : "boot ") + (location.hash || "#/").slice(0, 60)); fz.save();
+fz.add((KILLED_RELOAD ? "boot after iOS killed the page " : "boot ") + (location.hash || "#/").slice(0, 60) + (document.visibilityState === "visible" ? "" : " (page " + document.visibilityState + ")")); fz.save();
 // The camera covers the page, so the page's last word before such a kill is "app hidden" (which otherwise means a
 // normal trip to the background): the picker marker tells the two apart. The flow resumes once signed in.
 bootDiag.then(() => {
@@ -1113,7 +1113,7 @@ async function reportFreezeTrace() {
   }
   if (KILLED_RELOAD) { addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `page killed by iOS and reloaded ${killedAfterS}s after its last heartbeat (${deviceLine()}), on ${tr.route || "?"}; last steps:\n` + (tr.log || []).slice(-8).join("\n"), route: tr.route, version: tr.v, platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now(), tracedAt: tr.hb }).catch(() => {}); return; }
   if (!(tr.stalled || endedOnScreen)) return;
-  addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `freeze trace (previous session ${tr.stalled ? "stalled" : "ended while on screen"}, last heartbeat ${new Date(tr.hb).toTimeString().slice(0, 8)}, ${deviceLine()}):\n` + tr.log.join("\n"), route: tr.route, version: tr.v, platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now(), tracedAt: tr.hb }).catch(() => {});
+  addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `freeze trace (previous session ${tr.stalled ? "stalled" : "ended while on screen"}, last heartbeat ${new Date(tr.hb).toTimeString().slice(0, 8)}, ${deviceLine()}, worker store ${LS.ok ? "ok" : "NOT answering"}):\n` + tr.log.join("\n"), route: tr.route, version: tr.v, platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now(), tracedAt: tr.hb }).catch(() => {});
 }
 function render() {
   clearTimeout(renderTimer); renderTimer = 0;

@@ -871,8 +871,8 @@ exports.hang = onRequest({ region: "us-central1", invoker: "public", memory: "25
   if (d.kind !== "hung" && d.kind !== "resumed") { res.status(400).send(""); return; }
   const steps = (Array.isArray(d.steps) ? d.steps : []).slice(-10).map(s => String(s).slice(0, 120));
   const text = d.kind === "hung"
-    ? `WATCHDOG: the page's main thread stopped answering for ${Number(d.gapS) || 0}s (reported by its worker thread, so the process was alive: a hang, not a kill). Last steps:\n` + steps.join("\n")
-    : `WATCHDOG: the page came back after ${Number(d.hungFor) || 0}s. Last steps:\n` + steps.join("\n");
+    ? `WATCHDOG: the page's main thread stopped answering for ${Number(d.gapS) || 0}s (reported by its worker thread, so the process was alive: a hang, not a kill). Page ${d.vis === false ? "thought it was hidden" : "on screen"}, at ${String(d.route || "?").slice(0, 80)}. Last steps:\n` + steps.join("\n")
+    : `WATCHDOG: the page came back after ${Number(d.hungFor) || 0}s, at ${String(d.route || "?").slice(0, 80)}. Last steps:\n` + steps.join("\n");
   await db.collection("bugs").add({ uid: String(d.uid || "").slice(0, 40) || "unknown", name: "diag", diag: true, status: "open", platform: "ios", version: String(d.v || "").slice(0, 40), route: "", createdAt: Date.now(), text }).catch(() => {});
   res.status(200).send("ok");
 });
