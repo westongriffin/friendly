@@ -1,7 +1,7 @@
 // Friendly: app (Firebase Auth + Firestore). Real accounts, groups with
 // server-enforced privacy, expressive themed events, RSVP + guest management,
 // and shared money. Hosted static on GitHub Pages; no build step.
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import { initializeApp, onLog } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
   getAuth, onAuthStateChanged, createUserWithEmailAndPassword,
   signInWithEmailAndPassword, signInWithCustomToken, signOut, deleteUser, reauthenticateWithCredential, EmailAuthProvider,
@@ -21,6 +21,9 @@ const auth = getAuth(fb);
 // Keep a copy of the account's data on the device, so the app opens from it instantly and
 // freshens up in the background, instead of waiting on the network every launch.
 let db; try { db = initializeFirestore(fb, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) }); } catch (e) { console.warn("device cache unavailable:", e.message); db = getFirestore(fb); }
+// Firestore falls back to a memory-only cache (quietly, with a warning) when the device's database can't be
+// opened; a write made in that state lives only until the page goes away. Keep the warning for the reports.
+window.__cacheNote = ""; try { onLog(l => { const m = String((l && l.message) || ""); if (/memory cache|persistence|IndexedDB|indexeddb/i.test(m) && !window.__cacheNote) window.__cacheNote = m.slice(0, 160); }, { level: "warn" }); } catch {}
 // On sign-out or account deletion, the device copy goes too.
 // Every step has a time limit and the page always reloads: on iPhone, clearing a large device copy could hang
 // forever (the delete waits on a database connection that never closes), which left the app frozen on
@@ -603,10 +606,14 @@ function imagenViaFirestore(prompt) {
 // `what` names the flow (receipt, wall photo, ...) for the freeze trace, and a marker stays in storage while the
 // camera or photo picker is open: iOS can kill the page behind the camera, and the reload then picks the flow back up.
 const pickerMark = (what, stage) => { try { if (what) localStorage.setItem("friendlyPicker", JSON.stringify({ what, stage, route: location.hash, t: Date.now() })); else localStorage.removeItem("friendlyPicker"); } catch {} };
-function pickFile(accept = "image/*", what = "photo") { return new Promise(res => { const i = document.createElement("input"); i.type = "file"; i.accept = accept;
+// The input lives in the page (hidden) while the picker is up: a detached one can be garbage-collected on iOS
+// while the person is still choosing, and its photo then never arrives.
+function pickFile(accept = "image/*", what = "photo") { return new Promise(res => { const i = document.createElement("input"); i.type = "file"; i.accept = accept; i.style.cssText = "position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0";
+  document.body.appendChild(i); window.__picker = i;
+  const finish = f => { if (window.__picker === i) window.__picker = null; setTimeout(() => i.remove(), 1000); res(f); };
   pickerMark(what, "picker open"); fz.add(`photo picker opened (${what})`); fz.save();
-  i.onchange = () => { const f = i.files[0] || null; fz.add(f ? `photo picked (${what}, ${Math.round(f.size / 1024)} KB)` : `photo picker closed (${what})`); fz.save(); if (f) { pickerMark(what, "processing"); setTimeout(() => pickerMark(null), 30000); } else pickerMark(null); res(f); };
-  i.oncancel = () => { fz.add(`photo picker cancelled (${what})`); fz.save(); pickerMark(null); res(null); };
+  i.onchange = () => { const f = i.files[0] || null; fz.add(f ? `photo picked (${what}, ${Math.round(f.size / 1024)} KB)` : `photo picker closed (${what})`); fz.save(); if (f) { pickerMark(what, "processing"); setTimeout(() => pickerMark(null), 30000); } else pickerMark(null); finish(f); };
+  i.oncancel = () => { fz.add(`photo picker cancelled (${what})`); fz.save(); pickerMark(null); finish(null); };
   i.click(); }); }
 // Comments/polls live under events by default; groups and expenses reuse the
 // same components by passing a pseudo-event with `_col: ["groups", id]` etc.
@@ -4083,12 +4090,28 @@ function openExpense(eventId, restrict, groupId) {
       const amount = parseAmount(el("xAmt").value); if (!amount) return toast("Enter a valid amount.");
       const split = [...document.querySelectorAll('input[name=spl]:checked')].map(i => i.value); if (!split.length) return toast("Pick who splits it.");
       const paidBy = el("xPayer").value; const involved = [...new Set([...split, paidBy])];
-      try { await setDoc(doc(db, "expenses", newId()), { desc: el("xDesc").value.trim(), amountCents: amount, paidBy, split, involved, eventId: eventId || null, groupId: groupId || (eventId && (S.events.get(eventId) || {}).groupId) || matchGroupId(involved), addedBy: myUid(), createdAt: Date.now() }); closeDialog(); toast("Expense added"); } catch (e) { toast(e.message); }
+      const rec = { desc: el("xDesc").value.trim(), amountCents: amount, paidBy, split, involved, eventId: eventId || null, groupId: groupId || (eventId && (S.events.get(eventId) || {}).groupId) || matchGroupId(involved), addedBy: myUid(), createdAt: Date.now() };
+      try { await saveExpense(rec); closeDialog(); toast("Expense added"); } catch (e) { toast("Couldn't save that expense: " + e.message); }
     });
   el("xScan").onclick = () => scanReceipt(eventId, restrict, { desc: el("xDesc").value.trim(), paidBy: el("xPayer").value }, groupId);
   if (el("xTell")) el("xTell").onclick = () => openPlanDialog("expense", { eventId, groupId });
 }
 
+// One door for expense writes: the save is capped in time (a write to a dead connection otherwise waits forever,
+// showing an expense that was never saved), kept under Firestore's document size, and a failure is reported with
+// the sizes that matter.
+async function saveExpense(rec) {
+  const id = newId(), t0 = Date.now();
+  if (rec.receipt && rec.receipt.length > 600000) { try { rec.receipt = await compressImage(rec.receipt, 800, 0.7, 420000); } catch { rec.receipt = ""; } }
+  const size = Math.round(JSON.stringify(rec).length / 1024);
+  fz.add(`expense save ${size}KB`); fz.save();
+  try { await Promise.race([setDoc(doc(db, "expenses", id), rec), new Promise((_, no) => setTimeout(() => no(new Error("the save is taking too long; check your connection and try again")), 40000))]); fz.add("expense saved in " + Math.round((Date.now() - t0) / 1000) + "s"); fz.save(); }
+  catch (e) {
+    fz.add("expense save FAILED " + String(e.message).slice(0, 80)); fz.save();
+    try { addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `expense write failed after ${Math.round((Date.now() - t0) / 1000)}s: ${e.code || ""} ${e.message}. Doc ${size}KB, receipt ${Math.round((rec.receipt || "").length / 1024)}KB, ${(rec.items || []).length} items, ${(rec.involved || []).length} people, event ${rec.eventId || "-"}, cache note: ${window.__cacheNote || "none"}`, route: location.hash, version: APP_V + " / " + (nativeVersion || ""), platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now() }).catch(() => {}); } catch {}
+    throw e;
+  }
+}
 // ----- Receipt scan → itemize → assign -----
 // Generic request/response doc: write {uid, ...payload, status:"pending"},
 // resolve with the doc once a Cloud Function marks it done.
@@ -4182,7 +4205,7 @@ function itemizeDialog(eventId, restrict, seed, data, receipt, groupId) {
       const rec = { desc: el("xDesc").value.trim() || data.merchant || "Receipt", amountCents: total, paidBy, split, shares, involved, eventId: eventId || null, groupId: groupId || (eventId && (S.events.get(eventId) || {}).groupId) || matchGroupId(involved), addedBy: myUid(), createdAt: Date.now(),
         items: items.filter(it => it.cents).map(it => ({ name: it.name, cents: it.cents, uids: [...it.uids] })), tax: st.tax, tip: st.tip, merchant: data.merchant || "", receipt: receipt || "" };
       rec.groupId = groupId || (eventId && (S.events.get(eventId) || {}).groupId) || null;
-      try { await setDoc(doc(db, "expenses", newId()), rec); closeDialog(); toast("Itemized expense added"); } catch (e) { toast(e.message); }
+      try { await saveExpense(rec); closeDialog(); toast("Itemized expense added"); } catch (e) { toast("Couldn't save that expense: " + e.message); }
     });
   const renderSum = () => {
     const { shares, subtotal, total } = computeShares(items, st.tax, st.tip);
