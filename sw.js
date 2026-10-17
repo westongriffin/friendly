@@ -3,9 +3,9 @@
 // network-first with a short timeout (fresh when online, instant from the copy on a dead or crawling
 // connection); the versioned Firebase SDK and font files never change, so they're cache-first.
 // Bump CACHE on deploy.
-const CACHE = "friendly-fb-v221";
+const CACHE = "friendly-fb-v222";
 const SHELL = [
-  "./", "./index.html", "./styles.css", "./app.js", "./blip.js", "./themes.js", "./version.json",
+  "./", "./index.html", "./styles.css", "./app.js", "./blip.js", "./themes.js", "./diag-worker.js", "./version.json",
   "./firebase-config.js", "./manifest.webmanifest",
   "./icons/icon-192.png", "./icons/icon-512.png",
   "./icons/maskable-512.png", "./icons/apple-touch-icon.png"
