@@ -983,9 +983,11 @@ function withInputKept(fn) {
 // heartbeat, saved every second. When the page's code stalls 3+ seconds while on screen, that's logged; the next
 // sign-in reports any session that stalled, so a freeze on a phone tells us what was running.
 const FZ_KEY = "friendlyFreezeTrace";
+const deviceLine = () => { const m = /OS (\d+[_.]\d+(?:[_.]\d+)?)/.exec(navigator.userAgent || ""); return (m ? "iOS " + m[1].replace(/_/g, ".") : (navigator.userAgent || "").slice(0, 60)) + " · " + (window.screen ? screen.width + "x" + screen.height : ""); };
 const fz = { log: [], tick: Date.now(), stalled: false,
   add(s) { this.log.push(new Date().toTimeString().slice(0, 8) + " " + s); if (this.log.length > 50) this.log.shift(); },
   save() { try { localStorage.setItem(FZ_KEY, JSON.stringify({ hb: Date.now(), stalled: this.stalled, log: this.log, v: APP_V + " / " + (nativeVersion || ""), route: location.hash })); } catch {} } };
+try { const prev = localStorage.getItem(FZ_KEY); if (prev) localStorage.setItem("friendlyFreezePrev", prev); } catch {}
 fz.add("boot " + (location.hash || "#/").slice(0, 60)); fz.save();
 setInterval(() => { const now = Date.now(), gap = now - fz.tick; fz.tick = now; if (gap > 3000 && gap < 90000 && !document.hidden) { fz.stalled = true; fz.add(`STALL ${Math.round(gap / 100) / 10}s on ${location.hash || "#/"}`); } fz.save(); }, 1000);
 document.addEventListener("visibilitychange", () => { fz.tick = Date.now(); fz.add("app " + document.visibilityState); fz.save(); });
@@ -998,9 +1000,8 @@ function reportFreezeTrace() {
   const lastStep = String((tr && tr.log && tr.log[tr.log.length - 1]) || "");
   const endedOnScreen = tr && tr.log && tr.log.length && !/ (app hidden|page closed)$/.test(lastStep);
   if (!tr || !(tr.stalled || endedOnScreen) || !myUid()) return;
-  addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `freeze trace (previous session ${tr.stalled ? "stalled" : "ended while on screen"}, last heartbeat ${new Date(tr.hb).toTimeString().slice(0, 8)}):\n` + tr.log.join("\n"), route: tr.route, version: tr.v, platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now(), tracedAt: tr.hb }).catch(() => {});
+  addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `freeze trace (previous session ${tr.stalled ? "stalled" : "ended while on screen"}, last heartbeat ${new Date(tr.hb).toTimeString().slice(0, 8)}, ${deviceLine()}):\n` + tr.log.join("\n"), route: tr.route, version: tr.v, platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now(), tracedAt: tr.hb }).catch(() => {});
 }
-try { const prev = localStorage.getItem(FZ_KEY); if (prev) localStorage.setItem("friendlyFreezePrev", prev); } catch {}
 function render() {
   clearTimeout(renderTimer); renderTimer = 0;
   const fzT0 = performance.now();
@@ -1739,7 +1740,7 @@ function reportContactsTrace() {
   let tr = null; try { tr = JSON.parse(localStorage.getItem(CT_KEY) || "null"); localStorage.removeItem(CT_KEY); } catch {}
   if (!tr || !myUid()) return;
   const alive = Math.round((tr.hb - tr.last) / 1000);
-  addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `contacts trace: app closed mid-flow. Code kept running ${alive}s after the last step${alive < 2 ? " (looks FROZEN)" : " (code alive, screen not responding?)"}.\n` + tr.steps.join("\n"), route: tr.route, version: tr.v, platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now(), tracedAt: tr.t0 }).catch(() => {});
+  addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `contacts trace (${deviceLine()}): app closed mid-flow. Code kept running ${alive}s after the last step${alive < 2 ? " (looks FROZEN)" : " (code alive, screen not responding?)"}.\n` + tr.steps.join("\n"), route: tr.route, version: tr.v, platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now(), tracedAt: tr.t0 }).catch(() => {});
 }
 function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pendingPhones = new Map(), submitLabel = "Add & send", knownLabel = "On Friendly · added right away", phoneLabel = "Gets a text with the join link", onSubmit }) {
   const me = myUid(); const picked = [];   // { name, phone, e164, uid|null }
@@ -1816,7 +1817,12 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
     ctTrace.step(window.__friendlyBook ? "book cached" : "book load");
     if (!window.__friendlyBook) {
       let perm = null;
-      try { perm = await withTimeout(C.checkPermissions(), 6000, "Checking contacts access"); if (perm && perm.contacts !== "granted" && perm.contacts !== "limited") perm = await C.requestPermissions(); } catch {}
+      try {
+        ctTrace.step("asking iOS for access status");
+        perm = await withTimeout(C.checkPermissions(), 6000, "Checking contacts access");
+        ctTrace.step("status " + (perm && perm.contacts));
+        if (perm && perm.contacts !== "granted" && perm.contacts !== "limited") { ctTrace.step("showing Apple's permission screen"); perm = await C.requestPermissions(); }
+      } catch (e) { ctTrace.step("access check error " + String((e && e.message) || e).slice(0, 50)); }
       ctTrace.step("perm " + (perm && perm.contacts));
       if (!perm || (perm.contacts !== "granted" && perm.contacts !== "limited")) { if (btn) { btn.disabled = false; btn.textContent = "📇 Choose from contacts"; } return false; }
       if (btn) btn.textContent = "Loading your contacts…";
