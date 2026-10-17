@@ -979,7 +979,7 @@ function withInputKept(fn) {
   n.focus({ preventScroll: true });
   try { if (snap.s != null) n.setSelectionRange(snap.s, snap.e); } catch {}
 }
-// Freeze black box (admins). A ring of recent steps (redraws with route and time taken, visibility changes) plus a
+// Freeze black box (every user; steps and timings only, no personal data). A ring of recent steps (redraws with route and time taken, visibility changes) plus a
 // heartbeat, saved every second. When the page's code stalls 3+ seconds while on screen, that's logged; the next
 // sign-in reports any session that stalled, so a freeze on a phone tells us what was running.
 const FZ_KEY = "friendlyFreezeTrace";
@@ -997,7 +997,7 @@ function reportFreezeTrace() {
   // or closing): that's a force-quit during a hang, or a crash.
   const lastStep = String((tr && tr.log && tr.log[tr.log.length - 1]) || "");
   const endedOnScreen = tr && tr.log && tr.log.length && !/ (app hidden|page closed)$/.test(lastStep);
-  if (!tr || !(tr.stalled || endedOnScreen) || !isAdmin()) return;
+  if (!tr || !(tr.stalled || endedOnScreen) || !myUid()) return;
   addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `freeze trace (previous session ${tr.stalled ? "stalled" : "ended while on screen"}, last heartbeat ${new Date(tr.hb).toTimeString().slice(0, 8)}):\n` + tr.log.join("\n"), route: tr.route, version: tr.v, platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now(), tracedAt: tr.hb }).catch(() => {});
 }
 try { const prev = localStorage.getItem(FZ_KEY); if (prev) localStorage.setItem("friendlyFreezePrev", prev); } catch {}
@@ -1722,14 +1722,14 @@ function openGroupDialog() {
 // number only, to be added to a pending-invite list and texted a join link).
 // Phone number is the one thing every contact reliably has, and the one thing
 // the join/auto-add mechanisms actually match on.
-// "Choose from contacts" black box (admins only). Every step and tap inside Add people is written to the
+// "Choose from contacts" black box (every user; taps on contacts are logged as "contact row", never a name or number). Every step and tap inside Add people is written to the
 // device with a once-a-second heartbeat. Closing the dialog clears it, so a trace still there at the next
 // launch means the app was force-closed mid-flow; it's reported as a diag row with where it stopped and
 // whether the page's code was still running (heartbeat kept going) or had frozen (heartbeat stopped).
 const CT_KEY = "friendlyContactsTrace";
 const ctTrace = {
   t0: 0, steps: [], hb: null, last: 0,
-  start(where) { if (!isAdmin()) return; this.t0 = Date.now(); this.steps = []; this.step("open " + where); clearInterval(this.hb); this.hb = setInterval(() => this.save(), 1000); },
+  start(where) { this.t0 = Date.now(); this.steps = []; this.step("open " + where); clearInterval(this.hb); this.hb = setInterval(() => this.save(), 1000); },
   step(s) { if (!this.t0) return; this.last = Date.now(); this.steps.push(s + " @" + ((this.last - this.t0) / 1000).toFixed(1) + "s"); if (this.steps.length > 60) this.steps.splice(1, 1); this.save(); },
   save() { if (!this.t0) return; try { localStorage.setItem(CT_KEY, JSON.stringify({ t0: this.t0, hb: Date.now(), last: this.last, steps: this.steps, route: location.hash, v: APP_V + " / " + (nativeVersion || "") })); } catch {} },
   end() { if (!this.t0) return; clearInterval(this.hb); this.hb = null; this.t0 = 0; try { localStorage.removeItem(CT_KEY); } catch {} }
@@ -1737,7 +1737,7 @@ const ctTrace = {
 document.addEventListener("visibilitychange", () => ctTrace.step(document.visibilityState));
 function reportContactsTrace() {
   let tr = null; try { tr = JSON.parse(localStorage.getItem(CT_KEY) || "null"); localStorage.removeItem(CT_KEY); } catch {}
-  if (!tr || !isAdmin()) return;
+  if (!tr || !myUid()) return;
   const alive = Math.round((tr.hb - tr.last) / 1000);
   addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `contacts trace: app closed mid-flow. Code kept running ${alive}s after the last step${alive < 2 ? " (looks FROZEN)" : " (code alive, screen not responding?)"}.\n` + tr.steps.join("\n"), route: tr.route, version: tr.v, platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now(), tracedAt: tr.t0 }).catch(() => {});
 }
@@ -1782,7 +1782,7 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
     });
   renderPicked();
   ctTrace.start(location.hash);
-  { const dlg = el("appDialog"); if (dlg) dlg.addEventListener("pointerdown", e => { const t = e.target.closest("button,input,label,summary") || e.target; ctTrace.step("tap " + (t.id || t.dataset.book || t.textContent || t.tagName).toString().trim().slice(0, 24)); }, true); }
+  { const dlg = el("appDialog"); if (dlg) dlg.addEventListener("pointerdown", e => { const t = e.target.closest("button,input,label,summary") || e.target; ctTrace.step("tap " + (t.dataset.book ? "contact checkbox" : t.closest(".book-row") ? "contact row" : t.closest(".inv-hit") ? "picked person" : t.id || (t.tagName === "BUTTON" ? t.textContent : t.tagName)).toString().trim().slice(0, 24)); }, true); }
   if (el("invAddManual")) el("invAddManual").onclick = () => { addPicked(el("invName").value.trim(), el("invPhone").value.trim()); el("invName").value = ""; el("invPhone").value = ""; };
   // "Choose from contacts": your address book as a searchable checklist right here in the dialog (check as many
   // as you like). It reads the contacts on the phone only to show this list; nothing is uploaded except the
@@ -1809,7 +1809,7 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
   // Loads the phone's address book once per app session (cached), with a time limit on every step so the
   // button can't silently hang: it says what it's doing at once, and offers Try again if the phone is slow.
   const withTimeout = (pr, ms, what) => Promise.race([pr, new Promise((_, no) => setTimeout(() => no(new Error(what + " took too long")), ms))]);
-  const slowLog = (ms, n, err) => { try { if (isAdmin() && (ms > 6000 || err)) addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `contacts load ${ms}ms, ${n} contacts${err ? ", error: " + err : ""}`, route: location.hash, version: APP_V + " / " + (nativeVersion || ""), platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now() }).catch(() => {}); } catch {} };
+  const slowLog = (ms, n, err) => { try { if (myUid() && (ms > 6000 || err)) addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `contacts load ${ms}ms, ${n} contacts${err ? ", error: " + err : ""}`, route: location.hash, version: APP_V + " / " + (nativeVersion || ""), platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now() }).catch(() => {}); } catch {} };
   async function openBook() {
     const C = nativeContacts, btn = el("invPick"), t0 = Date.now();
     if (btn) { btn.textContent = "Opening your contacts…"; btn.disabled = true; }
