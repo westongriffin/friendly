@@ -48,6 +48,7 @@ try {
 } catch (e) { console.warn("storage worker unavailable:", e.message); }
 setTimeout(() => bootDiagResolve(false), 2500);
 bootDiag.then(ok => { if (!ok) console.warn("storage worker did not answer; device settings will not persist this session"); });
+if (/^\d+$/.test(APP_V)) LS.set("friendlyV", APP_V);   // read by index.html at the next start (see there)
 
 const fb = initializeApp(firebaseConfig);
 const auth = getAuth(fb);

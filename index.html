@@ -36,10 +36,14 @@ body{margin:0;background:#BFE7C6}
 // stylesheet above blocked startup the same way, so it now loads in the background too).
 (function(){
   var known = "61"; try { known = localStorage.getItem("friendlyV") || known; } catch (e) {}
+  // The version the app last ran is kept by app.js in its small IndexedDB store (the page never writes
+  // localStorage after startup: on iPhone that write can deadlock against a database transaction). Read it here,
+  // asynchronously, alongside the version check; whichever is newer wins if the network doesn't answer in time.
+  try { var rq = indexedDB.open("friendlyDiag", 1); rq.onupgradeneeded = function () { rq.result.createObjectStore("kv"); };
+    rq.onsuccess = function () { try { var g = rq.result.transaction("kv").objectStore("kv").get("friendlyV"); g.onsuccess = function () { var v = g.result; if (v && (+v || 0) > (+known || 0)) known = String(v); rq.result.close(); }; } catch (e) {} }; } catch (e) {}
   var started = false;
   function start(v) {
     if (started) return; started = true; v = String(v || known);
-    try { localStorage.setItem("friendlyV", v); } catch (e) {}
     var go = false, scripts = function () { if (go) return; go = true;
       var b = document.createElement("script"); b.src = "./blip.js?v=" + v; b.async = false; document.head.appendChild(b);
       var a = document.createElement("script"); a.type = "module"; a.src = "./app.js?v=" + v; a.async = false; document.head.appendChild(a); };
@@ -53,7 +57,7 @@ body{margin:0;background:#BFE7C6}
   try {
     fetch("./version.json?t=" + Date.now(), { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (j) {
       if (!j || !j.v) return;
-      if (!started) { clearTimeout(timer); start(j.v); } else { try { localStorage.setItem("friendlyV", String(j.v)); } catch (e) {} }
+      if (!started) { clearTimeout(timer); start(j.v); }
     }).catch(function () {});
   } catch (e) { start(known); }
 })();
