@@ -1858,8 +1858,10 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
       } catch (e) { ctTrace.step("access check error " + String((e && e.message) || e).slice(0, 50)); }
       ctTrace.step("perm " + (perm && perm.contacts));
       if (!perm || (perm.contacts !== "granted" && perm.contacts !== "limited")) { if (btn) { btn.disabled = false; btn.textContent = "📇 Choose from contacts"; } return false; }
+      // A big address book can take ten seconds or more on some phones; a ticking count shows it's alive.
       if (btn) btn.textContent = "Loading your contacts…";
-      const r = await withTimeout(C.getContacts({ projection: { name: true, phones: true } }), 25000, "Loading your contacts");
+      const t1 = Date.now(), tick = setInterval(() => { const b = el("invPick"); if (b) b.textContent = `Loading your contacts… ${Math.round((Date.now() - t1) / 1000)}s`; }, 1000);
+      let r; try { r = await withTimeout(C.getContacts({ projection: { name: true, phones: true } }), 25000, "Loading your contacts"); } finally { clearInterval(tick); }
       ctTrace.step("got " + ((r && r.contacts) || []).length);
       const seen = new Set();
       window.__friendlyBook = ((r && r.contacts) || []).map(c => { const phone = phoneOfContact(c); return { name: nameOfContact(c).trim(), phone, e164: toE164(phone) }; })
