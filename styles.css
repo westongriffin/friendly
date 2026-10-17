@@ -980,3 +980,10 @@ p .linkish{display:inline;margin:0;padding:0;color:var(--accent)}
 /* While Dot's intro replays over the app, the app underneath doesn't paint or animate */
 body.replaying #app{visibility:hidden}
 body.replaying #app *{animation-play-state:paused!important}
+
+/* Receipt scan progress, in place of the Scan button while it runs. */
+.scan-prog{display:flex;align-items:center;gap:10px;margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:14px;background:var(--card,#fff)}
+.scan-prog img{width:44px;height:44px;object-fit:cover;border-radius:8px;background:var(--line)}
+.scan-prog b{display:block;font-size:14px}
+.scan-prog .btn{flex:none}
+.oops{color:#B4412F}

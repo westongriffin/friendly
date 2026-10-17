@@ -4077,8 +4077,8 @@ function openExpense(eventId, restrict, groupId) {
     <div class="two"><label class="field"><span>Amount ($)</span><input id="xAmt" inputmode="decimal" placeholder="42.50"></label>
     <label class="field"><span>Paid by</span><select id="xPayer">${payerOptions(people)}</select></label></div>
     <span class="field-label">Split between</span>${people.box(people, eventId ? "event" : "group")}
-    <button type="button" class="btn small" id="xScan" style="margin-top:12px">📷 Scan a receipt to itemize</button>
-    <p class="muted sm" style="margin-top:6px">Snap the receipt, assign each line to whoever had it. Tax and tip split in proportion.</p>`,
+    <div id="xScanBox"><button type="button" class="btn small" id="xScan" style="margin-top:12px">📷 Scan a receipt to itemize</button>
+    <p class="muted sm" style="margin-top:6px">Snap the receipt, assign each line to whoever had it. Tax and tip split in proportion.</p></div>`,
     "Add expense", async () => {
       const amount = parseAmount(el("xAmt").value); if (!amount) return toast("Enter a valid amount.");
       const split = [...document.querySelectorAll('input[name=spl]:checked')].map(i => i.value); if (!split.length) return toast("Pick who splits it.");
@@ -4092,28 +4092,51 @@ function openExpense(eventId, restrict, groupId) {
 // ----- Receipt scan → itemize → assign -----
 // Generic request/response doc: write {uid, ...payload, status:"pending"},
 // resolve with the doc once a Cloud Function marks it done.
-function requestViaFirestore(col, payload, timeoutMs = 90000, onUpdate) {
+function requestViaFirestore(col, payload, timeoutMs = 90000, onUpdate, onSent) {
   return new Promise(async (resolve, reject) => {
     const uid = S.user && S.user.uid; if (!uid) return reject(new Error("signed out"));
     const ref = doc(db, col, newId());
     let unsub = null, timer = null;
     const done = (fn, arg) => { clearTimeout(timer); if (unsub) unsub(); deleteDoc(ref).catch(() => {}); fn(arg); };
-    try { await setDoc(ref, { uid, ...payload, status: "pending", createdAt: Date.now() }); } catch (e) { return reject(e); }
+    // A write never gives up on its own: with no connection it waits in a queue indefinitely, so cap it here.
+    try { await Promise.race([setDoc(ref, { uid, ...payload, status: "pending", createdAt: Date.now() }), new Promise((_, no) => setTimeout(() => no(new Error("couldn't reach Friendly's servers (check your connection)")), 45000))]); }
+    catch (e) { deleteDoc(ref).catch(() => {}); return reject(e); }
+    if (onSent) try { onSent(); } catch {}
     timer = setTimeout(() => done(reject, new Error("timed out")), timeoutMs);
     unsub = onSnapshot(ref, s => { const d = s.data(); if (!d) return; if (onUpdate) try { onUpdate(d); } catch {} if (d.status === "done") done(resolve, d); else if (d.status === "error") done(reject, new Error(d.error || "failed")); }, err => done(reject, err));
   });
 }
-async function scanReceipt(eventId, restrict, seed, groupId) {
+async function scanReceipt(eventId, restrict, seed, groupId, file) {
   if (isDemo()) return toast("Receipt scanning is off in the demo -- try Add expense instead.");
-  const f = await pickFile("image/*", "receipt"); if (!f) return;
-  toast("Reading the receipt…", null, null, "thinking");
+  const f = file || await pickFile("image/*", "receipt"); if (!f) return;
+  // Progress shows in the dialog, where the button was: each step named and timed, with a way out. Every step
+  // has a time limit, so a stuck photo or a dead connection ends in a message rather than a spinner.
+  const box = el("xScanBox"), was = box ? box.innerHTML : "", t0 = Date.now(); let cancelled = false, timer = 0, stage = "";
+  const setStage = (s, note) => { stage = s; fz.add("receipt: " + s); fz.save(); const b = el("xScanStage"), n = el("xScanNote"); if (b) b.textContent = s; if (n) n.textContent = note || ""; };
+  const restore = () => { clearInterval(timer); const bx = el("xScanBox"); if (!bx) return; bx.innerHTML = was; const sb = el("xScan"); if (sb) sb.onclick = () => scanReceipt(eventId, restrict, { desc: el("xDesc").value.trim(), paidBy: el("xPayer").value }, groupId); };
+  if (box) {
+    box.innerHTML = `<div class="scan-prog"><img id="xScanThumb" alt="" hidden><div style="flex:1;min-width:0"><b id="xScanStage">Preparing the photo…</b><span class="muted sm" id="xScanNote">About 10 seconds in all.</span></div><button type="button" class="btn small" id="xScanCancel">Cancel</button></div>`;
+    el("xScanCancel").onclick = () => { cancelled = true; fz.add("receipt: cancelled during " + stage); fz.save(); restore(); };
+    timer = setInterval(() => { const n = el("xScanNote"), s = Math.round((Date.now() - t0) / 1000); if (n && s >= 3) n.textContent = `${s}s` + (s > 30 ? " · slower than usual, still trying" : ""); }, 1000);
+  } else toast("Reading the receipt…", null, null, "thinking");
+  const limit = (pr, ms, what) => Promise.race([pr, new Promise((_, no) => setTimeout(() => no(new Error(what)), ms))]);
   try {
-    const image = await compressImage(f, 2000, 0.85);
-    const thumb = await compressImage(f, 1000, 0.72);   // kept on the expense for reference
-    pickerMark(null); fz.add("receipt sent to be read"); fz.save();
-    const res = await requestViaFirestore("receiptRequests", { image });
+    setStage("Preparing the photo…", "About 10 seconds in all.");
+    const image = await limit(compressImage(f, 2000, 0.85), 25000, "the photo took too long to prepare");
+    const thumb = await limit(compressImage(image, 1000, 0.72), 15000, "the photo took too long to prepare");   // kept on the expense; made from the prepared copy, not a second full-size decode
+    if (cancelled) return;
+    const im = el("xScanThumb"); if (im) { im.src = thumb; im.hidden = false; }
+    pickerMark(null); setStage("Sending it to Dot…");
+    const res = await requestViaFirestore("receiptRequests", { image }, 90000, null, () => { if (!cancelled) setStage("Dot is reading the receipt…"); });
+    if (cancelled) return;
+    fz.add("receipt: read " + ((res.data && res.data.items) || []).length + " lines in " + Math.round((Date.now() - t0) / 1000) + "s"); fz.save(); clearInterval(timer);
     itemizeDialog(eventId, restrict, seed, res.data || {}, thumb, groupId);
-  } catch (e) { toast("Couldn't read that receipt: " + e.message); }
+  } catch (e) {
+    fz.add("receipt: failed during " + stage + ": " + e.message); fz.save(); if (cancelled) return;
+    restore();
+    const bx = el("xScanBox"); if (bx) { const n = document.createElement("p"); n.className = "muted sm oops"; n.style.marginTop = "6px"; n.textContent = "Couldn't read that receipt: " + String(e.message || "").replace(/\.+$/, "") + ". Try again, or type the amount above."; bx.appendChild(n); }
+    else toast("Couldn't read that receipt: " + e.message);
+  }
 }
 const toCents = v => Math.max(0, Math.round((Number(v) || 0) * 100));
 // Each item's cost splits evenly among the people on it; tax and tip follow
