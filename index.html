@@ -20,10 +20,10 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Instrument+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@500;600&family=Fraunces:opsz,wght@9..144,500;9..144,600&family=DM+Serif+Display&family=Syne:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Unbounded:wght@600;700&family=Pacifico&family=Caprasimo&family=Righteous&family=Bungee&family=VT323&display=swap" media="print" onload="this.media='all'"><noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Instrument+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@500;600&family=Fraunces:opsz,wght@9..144,500;9..144,600&family=DM+Serif+Display&family=Syne:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Unbounded:wght@600;700&family=Pacifico&family=Caprasimo&family=Righteous&family=Bungee&family=VT323&display=swap"></noscript>
 <style>
 /* Painted before any file has downloaded. When iOS kills the page (memory) and it reloads, or on a slow start,
-   this is what shows instead of a blank green screen: the intro's gradient with a still Dot. */
+   this is what shows: the intro's first frame (the logo on its gradient), which the intro then animates from. */
 body{margin:0;background:#BFE7C6}
 .splash{position:fixed;inset:0;display:grid;place-content:center;justify-items:center;background:linear-gradient(160deg,#BFE7C6,#7CC79B 55%,#1F5A3A)}
-.boot-dot{width:112px;height:112px}
+.boot-mark{width:calc(min(440px, 92vw) * .67);height:auto;display:block;transform:translateY(2px)}
 </style>
 <script>
 // Load the app at the version named in version.json, fetched fresh every open (the page itself may sit in a
@@ -40,7 +40,10 @@ body{margin:0;background:#BFE7C6}
     var go = false, scripts = function () { if (go) return; go = true;
       var b = document.createElement("script"); b.src = "./blip.js?v=" + v; b.async = false; document.head.appendChild(b);
       var a = document.createElement("script"); a.type = "module"; a.src = "./app.js?v=" + v; a.async = false; document.head.appendChild(a); };
-    var l = document.createElement("link"); l.rel = "stylesheet"; l.href = "./styles.css?v=" + v; l.onload = scripts; l.onerror = scripts; document.head.appendChild(l);
+    // The stylesheet must not block the first paint (the inline logo above is styled inline), so it loads as a
+    // print sheet and switches to the screen once it has arrived; the scripts follow it.
+    var l = document.createElement("link"); l.rel = "stylesheet"; l.href = "./styles.css?v=" + v; l.media = "print";
+    l.onload = function () { l.media = "all"; scripts(); }; l.onerror = scripts; document.head.appendChild(l);
     setTimeout(scripts, 3000);   // styles first so nothing shows unstyled, but never wait on them forever
   }
   var timer = setTimeout(function () { start(known); }, 1500);
@@ -54,7 +57,7 @@ body{margin:0;background:#BFE7C6}
 </script>
 </head>
 <body>
-<div id="app"><div class="splash"><svg class="boot-dot" viewBox="0 0 100 100" aria-hidden="true"><path d="M50 9c25 0 42 17 42 42S75 92 50 92 8 76 8 51 25 9 50 9z" fill="#FFC145"/><ellipse cx="36" cy="46" rx="4.6" ry="7.2" fill="#2A2019"/><ellipse cx="64" cy="46" rx="4.6" ry="7.2" fill="#2A2019"/><circle cx="37.5" cy="43" r="1.7" fill="#fff"/><circle cx="65.5" cy="43" r="1.7" fill="#fff"/><circle cx="25" cy="60" r="5.5" fill="#FF6B57" opacity=".55"/><circle cx="75" cy="60" r="5.5" fill="#FF6B57" opacity=".55"/><path d="M41 63q9 8 18 0" stroke="#2A2019" stroke-width="3.2" fill="none" stroke-linecap="round"/></svg></div></div>
+<div id="app"><div class="splash"><svg class="boot-mark" viewBox="0 -950 4300 1240" aria-label="Friendly" role="img"><g transform="scale(1,-1)"><path fill="#2A2019" d="M70 0V660H213V0ZM138 247V365H518V247ZM138 537V660H555V537ZM601 0V257V525H721V341H739Q746 410 765.5 453Q785 496 819 516.5Q853 537 903 537Q913 537 924.5 536Q936 535 951 531L945 378Q928 385 910 388Q892 391 878 391Q840 391 812 373Q784 355 767.5 320.5Q751 286 745 237V0ZM999 0V525H1143V0ZM1071 600Q1029 600 1006.5 617.5Q984 635 984 669Q984 704 1006.5 721.5Q1029 739 1071 739Q1114 739 1136.5 721.5Q1159 704 1159 669Q1159 635 1136.5 617.5Q1114 600 1071 600ZM1483 -14Q1417 -14 1367 4.5Q1317 23 1282 57.5Q1247 92 1229 141.5Q1211 191 1211 253Q1211 315 1228.5 367Q1246 419 1279.5 458Q1313 497 1362 518Q1411 539 1473 539Q1534 539 1580.5 519Q1627 499 1658 460Q1689 421 1703.5 365Q1718 309 1713 236L1304 233V312L1627 315L1580 274Q1586 327 1573 360.5Q1560 394 1533.5 410.5Q1507 427 1474 427Q1436 427 1408 406.5Q1380 386 1364.5 348Q1349 310 1349 256Q1349 172 1385.5 132Q1422 92 1483 92Q1511 92 1530.5 99.5Q1550 107 1562.5 119Q1575 131 1582 146.5Q1589 162 1593 178L1719 153Q1712 116 1695 85.5Q1678 55 1649 33Q1620 11 1579.5 -1.5Q1539 -14 1483 -14ZM1784 0V314V525H1902L1901 360H1919Q1932 420 1955.5 460Q1979 500 2015.5 519.5Q2052 539 2103 539Q2193 539 2240 475.5Q2287 412 2287 278V0H2143V262Q2143 343 2119 380.5Q2095 418 2049 418Q2009 418 1982.5 393.5Q1956 369 1942 326.5Q1928 284 1928 231V0ZM2567 -14Q2502 -14 2453.5 19.5Q2405 53 2378 115Q2351 177 2351 264Q2351 345 2375 406.5Q2399 468 2445.5 503Q2492 538 2561 538Q2611 538 2646 518.5Q2681 499 2703.5 462Q2726 425 2739 371H2760Q2754 404 2748.5 435.5Q2743 467 2739.5 495Q2736 523 2736 544V712H2881V250V0H2760L2761 154H2742Q2731 97 2708 60Q2685 23 2650 4.5Q2615 -14 2567 -14ZM2616 104Q2647 104 2670 117.5Q2693 131 2707.5 153.5Q2722 176 2729.5 202.5Q2737 229 2737 254V271Q2737 291 2731.5 312Q2726 333 2716 352.5Q2706 372 2691 387.5Q2676 403 2656.5 412Q2637 421 2613 421Q2578 421 2553 401Q2528 381 2514.5 345Q2501 309 2501 262Q2501 215 2515 179Q2529 143 2555 123.5Q2581 104 2616 104ZM3409 -178Q3370 -178 3329 -171Q3288 -164 3252 -149Q3216 -134 3190 -111L3230 15Q3262 -18 3309.5 -34.5Q3357 -51 3403 -51Q3456 -51 3491.5 -29.5Q3527 -8 3545 36Q3563 80 3566 146L3571 238H3551Q3542 171 3519.5 128.5Q3497 86 3462 66.5Q3427 47 3381 47Q3323 47 3284.5 76Q3246 105 3226.5 162.5Q3207 220 3207 306V525H3351V341Q3351 248 3372 207Q3393 166 3436 166Q3459 166 3478 178.5Q3497 191 3510 215Q3523 239 3530.5 274Q3538 309 3538 353V525H3682V140Q3682 79 3671 28.5Q3660 -22 3638.5 -60.5Q3617 -99 3584.5 -125.5Q3552 -152 3508.5 -165Q3465 -178 3409 -178Z"/><path fill="#FF6B57" d="M3029.5 -6.8 2918.1 696.4 3058.3 718.6 3169.7 15.4Z"/></g><circle cx="4047" cy="-830" r="167" fill="#FFC145"/></svg></div></div>
 <div id="toast" role="status"></div>
 <!-- ?v= is bumped with the service-worker CACHE version on every deploy so the
      CDN (10-minute cache) can never pair a new index.html with an old script. -->

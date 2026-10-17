@@ -991,7 +991,10 @@ const fz = { log: [], tick: Date.now(), stalled: false,
 // comes up); the app reloads it at once. Such a reload boots within a second or two of the dead page's last
 // heartbeat, while a force-quit and relaunch takes far longer, so the heartbeat age tells the two apart.
 let KILLED_RELOAD = false, killedAfterS = 0;
-try { const prev = localStorage.getItem(FZ_KEY); if (prev) { localStorage.setItem("friendlyFreezePrev", prev); const p = JSON.parse(prev); const last = String((p.log || []).slice(-1)[0] || ""); killedAfterS = Math.round((Date.now() - (p.hb || 0)) / 1000); KILLED_RELOAD = !!(p.hb && killedAfterS < 8 && !/ (app hidden|page closed)$/.test(last)); } } catch {}
+// The native app stamps window.__killedReloadAt on a reload it made after iOS killed the page (PageGuard in the
+// iPhone app, from the build after 1.0.3); older builds are recognised from the heartbeat age below.
+if (typeof window.__killedReloadAt === "number" && Date.now() - window.__killedReloadAt < 60000) KILLED_RELOAD = true;
+try { const prev = localStorage.getItem(FZ_KEY); if (prev) { localStorage.setItem("friendlyFreezePrev", prev); const p = JSON.parse(prev); const last = String((p.log || []).slice(-1)[0] || ""); killedAfterS = Math.round((Date.now() - (p.hb || 0)) / 1000); KILLED_RELOAD = KILLED_RELOAD || !!(p.hb && killedAfterS < 8 && !/ (app hidden|page closed)$/.test(last)); } } catch {}
 fz.add((KILLED_RELOAD ? "boot after iOS killed the page " : "boot ") + (location.hash || "#/").slice(0, 60)); fz.save();
 setInterval(() => { const now = Date.now(), gap = now - fz.tick; fz.tick = now; if (gap > 3000 && gap < 90000 && !document.hidden) { fz.stalled = true; fz.add(`STALL ${Math.round(gap / 100) / 10}s on ${location.hash || "#/"}`); } fz.save(); }, 1000);
 document.addEventListener("visibilitychange", () => { fz.tick = Date.now(); fz.add("app " + document.visibilityState); fz.save(); });
@@ -1082,6 +1085,8 @@ function renderNow() {
   const root = el("app");
   // The intro runs its own course (logo, Dot forms, a beat of rest) and then always gets out of the way.
   // It never waits on data: if the account hasn't loaded yet, the app appears with placeholders instead.
+  // A page iOS killed comes straight back to where it was; the intro is for a real start.
+  if (KILLED_RELOAD) S._introOver = true;
   if (!S._introOver && Date.now() - BOOT_AT < SPLASH_MIN) {
     if (!splashTimer) splashTimer = setTimeout(() => { splashTimer = null; render(); }, SPLASH_MIN - (Date.now() - BOOT_AT) + 20);
     mountSplash(root, "Getting everyone here…"); return; }
