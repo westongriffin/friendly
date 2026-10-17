@@ -9,18 +9,67 @@ import {
   verifyPasswordResetCode, confirmPasswordReset
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
-  getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, terminate, clearIndexedDbPersistence, doc, getDoc, setDoc, updateDoc, deleteDoc, collection,
+  getFirestore, initializeFirestore, persistentLocalCache, persistentSingleTabManager, terminate, clearIndexedDbPersistence, doc, getDoc, setDoc, updateDoc, deleteDoc, collection,
   query, where, onSnapshot, addDoc, arrayUnion, arrayRemove, deleteField, orderBy, limit, getDocs
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import { firebaseConfig, mapsKey, adminUids, vapidPublicKey, giphyKey } from "./firebase-config.js";
 import { THEMES, themeOf, applyTheme, startParticles, DEFAULT_THEME, CUSTOM_FONTS, CUSTOM_PARTICLES, makeCustomTheme } from "./themes.js";
 
 const APP_V = (() => { try { return new URL(import.meta.url).searchParams.get("v") || "dev"; } catch { return "?"; } })();
+const WORKER_SRC = `const U=HANGURL;let last=Date.now(),vis=true,steps=[],uid="",v="",route="",stalled=false,hungAt=0,strikes=0,dirty=false,lastFlush=0,db=null;
+const open=()=>new Promise((res,rej)=>{const r=indexedDB.open("friendlyDiag",1);r.onupgradeneeded=()=>r.result.createObjectStore("kv");r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});
+const tx=(mode,fn)=>new Promise((res,rej)=>{if(!db)return res();try{const t=db.transaction("kv",mode);fn(t.objectStore("kv"));t.oncomplete=()=>res();t.onerror=()=>rej(t.error);t.onabort=()=>rej(t.error);}catch(e){rej(e);}});
+function flush(){dirty=false;lastFlush=Date.now();tx("readwrite",s=>{s.put({hb:last,log:steps.slice(-50),route,v,stalled},"__trace");}).catch(()=>{});}
+(async()=>{try{db=await open();}catch(e){}
+  const kv={};let trace=null,ct=null;
+  try{await tx("readonly",s=>{const r=s.openCursor();r.onsuccess=()=>{const c=r.result;if(!c)return;if(c.key==="__trace")trace=c.value;else if(c.key==="__ct")ct=c.value;else kv[c.key]=c.value;c.continue();};});}catch(e){}
+  postMessage({prev:{kv,trace,ct,ok:!!db}});
+  try{await tx("readwrite",s=>{s.delete("__ct");});}catch(e){}
+  flush();
+  setInterval(()=>{if(dirty||Date.now()-lastFlush>5000)flush();},2000);
+})();
+onmessage=e=>{const d=e.data||{};last=Date.now();strikes=0;
+  if(d.step){steps.push(d.step);if(steps.length>60)steps.shift();flush();}
+  if(d.uid!==undefined)uid=d.uid;if(d.v)v=d.v;if(typeof d.vis==="boolean")vis=d.vis;if(d.route!==undefined&&d.route!==route){route=d.route;dirty=true;}if(d.stalled)stalled=true;
+  if(d.kv){const k=d.kv[0],val=d.kv[1];tx("readwrite",s=>{val===null?s.delete(k):s.put(val,k);}).catch(()=>{});}
+  if(d.ct!==undefined)tx("readwrite",s=>{d.ct===null?s.delete("__ct"):s.put(d.ct,"__ct");}).catch(()=>{});
+  if(hungAt){fetch(U,{method:"POST",body:JSON.stringify({kind:"resumed",uid,v,hungFor:Math.round((Date.now()-hungAt)/1000),steps:steps.slice(-10)})}).catch(()=>{});hungAt=0;}};
+setInterval(()=>{if(!vis||hungAt)return;const gap=Date.now()-last;if(gap>6000){if(++strikes<2)return;hungAt=last;fetch(U,{method:"POST",body:JSON.stringify({kind:"hung",uid,v,gapS:Math.round(gap/1000),steps:steps.slice(-10)})}).catch(()=>{});}else strikes=0;},1000);`;
+// ---- Device storage and the watchdog thread ----
+// On iPhone, writing localStorage is a blocking call into WebKit's storage process, and that call can deadlock
+// against a Firestore database transaction that is waiting on this same page: the page freezes for good (taps
+// dead, the system swipe-back still works). So after startup the page never writes web storage. Everything the
+// app keeps on the device goes through LS: reads come from a memory copy; writes update the copy at once and are
+// handed to a worker thread, which keeps them in its own small IndexedDB. The same worker is the watchdog: the page
+// pings it every second, and if the page stops answering for six seconds while on screen the worker reports that
+// to the server itself (a page iOS kills takes the worker with it, so such a report means a hang, not a kill).
+const HANG_URL = "https://us-central1-friendly-6992a.cloudfunctions.net/hang";
+let dog = null, prevTrace = null, prevCt = null, bootDiagResolve = null;
+const bootDiag = new Promise(r => { bootDiagResolve = r; });
+function dogSay(m) { try { if (dog) dog.postMessage(m); } catch {} }
+const LS = { m: new Map(), touched: new Set(), ok: false,
+  get(k) { return this.m.has(k) ? this.m.get(k) : null; },
+  set(k, v) { v = String(v); this.m.set(k, v); this.touched.add(k); dogSay({ kv: [k, v] }); },
+  remove(k) { this.m.delete(k); this.touched.add(k); dogSay({ kv: [k, null] }); } };
+// First start on this version: what the old code kept in localStorage moves over (one read, at startup, is safe).
+let migrateLS = false;
+try { migrateLS = localStorage.getItem("friendlyLS") !== "1"; if (migrateLS) { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k !== "friendlyV") LS.m.set(k, localStorage.getItem(k)); } localStorage.setItem("friendlyLS", "1"); } } catch {}
+try {
+  dog = new Worker(URL.createObjectURL(new Blob([WORKER_SRC.replace("HANGURL", JSON.stringify(HANG_URL))], { type: "text/javascript" })));
+  dog.onmessage = e => { const d = e.data || {}; if (!d.prev) return;
+    LS.ok = !!d.prev.ok;
+    for (const [k, v] of Object.entries(d.prev.kv || {})) if (!LS.touched.has(k)) LS.m.set(k, v);
+    if (migrateLS && LS.ok) for (const [k, v] of LS.m) dogSay({ kv: [k, v] });
+    prevTrace = d.prev.trace || null; prevCt = d.prev.ct || null; bootDiagResolve(true); };
+  dog.postMessage({ vis: document.visibilityState === "visible" });
+} catch (e) { console.warn("storage worker unavailable:", e.message); }
+setTimeout(() => bootDiagResolve(false), 2500);
+
 const fb = initializeApp(firebaseConfig);
 const auth = getAuth(fb);
 // Keep a copy of the account's data on the device, so the app opens from it instantly and
 // freshens up in the background, instead of waiting on the network every launch.
-let db; try { db = initializeFirestore(fb, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) }); } catch (e) { console.warn("device cache unavailable:", e.message); db = getFirestore(fb); }
+let db; try { db = initializeFirestore(fb, { localCache: persistentLocalCache({ tabManager: persistentSingleTabManager(undefined) }) }); } catch (e) { console.warn("device cache unavailable:", e.message); db = getFirestore(fb); }
 // Firestore falls back to a memory-only cache (quietly, with a warning) when the device's database can't be
 // opened; a write made in that state lives only until the page goes away. Keep the warning for the reports.
 window.__cacheNote = ""; try { onLog(l => { const m = String((l && l.message) || ""); if (/memory cache|persistence|IndexedDB|indexeddb/i.test(m) && !window.__cacheNote) window.__cacheNote = m.slice(0, 160); }, { level: "warn" }); } catch {}
@@ -31,15 +80,15 @@ window.__cacheNote = ""; try { onLog(l => { const m = String((l && l.message) ||
 const WIPE_KEY = "friendlyWipePending";
 const within = (p, ms) => Promise.race([Promise.resolve(p).catch(() => {}), new Promise(r => setTimeout(r, ms))]);
 async function wipeLocalData() {
-  try { localStorage.setItem(WIPE_KEY, "1"); } catch {}
+  try { LS.set(WIPE_KEY, "1"); } catch {}
   const hard = setTimeout(() => location.reload(), 5000);
   let done = false;
   await within(terminate(db), 2000);
   await within(clearIndexedDbPersistence(db).then(() => { done = true; }), 2500);
-  if (done) try { localStorage.removeItem(WIPE_KEY); } catch {}
+  if (done) try { LS.remove(WIPE_KEY); } catch {}
   clearTimeout(hard); location.reload();
 }
-try { if (localStorage.getItem(WIPE_KEY)) clearIndexedDbPersistence(db).then(() => localStorage.removeItem(WIPE_KEY)).catch(() => {}); } catch {}
+bootDiag.then(() => { try { if (LS.get(WIPE_KEY)) clearIndexedDbPersistence(db).then(() => LS.remove(WIPE_KEY)).catch(() => {}); } catch {} });
 
 
 
@@ -47,6 +96,7 @@ try { if (localStorage.getItem(WIPE_KEY)) clearIndexedDbPersistence(db).then(() 
 // this degrades to web behavior when window.Capacitor is absent.
 const CAP = window.Capacitor || null;
 const NATIVE = !!(CAP && CAP.isNativePlatform && CAP.isNativePlatform());
+dogSay({ v: APP_V + " / " + (NATIVE ? "native" : "web") });
 
 // Public demo (wes-griffin.com "Try the demo" and ?demo=1): a dedicated
 // sandbox account, seeded and nightly-reset server-side (functions/index.js).
@@ -312,7 +362,7 @@ function showLogoTip(custom, sug) {
   if (!custom && !sug && dotCurrent) sug = dotCurrent;
   const key = ["event", "groups", "money"].includes(S.route.name) ? S.route.name : "home";
   let tip = custom || (sug && sug.text);
-  if (!tip) { const list = LOGO_TIPS[key]; let i = 0; try { i = (parseInt(localStorage.getItem("friendlyTip:" + key) || "0", 10) || 0); localStorage.setItem("friendlyTip:" + key, String(i + 1)); } catch {} tip = list[i % list.length]; }
+  if (!tip) { const list = LOGO_TIPS[key]; let i = 0; try { i = (parseInt(LS.get("friendlyTip:" + key) || "0", 10) || 0); LS.set("friendlyTip:" + key, String(i + 1)); } catch {} tip = list[i % list.length]; }
   const r = dotEl.getBoundingClientRect();
   const wrap = document.createElement("div"); wrap.id = "logoTip";
   wrap.style.left = r.left + "px"; wrap.style.top = r.top + "px";
@@ -341,8 +391,8 @@ function showLogoTip(custom, sug) {
 // Loud kinds may speak unprompted (at most one a day); quiet kinds only put a ring on the dot and wait for a tap.
 // Every suggestion shows once per subject; a kind dismissed twice is dropped for that device.
 const DOT_KINDS = { invite: "loud", address: "loud", nudge: "loud", venmo: "loud", request: "quiet", bring: "quiet", calendar: "quiet", birthday: "quiet", cover: "quiet" };
-function dotStore(k) { try { return JSON.parse(localStorage.getItem(k) || "{}"); } catch { return {}; } }
-function dotSave(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+function dotStore(k) { try { return JSON.parse(LS.get(k) || "{}"); } catch { return {}; } }
+function dotSave(k, v) { try { LS.set(k, JSON.stringify(v)); } catch {} }
 function dotMarkSeen(sug, dismissed) {
   const seen = dotStore("friendlyDotSeen"); seen[sug.id] = Date.now(); dotSave("friendlyDotSeen", seen);
   if (dismissed) { const m = dotStore("friendlyDotMute"); m[sug.kind] = (m[sug.kind] || 0) + 1; dotSave("friendlyDotMute", m); }
@@ -390,9 +440,9 @@ function dotWatch() {
   d.classList.toggle("has-tip", !!sug);
   if (!sug) return;
   if (sug.id !== dotLastId) { dotLastId = sug.id; d.classList.add("hop"); setTimeout(() => d.classList.remove("hop"), 1400); }
-  let loudDay = ""; try { loudDay = localStorage.getItem("friendlyDotLoudDay") || ""; } catch {}
+  let loudDay = ""; try { loudDay = LS.get("friendlyDotLoudDay") || ""; } catch {}
   if (sug.tier === "loud" && loudDay !== todayStr() && !document.getElementById("logoTip") && !dotIntroPending) {
-    try { localStorage.setItem("friendlyDotLoudDay", todayStr()); } catch {}
+    try { LS.set("friendlyDotLoudDay", todayStr()); } catch {}
     setTimeout(() => { if (dotCurrent && dotCurrent.id === sug.id) showLogoTip(null, sug); }, 1500);
   }
 }
@@ -408,11 +458,11 @@ const TOUR = [
   { target: "#brandDot", title: "One more thing", text: "Tap my little dot up here anytime for a tip.", ok: "Let's go", tab: "#/" }
 ];
 let tourStep = -1;
-function tourDone() { try { if (localStorage.getItem("friendlyTourDone")) return true; } catch {} return !!(S.profile && S.profile.tourDone); }
+function tourDone() { try { if (LS.get("friendlyTourDone")) return true; } catch {} return !!(S.profile && S.profile.tourDone); }
 function wantsTour() { const c = (S.profile && S.profile.createdAt) || 0; return !tourDone() && c && Date.now() - c < 14 * 864e5; }
 function endTour() {
   tourStep = -1; const o = el("tourLayer"); if (o) o.remove(); window.removeEventListener("resize", placeTour); document.querySelectorAll(".tour-peek").forEach(n => n.classList.remove("tour-peek"));
-  try { localStorage.setItem("friendlyTourDone", "1"); localStorage.setItem("friendlyDotHello", "1"); } catch {}
+  try { LS.set("friendlyTourDone", "1"); LS.set("friendlyDotHello", "1"); } catch {}
   if (S.profile && !S.profile.tourDone) updateDoc(doc(db, "users", myUid()), { tourDone: true }).catch(() => {});
 }
 function startTour() { if (!window.Blip) return; if (location.hash !== "#/" && location.hash !== "") go("#/"); tourStep = 0; setTimeout(showTourStep, 350); }
@@ -448,9 +498,9 @@ function dotIntro() {
   if (!window.Blip || !el("brandDot")) return;
   if (tourStep >= 0) return;
   if (wantsTour()) { dotHopped = true; tourStep = 0; setTimeout(() => { if (S.route.name === "home" && tourStep === 0) showTourStep(); }, 900); return; }
-  let seen = false; try { seen = !!localStorage.getItem("friendlyDotHello"); } catch {}
+  let seen = false; try { seen = !!LS.get("friendlyDotHello"); } catch {}
   if (!seen) {
-    try { localStorage.setItem("friendlyDotHello", "1"); } catch {}
+    try { LS.set("friendlyDotHello", "1"); } catch {}
     dotIntroPending = true;
     setTimeout(() => { if (S.route.name === "home" && el("brandDot")) showLogoTip("Hi, I'm Dot. Tap me down in the corner and I'll plan things for you. Tap me up here for a tip."); setTimeout(() => { dotIntroPending = false; dotWatch(); }, 8000); }, 1600);
     dotHopped = true; return;
@@ -605,7 +655,7 @@ function imagenViaFirestore(prompt) {
 }
 // `what` names the flow (receipt, wall photo, ...) for the freeze trace, and a marker stays in storage while the
 // camera or photo picker is open: iOS can kill the page behind the camera, and the reload then picks the flow back up.
-const pickerMark = (what, stage) => { try { if (what) localStorage.setItem("friendlyPicker", JSON.stringify({ what, stage, route: location.hash, t: Date.now() })); else localStorage.removeItem("friendlyPicker"); } catch {} };
+const pickerMark = (what, stage) => { try { if (what) LS.set("friendlyPicker", JSON.stringify({ what, stage, route: location.hash, t: Date.now() })); else LS.remove("friendlyPicker"); } catch {} };
 // The input lives in the page (hidden) while the picker is up: a detached one can be garbage-collected on iOS
 // while the person is still choosing, and its photo then never arrives.
 function pickFile(accept = "image/*", what = "photo") { return new Promise(res => { const i = document.createElement("input"); i.type = "file"; i.accept = accept; i.style.cssText = "position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0";
@@ -650,7 +700,7 @@ function upcomingBirthdays(withinDays = 60, onlyGroup = null) {
 }
 function planBirthday(b) { resetCompose(); compose.date = b.date; compose.groupId = b.groupId; compose.title = first(b.name) + "'s birthday"; compose.emoji = "🎂"; go("#/new"); toast("Pick a theme and invite the crew 🎂"); }
 function birthdayCard() {
-  const list = upcomingBirthdays(30); let dismissed = []; try { dismissed = JSON.parse(localStorage.getItem("friendlyBdayDismissed") || "[]"); } catch {}
+  const list = upcomingBirthdays(30); let dismissed = []; try { dismissed = JSON.parse(LS.get("friendlyBdayDismissed") || "[]"); } catch {}
   const b = list.find(x => !dismissed.includes(x.uid + ":" + x.date)); if (!b) return "";
   return `<div class="card notif-card"><span class="notif-ico dot-ico">${dotHat(52)}</span><div style="flex:1"><b>${esc(first(b.name))}'s birthday is ${b.days === 0 ? "today" : b.days === 1 ? "tomorrow" : "in " + b.days + " days"}</b><div class="muted sm">${esc(fmtDay({ date: b.date }))}. A month out is the sweet spot to plan something.</div></div><span class="btnrow" style="gap:6px"><button class="btn primary small" data-bplan="${b.uid}">Plan something</button><button class="btn ghost small" data-bdismiss="${b.uid}:${b.date}">Later</button></span></div>`;
 }
@@ -710,7 +760,7 @@ const BOOT_AT = Date.now(), SPLASH_MIN = 6000, SPLASH_MAX = 6000; let splashTime
 // Dot's intro plays on every fresh launch (the app was closed), and when the app comes back from the background
 // after 10 minutes or more; a quicker switch back goes straight in.
 const AWAY_FOR_INTRO = 10 * 60 * 1000;
-const markSeen = () => { try { localStorage.setItem("friendlyLastSeen", String(Date.now())); } catch {} };
+const markSeen = () => { try { LS.set("friendlyLastSeen", String(Date.now())); } catch {} };
 markSeen(); setInterval(() => { if (!document.hidden) markSeen(); }, 30000);
 window.addEventListener("pagehide", markSeen);
 const S = {
@@ -784,7 +834,7 @@ window.go = path => { location.hash = path; };
 // ---------- auth ----------
 onAuthStateChanged(auth, async u => {
   dogSay({ uid: (u && u.uid) || "" });
-  if (u) { try { localStorage.setItem("friendlyKnown", "1"); } catch {} }
+  if (u) { try { LS.set("friendlyKnown", "1"); } catch {} }
   S.subs.forEach(fn => fn()); S.subs = [];
   S.user = u;
   if (!u) {
@@ -799,7 +849,7 @@ onAuthStateChanged(auth, async u => {
   getDoc(uref).then(snap => { if (!snap.exists()) return setDoc(uref, { name: u.displayName || first(u.email), email: u.email, venmo: "", phone: "", createdAt: Date.now() }); }).catch(() => {});
   // Open on Events. Only top-level tabs are redirected; a link to an event,
   // group, expense, or invite still goes where it points.
-  let pendingJoin = ""; try { pendingJoin = localStorage.getItem("friendlyJoin") || ""; localStorage.removeItem("friendlyJoin"); } catch {}
+  let pendingJoin = ""; try { pendingJoin = LS.get("friendlyJoin") || ""; LS.remove("friendlyJoin"); } catch {}
   if (pendingJoin) location.hash = "#/join/" + pendingJoin;
   else if (/^(#\/?|#\/(money|groups|activity|photos|search|profile))$/.test(location.hash)) location.hash = "#/";
   if (NATIVE) registerPush(u.uid);
@@ -1014,49 +1064,41 @@ function withInputKept(fn) {
 // heartbeat, saved every second. When the page's code stalls 3+ seconds while on screen, that's logged; the next
 // sign-in reports any session that stalled, so a freeze on a phone tells us what was running.
 const FZ_KEY = "friendlyFreezeTrace";
-// A watchdog on its own thread. The page tells it every second that it's alive, and each step it takes; if the
-// page's main thread stops answering for six seconds while on screen, the watchdog reports to the server by itself,
-// and again when the page comes back. iOS killing the page takes the watchdog with it, so a report here means a
-// hang, not a kill. Reports carry no personal data beyond the account id and the step labels.
-const HANG_URL = "https://us-central1-friendly-6992a.cloudfunctions.net/hang";
-let dog = null;
-function dogSay(m) { try { if (dog) dog.postMessage(m); } catch {} }
-try {
-  const src = `let last=Date.now(),vis=true,steps=[],uid="",v="",hungAt=0,strikes=0;const U=${JSON.stringify(HANG_URL)};
-onmessage=e=>{const d=e.data||{};if(d.step){steps.push(d.step);if(steps.length>10)steps.shift();}if(d.uid)uid=d.uid;if(d.v)v=d.v;if(typeof d.vis==="boolean")vis=d.vis;last=Date.now();strikes=0;
-if(hungAt){fetch(U,{method:"POST",body:JSON.stringify({kind:"resumed",uid,v,hungFor:Math.round((Date.now()-hungAt)/1000),steps})}).catch(()=>{});hungAt=0;}};
-setInterval(()=>{if(!vis||hungAt)return;const gap=Date.now()-last;if(gap>6000){if(++strikes<2)return;hungAt=last;fetch(U,{method:"POST",body:JSON.stringify({kind:"hung",uid,v,gapS:Math.round(gap/1000),steps})}).catch(()=>{});}else strikes=0;},1000);`;
-  dog = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
-  dog.postMessage({ v: APP_V + " / " + (NATIVE ? "native" : "web"), vis: document.visibilityState === "visible" });
-} catch (e) { console.warn("watchdog unavailable:", e.message); }
+
 const deviceLine = () => { const m = /OS (\d+[_.]\d+(?:[_.]\d+)?)/.exec(navigator.userAgent || ""); return (m ? "iOS " + m[1].replace(/_/g, ".") : (navigator.userAgent || "").slice(0, 60)) + " · " + (window.screen ? screen.width + "x" + screen.height : ""); };
 const fz = { log: [], tick: Date.now(), stalled: false,
-  add(s) { this.log.push(new Date().toTimeString().slice(0, 8) + " " + s); if (this.log.length > 50) this.log.shift(); dogSay({ step: s }); },
-  save() { try { localStorage.setItem(FZ_KEY, JSON.stringify({ hb: Date.now(), stalled: this.stalled, log: this.log, v: APP_V + " / " + (nativeVersion || ""), route: location.hash })); } catch {} } };
+  add(s) { const line = new Date().toTimeString().slice(0, 8) + " " + s; this.log.push(line); if (this.log.length > 50) this.log.shift(); dogSay({ step: line }); },
+  save() { dogSay({ route: location.hash, stalled: this.stalled ? 1 : 0 }); } };
 // iOS kills the page to get memory back (in the background, or when a system screen like the contacts permission
 // comes up); the app reloads it at once. Telling that reload apart from a fresh launch: per-session storage lives
 // with the web view, so it survives a kill-and-reload and is empty after a force-quit and relaunch; a fresh launch
 // also always starts at the root with no screen address. The native app (from the build after 1.0.3) stamps
 // window.__killedReloadAt as well. A reload that boots within seconds of the dead page's last heartbeat is a kill.
-let KILLED_RELOAD = false, killedAfterS = 0, sameView = false;
+let KILLED_RELOAD = false, killedAfterS = 0, sameView = false, KILL_PICKER = null;
 try { sameView = sessionStorage.getItem("friendlyView") === "1"; sessionStorage.setItem("friendlyView", "1"); } catch {}
 if (typeof window.__killedReloadAt === "number" && Date.now() - window.__killedReloadAt < 60000) KILLED_RELOAD = true;
-try { const prev = localStorage.getItem(FZ_KEY); if (prev) { localStorage.setItem("friendlyFreezePrev", prev); const p = JSON.parse(prev); const last = String((p.log || []).slice(-1)[0] || ""); killedAfterS = Math.round((Date.now() - (p.hb || 0)) / 1000); const deepHash = !!location.hash && location.hash !== "#/"; if ((sameView || deepHash) && p.hb && killedAfterS < 8 && !/ (app hidden|page closed)$/.test(last)) KILLED_RELOAD = true; } } catch {}
+fz.add((KILLED_RELOAD ? "boot after iOS killed the page " : "boot ") + (location.hash || "#/").slice(0, 60)); fz.save();
 // The camera covers the page, so the page's last word before such a kill is "app hidden" (which otherwise means a
 // normal trip to the background): the picker marker tells the two apart. The flow resumes once signed in.
-let KILL_PICKER = null;
-try { const pk = JSON.parse(localStorage.getItem("friendlyPicker") || "null"); localStorage.removeItem("friendlyPicker");
-  if (pk && sameView) { const prev = JSON.parse(localStorage.getItem("friendlyFreezePrev") || "null"), log = (prev && prev.log) || [];
-    const i = log.map(s => / photo picker opened /.test(s)).lastIndexOf(true), age = Date.now() - (pk.t || 0);
-    const quiet = i >= 0 && log.slice(i + 1).every(s => / (app hidden|app visible|photo picked .*|redraw .*|STALL .*)$/.test(s));
-    if (quiet && age < (pk.stage === "picker open" ? 15 * 60000 : 45000)) { KILL_PICKER = pk; KILLED_RELOAD = true; } } } catch {}
-fz.add((KILLED_RELOAD ? (KILL_PICKER ? "boot after iOS killed the page under the camera " : "boot after iOS killed the page ") : "boot ") + (location.hash || "#/").slice(0, 60)); fz.save();
+bootDiag.then(() => {
+  try {
+    const p = prevTrace, log = (p && p.log) || [], last = String(log.slice(-1)[0] || "");
+    if (p && p.hb) { killedAfterS = Math.round((Date.now() - p.hb) / 1000); const deepHash = !!location.hash && location.hash !== "#/"; if ((sameView || deepHash) && killedAfterS < 10 && !/ (app hidden|page closed)$/.test(last)) KILLED_RELOAD = true; }
+    const pk = JSON.parse(LS.get("friendlyPicker") || "null"); LS.remove("friendlyPicker");
+    if (pk && sameView) {
+      const i = log.map(s => / photo picker opened /.test(s)).lastIndexOf(true), age = Date.now() - (pk.t || 0);
+      const quiet = i >= 0 && log.slice(i + 1).every(s => / (app hidden|app visible|photo picked .*|redraw .*|STALL .*)$/.test(s));
+      if (quiet && age < (pk.stage === "picker open" ? 15 * 60000 : 45000)) { KILL_PICKER = pk; KILLED_RELOAD = true; }
+    }
+    if (KILLED_RELOAD) { fz.add(KILL_PICKER ? "this is a reload after iOS killed the page under the camera" : "this is a reload after iOS killed the page"); if (S && S.user) S._introOver = true; }
+  } catch {}
+});
 setInterval(() => { const now = Date.now(), gap = now - fz.tick; fz.tick = now; if (gap > 3000 && gap < 90000 && !document.hidden) { fz.stalled = true; fz.add(`STALL ${Math.round(gap / 100) / 10}s on ${location.hash || "#/"}`); } fz.save(); dogSay({ beat: 1 }); }, 1000);
 document.addEventListener("visibilitychange", () => { fz.tick = Date.now(); fz.add("app " + document.visibilityState); fz.save(); dogSay({ vis: document.visibilityState === "visible" }); });
 window.addEventListener("hashchange", () => fz.add("go " + location.hash.slice(0, 60)));
 window.addEventListener("pagehide", () => { fz.add("page closed"); fz.save(); });
-function reportFreezeTrace() {
-  let tr = null; try { tr = JSON.parse(localStorage.getItem("friendlyFreezePrev") || "null"); localStorage.removeItem("friendlyFreezePrev"); } catch {}
+async function reportFreezeTrace() {
+  await bootDiag; const tr = prevTrace; prevTrace = null;
   // Report a session that stalled, or one that ended while on screen (its last step isn't going to the background
   // or closing): that's a force-quit during a hang, or a crash.
   const lastStep = String((tr && tr.log && tr.log[tr.log.length - 1]) || "");
@@ -1163,7 +1205,7 @@ function renderNow() {
   } else if (splashStop) { splashStop(); splashStop = null; }
   if (RESET_OOB) { renderResetPassword(root); return; }
   if (!S.ready) { if (!root.querySelector(".boot-skel")) root.innerHTML = loadingShell(); return; }
-  if (!S.user) { if (S.route.name === "event") { renderPreview(root, S.route.id); return; } if (S.route.name === "join") { try { localStorage.setItem("friendlyJoin", S.route.id); } catch {} } renderAuth(root); return; }
+  if (!S.user) { if (S.route.name === "event") { renderPreview(root, S.route.id); return; } if (S.route.name === "join") { try { LS.set("friendlyJoin", S.route.id); } catch {} } renderAuth(root); return; }
   if (!S.profile) { if (!root.querySelector(".boot-skel")) root.innerHTML = loadingShell(); return; }
   if (S.profile.onboarded === false) { root.innerHTML = onboardingBody(); wireOnboarding(); return; }
   const r = S.route;
@@ -1231,7 +1273,7 @@ function wireOnboarding() {
 
 // ---------- auth screen ----------
 // First time on this device: open on Create account. Anyone who has signed in here before gets Sign in.
-let authMode = (() => { try { return localStorage.getItem("friendlyKnown") ? "in" : "up"; } catch { return "in"; } })();
+let authMode = (() => { try { return LS.get("friendlyKnown") ? "in" : "up"; } catch { return "in"; } })();
 function renderAuth(root) {
   root.innerHTML = `
   <div class="auth-wrap">
@@ -1563,7 +1605,8 @@ function myEvents() {
 
 // ---------- HOME ----------
 let homeFilter = "all";
-let homeView = "cards"; try { homeView = localStorage.getItem("friendlyHomeView") || "cards"; } catch {} // "cards" | "calendar"
+let homeView = "cards"; try { homeView = LS.get("friendlyHomeView") || "cards"; } catch {} // "cards" | "calendar"
+bootDiag.then(() => { homeView = LS.get("friendlyHomeView") || homeView; if (LS.get("friendlyKnown")) authMode = "in"; });
 let calYM = null, calDay = null;   // month shown in the calendar, and a tapped day
 const fmtDay = ev => evDate(ev).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 const RSVP_LABEL = { going: "You're going", maybe: "Maybe", no: "Can't go", waitlist: "Waitlisted", pending: "Pending" };
@@ -1609,7 +1652,7 @@ function homeBody() {
     <button class="fchip ${homeFilter === "none" ? "on" : ""}" data-filter="none">Just friends</button>
   </div>` : "";
 
-  let hiddenToday = []; try { hiddenToday = JSON.parse(localStorage.getItem("friendlyTodayHidden") || "[]"); } catch {}
+  let hiddenToday = []; try { hiddenToday = JSON.parse(LS.get("friendlyTodayHidden") || "[]"); } catch {}
   const todayEvs = upcoming.filter(e => e.date === todayStr() && !hiddenToday.includes(e.id + "|" + e.date)).slice(0, 2);
   const todayCards = todayEvs.map(e => `<div class="card notif-card today-card" data-ev="${e.id}" role="button"><button type="button" class="today-x" data-hide-today="${e.id}|${e.date}" aria-label="Hide this">✕</button>${dotHat(56)}<div style="flex:1;min-width:0"><div class="eyebrow-sm">Today</div><b>${esc(e.title)}${e.time ? " · " + fmtTime(e.time) : ""}</b><div class="muted sm">${e.kind === "meeting" ? (e.invitedUids || []).filter(u => (e.rsvps || {})[u] === "going").length + " accepted" : goingCount(e) + " going"}${evStops(e).length ? " · " + evStops(e).length + " stops" : e.location ? " · " + esc(e.location) : ""}</div></div><span class="chev">›</span></div>`).join("");
   if ((S.profile.city || "").trim()) ensureCurated();
@@ -1658,17 +1701,17 @@ function wireHome() {
   if (el("homeTell")) el("homeTell").onclick = () => openPlanDialog("event", {});
   document.querySelectorAll("[data-filter]").forEach(b => b.onclick = () => { homeFilter = b.dataset.filter; calDay = null; render(); });
   document.querySelectorAll("[data-bplan]").forEach(b => b.onclick = () => { const x = upcomingBirthdays(400).find(y => y.uid === b.dataset.bplan); if (x) planBirthday(x); });
-  document.querySelectorAll("[data-bdismiss]").forEach(b => b.onclick = () => { try { const d = JSON.parse(localStorage.getItem("friendlyBdayDismissed") || "[]"); d.push(b.dataset.bdismiss); localStorage.setItem("friendlyBdayDismissed", JSON.stringify(d.slice(-40))); } catch {} render(); });
-  document.querySelectorAll("[data-hide-today]").forEach(b => b.onclick = e => { e.stopPropagation(); let h = []; try { h = JSON.parse(localStorage.getItem("friendlyTodayHidden") || "[]"); } catch {} h = [...h, b.dataset.hideToday].slice(-30); try { localStorage.setItem("friendlyTodayHidden", JSON.stringify(h)); } catch {} render(); });
+  document.querySelectorAll("[data-bdismiss]").forEach(b => b.onclick = () => { try { const d = JSON.parse(LS.get("friendlyBdayDismissed") || "[]"); d.push(b.dataset.bdismiss); LS.set("friendlyBdayDismissed", JSON.stringify(d.slice(-40))); } catch {} render(); });
+  document.querySelectorAll("[data-hide-today]").forEach(b => b.onclick = e => { e.stopPropagation(); let h = []; try { h = JSON.parse(LS.get("friendlyTodayHidden") || "[]"); } catch {} h = [...h, b.dataset.hideToday].slice(-30); try { LS.set("friendlyTodayHidden", JSON.stringify(h)); } catch {} render(); });
   if (el("pastToggle")) el("pastToggle").onclick = () => { S.pastOpen = !S.pastOpen; if (S.pastOpen) startPast(); render(); };
   if (homeView === "calendar") startPast();
-  if (el("viewToggle")) el("viewToggle").onclick = () => { homeView = homeView === "calendar" ? "cards" : "calendar"; try { localStorage.setItem("friendlyHomeView", homeView); } catch {} render(); };
+  if (el("viewToggle")) el("viewToggle").onclick = () => { homeView = homeView === "calendar" ? "cards" : "calendar"; try { LS.set("friendlyHomeView", homeView); } catch {} render(); };
   if (el("calPrev")) el("calPrev").onclick = () => { calYM = { y: calYM.m === 0 ? calYM.y - 1 : calYM.y, m: (calYM.m + 11) % 12 }; calDay = null; render(); };
   if (el("calNext")) el("calNext").onclick = () => { calYM = { y: calYM.m === 11 ? calYM.y + 1 : calYM.y, m: (calYM.m + 1) % 12 }; calDay = null; render(); };
   if (el("calClear")) el("calClear").onclick = () => { calDay = null; render(); };
   document.querySelectorAll("[data-calday]").forEach(c => c.onclick = () => { calDay = calDay === c.dataset.calday ? null : c.dataset.calday; render(); });
   if (el("pushOn")) el("pushOn").onclick = enableWebPush;
-  if (el("pushLater")) el("pushLater").onclick = () => { try { localStorage.setItem("friendlyPushDismissed", "1"); } catch {} render(); };
+  if (el("pushLater")) el("pushLater").onclick = () => { try { LS.set("friendlyPushDismissed", "1"); } catch {} render(); };
 }
 
 // ---------- GROUPS ----------
@@ -1806,12 +1849,12 @@ const ctTrace = {
   t0: 0, steps: [], hb: null, last: 0,
   start(where) { this.t0 = Date.now(); this.steps = []; this.step("open " + where); clearInterval(this.hb); this.hb = setInterval(() => this.save(), 1000); },
   step(s) { if (!this.t0) return; this.last = Date.now(); this.steps.push(s + " @" + ((this.last - this.t0) / 1000).toFixed(1) + "s"); if (this.steps.length > 60) this.steps.splice(1, 1); this.save(); },
-  save() { if (!this.t0) return; try { localStorage.setItem(CT_KEY, JSON.stringify({ t0: this.t0, hb: Date.now(), last: this.last, steps: this.steps, route: location.hash, v: APP_V + " / " + (nativeVersion || "") })); } catch {} },
-  end() { if (!this.t0) return; clearInterval(this.hb); this.hb = null; this.t0 = 0; try { localStorage.removeItem(CT_KEY); } catch {} }
+  save() { if (!this.t0) return; dogSay({ ct: { t0: this.t0, hb: Date.now(), last: this.last, steps: this.steps, route: location.hash, v: APP_V + " / " + (nativeVersion || "") } }); },
+  end() { if (!this.t0) return; clearInterval(this.hb); this.hb = null; this.t0 = 0; dogSay({ ct: null }); }
 };
 document.addEventListener("visibilitychange", () => ctTrace.step(document.visibilityState));
-function reportContactsTrace() {
-  let tr = null; try { tr = JSON.parse(localStorage.getItem(CT_KEY) || "null"); localStorage.removeItem(CT_KEY); } catch {}
+async function reportContactsTrace() {
+  await bootDiag; const tr = prevCt; prevCt = null;
   if (!tr || !myUid()) return;
   const alive = Math.round((tr.hb - tr.last) / 1000);
   // The page died while Add people was open and reloaded itself (the route survives a reload): put the person back
@@ -1997,7 +2040,7 @@ const groupInviteText = g => `Hey! I added you to our group "${g.name}" on Frien
 // after the first send that comes back.
 const INVITES_SHORTCUT_URL = "https://www.icloud.com/shortcuts/96d0a800f5d6409c9cec3fe35f4125d8";
 const AUTO_SEND = NATIVE && !IS_ANDROID && !!INVITES_SHORTCUT_URL;
-const autoSendReady = v => { try { if (v === undefined) return localStorage.getItem("friendlyAutoSend") === "1"; if (v) localStorage.setItem("friendlyAutoSend", "1"); else localStorage.removeItem("friendlyAutoSend"); } catch { return false; } };
+const autoSendReady = v => { try { if (v === undefined) return LS.get("friendlyAutoSend") === "1"; if (v) LS.set("friendlyAutoSend", "1"); else LS.remove("friendlyAutoSend"); } catch { return false; } };
 const shortcutRunUrl = (numbers, body) => "shortcuts://run-shortcut?name=" + encodeURIComponent("Friendly Invites") + "&input=text&text=" + encodeURIComponent(JSON.stringify({ m: body, p: numbers.map(n => n.replace(/[^+\d]/g, "")) }));
 function openTextInviteDialog(texted, text) {
   let idx = -1, active = false, wasHidden = false;
@@ -2184,12 +2227,12 @@ function ensureCurated() {
   if (curKey === key && curSub) return;
   if (curSub) curSub(); if (curCoverSub) curCoverSub(); curKey = key; S.curCovers = {}; S._curBuilding = false; S._curError = "";
   // Show the last nights this phone saw right away; the live copy replaces them when it arrives.
-  S.curated = null; try { const c = JSON.parse(localStorage.getItem("friendlyCurated:" + key) || "null"); if (c && c.nights) S.curated = c; } catch {}
+  S.curated = null; try { const c = JSON.parse(LS.get("friendlyCurated:" + key) || "null"); if (c && c.nights) S.curated = c; } catch {}
 
   curSub = onSnapshot(doc(db, "curated", key), snap => {
     const d = snap.exists() ? snap.data() : null;   // just the nights and which covers exist; the images load separately
     if (!d && snap.metadata.fromCache && S.curated) return;               // no local copy yet; keep showing the saved one
-    S.curated = d; if (d) try { localStorage.setItem("friendlyCurated:" + key, JSON.stringify(d)); } catch {}
+    S.curated = d; if (d) try { LS.set("friendlyCurated:" + key, JSON.stringify(d)); } catch {}
     if ((!d || (d.forDate || "") < addDays(todayStr(), -1) || (d.v || 1) < 4) && !S._curBuilding && !isDemo()) {   // v3 = four per filter, de-duplicated
       S._curBuilding = true;
       S._curPhase = "starting";
@@ -2215,11 +2258,11 @@ function mergeNightStops(n) {
   return { ...n, stops: out };
 }
 // Nights you built (and ideas you saved) stay on this device for two weeks, newest first.
-const builtStore = () => { try { return JSON.parse(localStorage.getItem("friendlyBuilt") || "[]"); } catch { return []; } };
+const builtStore = () => { try { return JSON.parse(LS.get("friendlyBuilt") || "[]"); } catch { return []; } };
 function rememberBuilt(nights) {
-  try { const keep = [...nights.map(n => ({ ...n, _at: Date.now() })), ...builtStore()].filter(n => Date.now() - (n._at || 0) < 14 * 864e5 && (!n.date || n.date >= todayStr())).slice(0, 30); localStorage.setItem("friendlyBuilt", JSON.stringify(keep)); } catch {}
+  try { const keep = [...nights.map(n => ({ ...n, _at: Date.now() })), ...builtStore()].filter(n => Date.now() - (n._at || 0) < 14 * 864e5 && (!n.date || n.date >= todayStr())).slice(0, 30); LS.set("friendlyBuilt", JSON.stringify(keep)); } catch {}
 }
-const savedIdeas = () => { try { return JSON.parse(localStorage.getItem("friendlyIdeas") || "[]"); } catch { return []; } };
+const savedIdeas = () => { try { return JSON.parse(LS.get("friendlyIdeas") || "[]"); } catch { return []; } };
 function nightCardHtml(n, id) {
   n = mergeNightStops(n);
   S._nightById = S._nightById || {}; S._nightById[id] = n;
@@ -2332,8 +2375,8 @@ function ideaToPlan(x) {
 }
 function wireIdeaCards(root = document) {
   root.querySelectorAll("[data-iplan]").forEach(b => b.onclick = () => { const x = S._ideaById[b.dataset.iplan]; if (x) { closeDialog(); ideaToPlan(x); } });
-  root.querySelectorAll("[data-isave]").forEach(b => b.onclick = () => { const x = S._ideaById[b.dataset.isave]; if (!x) return; try { localStorage.setItem("friendlyIdeas", JSON.stringify([x, ...savedIdeas().filter(y => y.title !== x.title)].slice(0, 40))); } catch {} b.textContent = "★ Saved"; b.disabled = true; toast("Saved to Curate › Saved ideas"); });
-  root.querySelectorAll("[data-iunsave]").forEach(b => b.onclick = () => { const x = S._ideaById[b.dataset.iunsave]; if (!x) return; try { localStorage.setItem("friendlyIdeas", JSON.stringify(savedIdeas().filter(y => y.title !== x.title))); } catch {} S._ideasOpen = true; render(); });
+  root.querySelectorAll("[data-isave]").forEach(b => b.onclick = () => { const x = S._ideaById[b.dataset.isave]; if (!x) return; try { LS.set("friendlyIdeas", JSON.stringify([x, ...savedIdeas().filter(y => y.title !== x.title)].slice(0, 40))); } catch {} b.textContent = "★ Saved"; b.disabled = true; toast("Saved to Curate › Saved ideas"); });
+  root.querySelectorAll("[data-iunsave]").forEach(b => b.onclick = () => { const x = S._ideaById[b.dataset.iunsave]; if (!x) return; try { LS.set("friendlyIdeas", JSON.stringify(savedIdeas().filter(y => y.title !== x.title))); } catch {} S._ideasOpen = true; render(); });
 }
 function openIdeasBrowser() {
   if (isDemo()) return toast("Browsing ideas is off in the demo.");
@@ -2371,7 +2414,7 @@ function wireCurate() {
   if (el("curBrowse")) el("curBrowse").onclick = openIdeasBrowser;
   if (el("builtNights")) { wireNightCards(el("builtNights")); el("builtNights").ontoggle = e => { S._builtOpen = e.target.open; }; }
   if (el("savedIdeas")) { wireIdeaCards(el("savedIdeas")); el("savedIdeas").ontoggle = e => { S._ideasOpen = e.target.open; }; }
-  if (el("clearBuilt")) el("clearBuilt").onclick = () => { try { localStorage.removeItem("friendlyBuilt"); } catch {} render(); };
+  if (el("clearBuilt")) el("clearBuilt").onclick = () => { try { LS.remove("friendlyBuilt"); } catch {} render(); };
   const firstMiles = () => (el("curMiles0") || {}).value;
   const firstSave = async () => { const city = await pickedCity(el("curCity")); if (city) saveCity(city, firstMiles()); };
   if (el("curCitySave")) el("curCitySave").onclick = firstSave;
@@ -2949,7 +2992,7 @@ function wireCompose() {
   if (el("saveDraftBtn")) el("saveDraftBtn").onclick = () => saveDraftToAccount();
   wirePlusFields("c"); wireComposeDay();
   document.querySelectorAll("[data-kind]").forEach(b => b.onclick = () => { syncCompose(); compose.kind = b.dataset.kind; render(); });
-  if (el("discardDraft")) el("discardDraft").onclick = () => { try { localStorage.removeItem("friendlyDraft"); } catch {} resetCompose(); compose._restored = true; render(); };
+  if (el("discardDraft")) el("discardDraft").onclick = () => { try { LS.remove("friendlyDraft"); } catch {} resetCompose(); compose._restored = true; render(); };
 }
 function refreshCoverUI() {
   el("coverPanel").innerHTML = coverPanel();
@@ -3024,7 +3067,7 @@ async function createEvent() {
     const planBring = [...(compose._plan ? compose._plan.bring : []), ...(compose.kind !== "meeting" && compose.bringOn !== false ? (compose.bring || []) : [])];
     const myRide = compose.kind !== "meeting" && compose.carOn !== false && compose.drive ? Number(compose.seats || 3) : 0;
     const fromDraft = compose._draftId;
-    composeStop(); resetCompose(); try { localStorage.removeItem("friendlyDraft"); } catch {}
+    composeStop(); resetCompose(); try { LS.remove("friendlyDraft"); } catch {}
     if (fromDraft) deleteDoc(doc(db, "users", myUid(), "drafts", fromDraft)).catch(() => {});
     if (myRide) addDoc(collection(db, "events", id, "comments"), { kind: "ride", seats: myRide, from: "", note: "", authorId: myUid(), authorName: S.profile.name, text: "", createdAt: Date.now() }).catch(() => {});
     for (const b of planBring) { try { await addDoc(collection(db, "events", id, "comments"), { kind: "bring", item: b.item, qty: b.qty, authorId: myUid(), authorName: S.profile.name, text: "", createdAt: Date.now() }); } catch {} }
@@ -3091,7 +3134,7 @@ function renderEventPage(root, id) {
 // Guest lists stay private until you've answered: hosts always see them; guests once they've RSVP'd.
 const RSVPD = ["going", "maybe", "no", "waitlist"];
 const canSeeGuests = ev => canManage(ev) || RSVPD.includes((ev.rsvps || {})[myUid()]);
-const collapsedOpen = (key, dflt) => { try { const v = localStorage.getItem(key); return v === null ? dflt : v === "1"; } catch { return dflt; } };
+const collapsedOpen = (key, dflt) => { try { const v = LS.get(key); return v === null ? dflt : v === "1"; } catch { return dflt; } };
 function statusGroups(ev) {
   const g = { going: [], maybe: [], no: [], waitlist: [], pending: [], none: [] };
   (ev.invitedUids || []).forEach(u => g[(ev.rsvps || {})[u] || "none"].push(u));
@@ -3504,7 +3547,7 @@ async function geocodePlace(str) {
 async function loadWeather(ev) {
   const box = el("wx"); if (!box || !ev.location || /zoom|meet\.google|teams|http|online|call/i.test(ev.location)) return;
   const du = daysUntil(ev); if (du < 0 || du > 15) return;
-  const key = "wx2:" + ev.date + ":" + ev.location; let cached = null; try { cached = JSON.parse(sessionStorage.getItem(key) || "null"); } catch {}
+  const key = "wx2:" + ev.date + ":" + ev.location; let cached = null; try { cached = JSON.parse(LS.get(key) || "null"); } catch {}
   const show = txt => { ev._wx = txt; const b = el("wx"); if (b) b.textContent = txt; };
   if (cached && Date.now() - cached.at < 36e5) return show(cached.txt);
   try {
@@ -3514,7 +3557,7 @@ async function loadWeather(ev) {
     const f = await (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${hit.latitude}&longitude=${hit.longitude}&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&temperature_unit=fahrenheit&timezone=auto&start_date=${ev.date}&end_date=${ev.date}`)).json();
     const d = f.daily; if (!d || !d.weather_code) return;
     const txt = `${WX[d.weather_code[0]] || "🌡"} · ${Math.round(d.temperature_2m_max[0])}° / ${Math.round(d.temperature_2m_min[0])}°${d.precipitation_probability_max && d.precipitation_probability_max[0] != null ? " · " + d.precipitation_probability_max[0] + "% rain" : ""} · ${hit.name}`;
-    try { sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), txt })); } catch {}
+    try { LS.set(key, JSON.stringify({ at: Date.now(), txt })); } catch {}
     show(txt);
   } catch {}
 }
@@ -3602,8 +3645,8 @@ function wireEventPage(ev) {
   const share = $("[data-share]"); if (share) share.onclick = () => shareEvent(ev);
   if (el("addPeopleBtn")) el("addPeopleBtn").onclick = () => openEventInviteDialog(ev);
   document.querySelectorAll("[data-textinvite]").forEach(b => b.onclick = () => { location.href = smsLink([b.dataset.textinvite], eventInviteText({ ...ev, openLink: true })); });
-  if (el("invToggle")) el("invToggle").onclick = () => { const c = el("invCard"); const open = !c.classList.contains("open"); c.classList.toggle("open", open); el("invToggle").setAttribute("aria-expanded", open); try { localStorage.setItem("friendlyInvOpen:" + ev.id, open ? "1" : "0"); } catch {} };
-  if (el("guestToggle")) el("guestToggle").onclick = () => { const c = el("guestCard"); const open = !c.classList.contains("open"); c.classList.toggle("open", open); el("guestToggle").setAttribute("aria-expanded", open); try { localStorage.setItem("friendlyGuestOpen:" + ev.id, open ? "1" : "0"); } catch {} };
+  if (el("invToggle")) el("invToggle").onclick = () => { const c = el("invCard"); const open = !c.classList.contains("open"); c.classList.toggle("open", open); el("invToggle").setAttribute("aria-expanded", open); try { LS.set("friendlyInvOpen:" + ev.id, open ? "1" : "0"); } catch {} };
+  if (el("guestToggle")) el("guestToggle").onclick = () => { const c = el("guestCard"); const open = !c.classList.contains("open"); c.classList.toggle("open", open); el("guestToggle").setAttribute("aria-expanded", open); try { LS.set("friendlyGuestOpen:" + ev.id, open ? "1" : "0"); } catch {} };
   document.querySelectorAll("[data-uninvitephone]").forEach(b => b.onclick = () => uninviteEventPhone(ev, b.dataset.uninvitephone));
   const join = $("[data-join]"); if (join) join.onclick = () => joinViaLink(ev, join);
   const cal = $("[data-cal]"); if (cal) cal.onclick = () => downloadIcs(ev);
@@ -4751,12 +4794,12 @@ setInterval(() => { if (S.route && S.route.name === "dm" && dmSub && el("dmList"
 // Effects (confetti, balloons…) play once for the recipient when a fresh message arrives.
 function playDmEffects(fid) {
   if (!dmSub || document.visibilityState !== "visible") return;
-  let seen = {}; try { seen = JSON.parse(localStorage.getItem("friendlyFx") || "{}"); } catch {}
+  let seen = {}; try { seen = JSON.parse(LS.get("friendlyFx") || "{}"); } catch {}
   for (const m of dmSub.msgs || []) {
     if (!m.effect || !DM_EFFECTS[m.effect] || seen[m.id] || Date.now() - m.createdAt > 10 * 60 * 1000) continue;
     seen[m.id] = 1; burstEffect(m.effect);
   }
-  try { localStorage.setItem("friendlyFx", JSON.stringify(Object.fromEntries(Object.entries(seen).slice(-200)))); } catch {}
+  try { LS.set("friendlyFx", JSON.stringify(Object.fromEntries(Object.entries(seen).slice(-200)))); } catch {}
 }
 function burstEffect(kind) {
   const fx = DM_EFFECTS[kind]; if (!fx) return;
@@ -4948,7 +4991,7 @@ function dmReportDialog(fid, msg) {
 // ---------- BUG REPORTS: shake the phone (or Profile › Report a bug) ----------
 // Reports go to bugs/{id} with where you were and what app version; admins get a push and a queue on Profile.
 const shakeNeedsPermission = () => typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function";
-const shakeOn = () => { try { return localStorage.getItem("friendlyShake") === "1"; } catch { return false; } };
+const shakeOn = () => { try { return LS.get("friendlyShake") === "1"; } catch { return false; } };
 let shakeHits = [], shakeQuiet = 0, shakeWired = false;
 function wireShake() {
   if (shakeWired || typeof window.DeviceMotionEvent === "undefined") return; shakeWired = true;
@@ -4962,7 +5005,7 @@ function wireShake() {
 }
 async function enableShake() {
   try { if (shakeNeedsPermission() && (await DeviceMotionEvent.requestPermission()) !== "granted") return false; } catch { return false; }
-  try { localStorage.setItem("friendlyShake", "1"); } catch {} wireShake(); return true;
+  try { LS.set("friendlyShake", "1"); } catch {} wireShake(); return true;
 }
 // Phones that don't ask for motion permission (Android, most browsers) get shake-to-report right away.
 if (!shakeNeedsPermission() || shakeOn()) wireShake();
@@ -5015,12 +5058,12 @@ const seenAt = () => (S.profile && S.profile.activitySeenAt) || 0;
 // A "New" pill clears the moment you actually open that event or group, not only
 // when you visit the Activity page -- opening the thing IS seeing the alert.
 // Tracked per-device in localStorage, keyed by the same url tail activity items carry.
-const peekedMap = () => { try { return JSON.parse(localStorage.getItem("friendlyPeeked") || "{}"); } catch { return {}; } };
+const peekedMap = () => { try { return JSON.parse(LS.get("friendlyPeeked") || "{}"); } catch { return {}; } };
 // Also saved on the account (users.peeked.<e_id>) so the app icon badge the server sends matches the bell.
 const peekKey = tail => tail.replace(/^#\//, "").replace(/[^A-Za-z0-9_-]/g, "_");
 const markPeeked = urlTail => {
   const hadNew = newCountFor(urlTail) > 0;
-  try { const m = peekedMap(); m[urlTail] = Date.now(); localStorage.setItem("friendlyPeeked", JSON.stringify(m)); } catch {}
+  try { const m = peekedMap(); m[urlTail] = Date.now(); LS.set("friendlyPeeked", JSON.stringify(m)); } catch {}
   if (hadNew && S.user) updateDoc(doc(db, "users", S.user.uid), { ["peeked." + peekKey(urlTail)]: Date.now() }).catch(() => {});
 };
 const isPeeked = a => { const tail = tailOf(a.url); if (tail === "#/" || tail === "#") return false; return Math.max(peekedMap()[tail] || 0, ((S.profile && S.profile.peeked) || {})[peekKey(tail)] || 0) >= a.createdAt; };
@@ -5029,7 +5072,7 @@ const newCountFor = urlTail => (S.activity || []).filter(a => a.createdAt > seen
 const isNewEvent = ev => (S.activity || []).some(a => a.createdAt > seenAt() && !isPeeked(a) && tailOf(a.url) === "#/e/" + ev.id);
 const actIcon = a => /joined via your link/.test(a.title) ? "🔗" : /waiting on your RSVP/.test(a.title) ? "📣" : /mentioned you/.test(a.title) ? "＠" : /to a meeting/.test(a.title) ? "📅" : /You're in!/.test(a.title) ? "🎟️" : /still owe/.test(a.title) ? "💸" : /invited you/.test(a.title) ? "🎟️" : /^Today:/.test(a.title) ? "⏰" : /reported/i.test(a.title) ? "⚑" : /is going|might come|can't make|joined the waitlist|requested/.test(a.title) ? "✅" : "💬";
 function notifCard() {
-  let pushDismissed = false; try { pushDismissed = !!localStorage.getItem("friendlyPushDismissed"); } catch {}
+  let pushDismissed = false; try { pushDismissed = !!LS.get("friendlyPushDismissed"); } catch {}
   if (NATIVE || pushDismissed) return "";
   const st = pushState(); if (st !== "off") return "";
   const needsInstall = IOS && !STANDALONE;
@@ -5098,8 +5141,8 @@ function wireMeeting(ev) {
   const cal = $("[data-cal]"); if (cal) cal.onclick = () => downloadIcs(ev);
   if (el("addPeopleBtn")) el("addPeopleBtn").onclick = () => openEventInviteDialog(ev);
   document.querySelectorAll("[data-textinvite]").forEach(b => b.onclick = () => { location.href = smsLink([b.dataset.textinvite], eventInviteText({ ...ev, openLink: true })); });
-  if (el("invToggle")) el("invToggle").onclick = () => { const c = el("invCard"); const open = !c.classList.contains("open"); c.classList.toggle("open", open); el("invToggle").setAttribute("aria-expanded", open); try { localStorage.setItem("friendlyInvOpen:" + ev.id, open ? "1" : "0"); } catch {} };
-  if (el("guestToggle")) el("guestToggle").onclick = () => { const c = el("guestCard"); const open = !c.classList.contains("open"); c.classList.toggle("open", open); el("guestToggle").setAttribute("aria-expanded", open); try { localStorage.setItem("friendlyGuestOpen:" + ev.id, open ? "1" : "0"); } catch {} };
+  if (el("invToggle")) el("invToggle").onclick = () => { const c = el("invCard"); const open = !c.classList.contains("open"); c.classList.toggle("open", open); el("invToggle").setAttribute("aria-expanded", open); try { LS.set("friendlyInvOpen:" + ev.id, open ? "1" : "0"); } catch {} };
+  if (el("guestToggle")) el("guestToggle").onclick = () => { const c = el("guestCard"); const open = !c.classList.contains("open"); c.classList.toggle("open", open); el("guestToggle").setAttribute("aria-expanded", open); try { LS.set("friendlyGuestOpen:" + ev.id, open ? "1" : "0"); } catch {} };
   document.querySelectorAll("[data-uninvitephone]").forEach(b => b.onclick = () => uninviteEventPhone(ev, b.dataset.uninvitephone));
   const nd = $("[data-nudge]"); if (nd) nd.onclick = () => nudge(ev, nd, true);
   const ed = $("[data-edit]"); if (ed) ed.onclick = () => editEvent(ev);
@@ -5311,7 +5354,7 @@ async function saveDraftToAccount() {
   const id = compose._draftId || newId();
   try {
     await setDoc(doc(db, "users", myUid(), "drafts", id), { json: composeJson(), title: compose.title.trim(), emoji: compose.emoji || "🎉", date: compose.date || "", kind: compose.kind || "event", updatedAt: Date.now() });
-    composeStop(); resetCompose(); try { localStorage.removeItem("friendlyDraft"); } catch {}
+    composeStop(); resetCompose(); try { LS.remove("friendlyDraft"); } catch {}
     go("#/drafts"); toast("Saved to Drafts", null, null, "happy");
   } catch (e) { toast(/exceed|size|large/i.test(e.message) ? "That draft is too big to save (try a smaller cover photo)." : e.message); }
 }
@@ -5335,7 +5378,7 @@ function wireDrafts() {
   document.querySelectorAll("[data-deldraft]").forEach(b => b.onclick = () => {
     if (!confirm("Delete this draft?")) return;
     // The draft you had open goes too, so New event starts clean.
-    if (compose._draftId === b.dataset.deldraft) { resetCompose(); try { localStorage.removeItem("friendlyDraft"); } catch {} }
+    if (compose._draftId === b.dataset.deldraft) { resetCompose(); try { LS.remove("friendlyDraft"); } catch {} }
     deleteDoc(doc(db, "users", myUid(), "drafts", b.dataset.deldraft)).then(() => toast("Draft deleted")).catch(e => toast(e.message));
   });
 }
@@ -5370,8 +5413,8 @@ function wireComposeDay() {
 function restoreDraft() {
   if (compose._restored) return; compose._restored = true;
   try {
-    const raw = localStorage.getItem("friendlyDraft"); if (!raw || !S.user) return;
-    localStorage.removeItem("friendlyDraft");
+    const raw = LS.get("friendlyDraft"); if (!raw || !S.user) return;
+    LS.remove("friendlyDraft");
     const d = JSON.parse(raw); if (!d || !(d.title || "").trim()) return;
     let json = JSON.stringify({ ...d, _restored: undefined, _fromDraft: undefined, _draftId: undefined }); if (json.length > 900000) json = JSON.stringify({ ...d, cover: null, coverTab: "emoji" });
     setDoc(doc(db, "users", myUid(), "drafts", newId()), { json, title: d.title.trim(), emoji: d.emoji || "🎉", date: d.date || "", kind: d.kind || "event", updatedAt: Date.now() }).catch(() => {});
@@ -5395,12 +5438,12 @@ async function sendMagicLink() {
   const email = (el("aEmail").value || "").trim(); if (!email.includes("@")) return toast("Enter your email first.");
   try {
     await sendSignInLinkToEmail(auth, email, { url: location.origin + location.pathname + location.hash, handleCodeInApp: true });
-    localStorage.setItem("friendlyMagicEmail", email); toast("Check your email for a sign-in link ✉️");
+    LS.set("friendlyMagicEmail", email); toast("Check your email for a sign-in link ✉️");
   } catch (e) { toast(e.code === "auth/operation-not-allowed" ? "Sign-in links aren't switched on yet. Use your password for now." : authError(e)); }
 }
 if (isSignInWithEmailLink(auth, location.href)) {
-  const email = localStorage.getItem("friendlyMagicEmail") || prompt("Confirm your email to finish signing in");
-  if (email) signInWithEmailLink(auth, email, location.href).then(() => { localStorage.removeItem("friendlyMagicEmail"); history.replaceState(null, "", location.pathname + location.hash); }).catch(e => toast(authError(e)));
+  const email = LS.get("friendlyMagicEmail") || prompt("Confirm your email to finish signing in");
+  if (email) signInWithEmailLink(auth, email, location.href).then(() => { LS.remove("friendlyMagicEmail"); history.replaceState(null, "", location.pathname + location.hash); }).catch(e => toast(authError(e)));
 }
 
 // ---------- dialog helper ----------
