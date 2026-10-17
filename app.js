@@ -854,7 +854,9 @@ function subscribeAll(u) {
   }));
 
   add(on("expenses", query(collection(db, "expenses"), where("involved", "array-contains", u.uid)), snap => {
-    S.expenses = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); renderSoon();
+    S.expenses = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }]));
+    S.nameHints = S.nameHints || new Map(); for (const x of S.expenses.values()) for (const [k, n] of Object.entries(x.guestNames || {})) if (n) S.nameHints.set(k, n);
+    renderSoon();
   }));
   add(on("settlements", query(collection(db, "settlements"), where("involved", "array-contains", u.uid)), snap => {
     S.settlements = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); renderSoon();
@@ -960,7 +962,12 @@ function rebuildContacts() {
 }
 // Someone's pay handles: the freshest copy an expense you share with them carries (the server keeps those in
 // step with their profile), else what a shared group recorded when they joined.
+// People who aren't on Friendly can still be on an expense: they're keyed by phone ("ph:+15551234567") and
+// named on the expense (guestNames). Balances count anyone with a name: a contact, an event guest, or one of these.
+const isGuest = u => typeof u === "string" && u.startsWith("ph:");
+const knownPerson = u => S.contacts.has(u) || !!nameHint(u);
 function payInfoOf(uid) {
+  if (isGuest(uid)) return { name: nameOf(uid), phone: uid.slice(3), venmo: "", zelle: "", cashapp: "", payPref: "" };
   const base = S.contacts.get(uid) || {}; let best = null, when = -1;
   for (const x of S.expenses.values()) { const p = x.pay && x.pay[uid]; if (p && (x.createdAt || 0) > when) { best = p; when = x.createdAt || 0; } }
   if (!best) return base;
@@ -1814,6 +1821,9 @@ function resumeAddPeople(openContacts) {
   };
   tick();
 }
+// A contact as the phone's picker returns it: display name, and the first number that looks like one.
+const nameOfContact = c => c.name ? (c.name.display || [c.name.given, c.name.family].filter(Boolean).join(" ")) : (c.displayName || "");
+const phoneOfContact = c => { const raw = (c.phones || c.phoneNumbers || []).map(p => (p && p.number) || (typeof p === "string" ? p : "")).filter(Boolean); return raw.find(p => toE164(p)) || raw[0] || ""; };
 function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pendingPhones = new Map(), submitLabel = "Add & send", knownLabel = "On Friendly · added right away", phoneLabel = "Gets a text with the join link", onSubmit }) {
   const me = myUid(); const picked = [];   // { name, phone, e164, uid|null }
   const nativeContacts = plugin("Contacts");
@@ -1861,8 +1871,6 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
   // as you like). It reads the contacts on the phone only to show this list; nothing is uploaded except the
   // people you pick. Apple's own picker sheet froze the iPhone app in multi-select mode, so it's only the
   // fallback now (one at a time) for when contacts access is declined.
-  const nameOfContact = c => c.name ? (c.name.display || [c.name.given, c.name.family].filter(Boolean).join(" ")) : (c.displayName || "");
-  const phoneOfContact = c => { const raw = (c.phones || c.phoneNumbers || []).map(p => (p && p.number) || (typeof p === "string" ? p : "")).filter(Boolean); return raw.find(p => toE164(p)) || raw[0] || ""; };
   const knownE164 = new Map([...S.contacts.entries()].filter(([u, i]) => u !== me && i.phone).map(([u, i]) => [toE164(i.phone), u]));
   let book = null;
   const paintBook = q => {
@@ -3941,8 +3949,8 @@ function pairwise() {
   const add = (d, c, cents) => { if (d === c || !cents) return; (owes[d] = owes[d] || {})[c] = (owes[d][c] || 0) + cents; };
   for (const x of S.expenses.values()) {
     // Itemized expenses carry exact per-person amounts; otherwise split evenly.
-    if (x.shares) { for (const [u, c] of Object.entries(x.shares)) if (S.contacts.has(u)) add(u, x.paidBy, c); continue; }
-    const split = (x.split || []).filter(u => S.contacts.has(u)); if (!split.length) continue;
+    if (x.shares) { for (const [u, c] of Object.entries(x.shares)) if (knownPerson(u)) add(u, x.paidBy, c); continue; }
+    const split = (x.split || []).filter(knownPerson); if (!split.length) continue;
     const base = Math.floor(x.amountCents / split.length); let rem = x.amountCents - base * split.length;
     for (const u of split) add(u, x.paidBy, base + (rem-- > 0 ? 1 : 0));
   }
@@ -3973,11 +3981,13 @@ function moneyBody() {
         zelle: other.zelle ? `<button class="btn small zelle" data-zelle="${p.to}" data-amt="${p.amount}" title="Zelle has no payment links: this copies their Zelle handle for your bank app">Zelle</button>` : "",
         apple: other.phone ? `<button class="btn small apple" data-apple="${p.to}" data-amt="${p.amount}"> Cash</button>` : ""
       };
-      const order = [other.payPref, "venmo", "cashapp", "zelle", "apple"].filter((k, i, a) => k && btns[k] && a.indexOf(k) === i);
+      if (isGuest(p.to)) btns.text = `<button class="btn small" data-text="${p.to}|${p.amount}|owe">💬 Text</button>`;
+      const order = [other.payPref, "venmo", "cashapp", "zelle", "apple", "text"].filter((k, i, a) => k && btns[k] && a.indexOf(k) === i);
       pay = order.map((k, i) => i === 0 && other.payPref === k ? btns[k].replace('class="btn small', 'class="btn small pref') : btns[k]).join("");
       if (other.payPref && btns[other.payPref]) pay = `<span class="pref-note">Prefers ${PAY_METHODS[other.payPref]}</span>` + pay;
     }
     else if (other.venmo) pay = `<button class="btn small venmo" data-request="${p.from}" data-amt="${p.amount}">Request</button>`;
+    else if (isGuest(p.from)) pay = `<button class="btn small" data-text="${p.from}|${p.amount}|owed">💬 Text a reminder</button>`;
     return `<div class="card settle-row"><div class="settle-top">${avatar(p.from)}<div style="flex:1"><b>${p.from === me ? "You owe " + esc(nameOf(p.to)) : esc(nameOf(p.from)) + " owes you"}</b></div><span class="amt sm">${fmt$(p.amount)}</span></div><div class="settle-actions">${pay}<button class="btn small" data-record="${p.from}|${p.to}|${p.amount}">${p.from === me ? "Mark as paid" : "Mark as received"}</button></div></div>`;
   }).join("")}</div>` : ""}
   <div class="section-head"><h2>Activity</h2></div>
@@ -3998,6 +4008,7 @@ function wireMoney() {
   document.querySelectorAll("[data-cashapp]").forEach(b => b.onclick = () => payCashApp(b.dataset.cashapp, +b.dataset.amt));
   document.querySelectorAll("[data-zelle]").forEach(b => b.onclick = () => payZelle(b.dataset.zelle, +b.dataset.amt));
   document.querySelectorAll("[data-record]").forEach(b => b.onclick = () => { const [f, t, a] = b.dataset.record.split("|"); openSettle(f, t, +a); });
+  document.querySelectorAll("[data-text]").forEach(b => b.onclick = () => { const [id, a, dir] = b.dataset.text.split("|"); textGuest(id, +a, dir); });
   document.querySelectorAll("[data-dele]").forEach(b => b.onclick = () => deleteWithUndo("expenses", b.dataset.dele, S.expenses.get(b.dataset.dele), "expense"));
   document.querySelectorAll("[data-dels]").forEach(b => b.onclick = () => deleteWithUndo("settlements", b.dataset.dels, (S.settlements || new Map()).get(b.dataset.dels), "payment"));
 }
@@ -4049,6 +4060,16 @@ async function markPaid(from, to, cents, note) {
   try { await setDoc(ref, { from, to, amountCents: cents, involved: [from, to], note: note || "", addedBy: myUid(), createdAt: Date.now() }); }
   catch (e) { return toast(e.message); }
   toast(note ? `Opened ${note} · marked as paid` : "Marked as paid", "Undo", () => deleteDoc(ref).then(() => toast("Undone")).catch(e => toast(e.message)));
+}
+// A text to someone who isn't on Friendly: what they owe you and how to pay you, or what you owe them.
+function textGuest(id, cents, dir) {
+  const me = S.profile || {}, ways = [["venmo", "Venmo " + (me.venmo || "").replace(/^@?/, "@")], ["zelle", "Zelle " + me.zelle], ["cashapp", "Cash App " + (me.cashapp || "").replace(/^\$?/, "$")]].filter(([k]) => me[k]);
+  const pref = ways.find(([k]) => k === me.payPref) || ways[0];
+  const body = dir === "owed"
+    ? `Hey ${first(nameOf(id))}, you owe me ${fmt$(cents)} from Friendly.${pref ? " Easiest is " + pref[1] + "." : ""} Thanks!`
+    : `Hey ${first(nameOf(id))}, I owe you ${fmt$(cents)}. What's easiest for you, Venmo, Zelle, or Cash App?`;
+  const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?";
+  location.href = "sms:" + id.slice(3) + sep + "body=" + encodeURIComponent(body);
 }
 function payApple(uid, cents) { const p = payInfoOf(uid).phone; if (!p) return; const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?"; location.href = "sms:" + p.replace(/[^+\d]/g, "") + sep + "body=" + encodeURIComponent(`Sending $${(cents / 100).toFixed(2)} Apple Cash for our Friendly tab 🤝`); markPaid(myUid(), uid, cents, "Apple Cash"); }
 function payCashApp(uid, cents) { const t = (payInfoOf(uid).cashapp || "").replace(/^\$/, ""); if (!t) return; window.open(`https://cash.app/$${encodeURIComponent(t)}/${(cents / 100).toFixed(2)}`, "_blank"); markPaid(myUid(), uid, cents, "Cash App"); }
@@ -4106,15 +4127,22 @@ function openExpense(eventId, restrict, groupId) {
     <div class="two"><label class="field"><span>Amount ($)</span><input id="xAmt" inputmode="decimal" placeholder="42.50"></label>
     <label class="field"><span>Paid by</span><select id="xPayer">${payerOptions(people)}</select></label></div>
     <span class="field-label">Split between</span>${people.box(people, eventId ? "event" : "group")}
+    ${isDemo() ? "" : `<div id="xGuests"></div><button type="button" class="btn ghost small" id="xAddGuest" style="margin-top:8px">＋ Someone not on Friendly</button>`}
     <div id="xScanBox"><button type="button" class="btn scan" id="xScan">📷 Scan or upload a receipt to itemize</button>
     <p class="muted sm" style="margin-top:6px">Snap it or pick a photo, then assign each line to whoever had it. Tax and tip split in proportion.</p></div>`,
     "Add expense", async () => {
       const amount = parseAmount(el("xAmt").value); if (!amount) return toast("Enter a valid amount.");
       const split = [...document.querySelectorAll('input[name=spl]:checked')].map(i => i.value); if (!split.length) return toast("Pick who splits it.");
       const paidBy = el("xPayer").value; const involved = [...new Set([...split, paidBy])];
-      const rec = { desc: el("xDesc").value.trim(), amountCents: amount, paidBy, split, involved, eventId: eventId || null, groupId: groupId || (eventId && (S.events.get(eventId) || {}).groupId) || matchGroupId(involved), addedBy: myUid(), createdAt: Date.now() };
+      const rec = { desc: el("xDesc").value.trim(), amountCents: amount, paidBy, split, involved, eventId: eventId || null, groupId: groupId || (eventId && (S.events.get(eventId) || {}).groupId) || matchGroupId(involved), addedBy: myUid(), createdAt: Date.now(), guestNames: guestNamesFor(involved) };
       try { await saveExpense(rec); closeDialog(); toast("Expense added"); } catch (e) { toast("Couldn't save that expense: " + e.message); }
     });
+  S._dlgGuests = {};
+  if (el("xAddGuest")) el("xAddGuest").onclick = () => guestAdder(el("xGuests"), (id, name) => {
+    if (document.querySelector(`input[name=spl][value="${CSS.escape(id)}"]`)) { toast(`${first(name)} is already on the list.`); return; }
+    el("xSplit").insertAdjacentHTML("beforeend", guestCbox(id, name));
+    if (!el("xPayer").querySelector(`option[value="${CSS.escape(id)}"]`)) el("xPayer").insertAdjacentHTML("beforeend", `<option value="${esc(id)}">${esc(first(name))}</option>`);
+  });
   el("xScan").onclick = () => scanReceipt(eventId, restrict, { desc: el("xDesc").value.trim(), paidBy: el("xPayer").value }, groupId);
   if (el("xTell")) el("xTell").onclick = () => openPlanDialog("expense", { eventId, groupId });
 }
@@ -4134,6 +4162,33 @@ async function saveExpense(rec) {
     throw e;
   }
 }
+// "Someone not on Friendly" inside an expense dialog: name and phone (typed, or from the phone's contacts),
+// added as a checked person. A number that belongs to someone you already know adds that person instead.
+// onAdd(id, name) gets "ph:+1…" for a guest or a real uid. Names of the guests added here are kept for the save.
+function guestAdder(host, onAdd) {
+  if (!host || host.firstChild) { const n = el("gName"); if (n) n.focus(); return; }
+  const native = plugin("Contacts");
+  host.innerHTML = `<div class="guest-add"><div class="two"><input id="gName" placeholder="Name" maxlength="40" autocomplete="off"><input id="gPhone" inputmode="tel" placeholder="Phone number" autocomplete="off"></div>
+    <div class="btnrow">${native ? `<button type="button" class="btn small" id="gPick">📇 From contacts</button>` : ""}<button type="button" class="btn small primary" id="gAdd">Add</button><button type="button" class="btn ghost small" id="gDone">Done</button></div></div>`;
+  const add = (name, phone) => {
+    const e164 = toE164(phone); if (!e164) return toast("Enter a phone number for " + (name || "them") + ".");
+    const known = [...S.contacts.entries()].find(([, i]) => toE164(i.phone) === e164);
+    if (known) { onAdd(known[0], known[1].name); toast(`${first(known[1].name)} is on Friendly, so they're added as themselves.`); }
+    else if (e164 === myPhoneE164()) toast("That's your own number.");
+    else { const id = "ph:" + e164; S._dlgGuests = S._dlgGuests || {}; S._dlgGuests[id] = (name || "").trim() || e164; (S.nameHints = S.nameHints || new Map()).set(id, S._dlgGuests[id]); onAdd(id, S._dlgGuests[id]); }
+    el("gName").value = ""; el("gPhone").value = ""; el("gName").focus();
+  };
+  el("gAdd").onclick = () => add(el("gName").value, el("gPhone").value);
+  el("gPhone").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); add(el("gName").value, el("gPhone").value); } };
+  el("gDone").onclick = () => { host.innerHTML = ""; };
+  if (native) el("gPick").onclick = async () => {
+    try { const r = await native.pickContact({ projection: { name: true, phones: true } }); const c = (r && (r.contact || (r.contacts && r.contacts[0]))) || (r && r.name ? r : null); if (!c) return;
+      add(nameOfContact(c), phoneOfContact(c)); } catch (e) { const m = String((e && e.message) || ""); if (!/cancel/i.test(m)) toast("Couldn't read that contact: " + m); }
+  };
+  el("gName").focus();
+}
+const guestNamesFor = ids => { const o = {}; for (const u of ids || []) if (isGuest(u)) o[u] = (S._dlgGuests || {})[u] || nameHint(u) || u.slice(3); return o; };
+const guestCbox = (id, name) => `<label class="cbox"><input type="checkbox" name="spl" value="${esc(id)}" checked>${esc(first(name))}${isGuest(id) ? ` <span class="muted sm">not on Friendly</span>` : ""}</label>`;
 // ----- Receipt scan → itemize → assign -----
 // Generic request/response doc: write {uid, ...payload, status:"pending"},
 // resolve with the doc once a Cloud Function marks it done.
@@ -4202,6 +4257,7 @@ function computeShares(items, tax, tip) {
 function itemizeDialog(eventId, restrict, seed, data, receipt, groupId) {
   const pp = expensePeople(eventId, restrict);
   const people = [...pp.main, ...pp.others.filter(([u]) => u === seed.paidBy)];
+  S._dlgGuests = {};
   const items = (data.items || []).map(it => ({ name: String(it.name || "Item").slice(0, 60), cents: toCents(it.price), uids: new Set() }));
   const st = { tax: toCents(data.tax), tip: toCents(data.tip) };
   const chips = it => people.map(([u, i]) => `<button type="button" class="${it.uids.has(u) ? "on" : ""}" data-who="${u}">${esc(first(i.name))}</button>`).join("");
@@ -4214,7 +4270,7 @@ function itemizeDialog(eventId, restrict, seed, data, receipt, groupId) {
     <label class="field"><span>Paid by</span><select id="xPayer">${payerOptions(pp, seed.paidBy)}</select></label></div>
     <p class="muted sm" style="margin:-2px 0 6px">Tap who had each line. Tax and tip are split in proportion to what each person ordered.</p>
     <div id="itz">${items.map(rowHtml).join("")}</div>
-    <button type="button" class="btn small" id="itzAdd" style="margin-top:8px">＋ Add a line</button>
+    <div class="btnrow" style="margin-top:8px"><button type="button" class="btn small" id="itzAdd">＋ Add a line</button>${isDemo() ? "" : `<button type="button" class="btn ghost small" id="xAddGuest">＋ Someone not on Friendly</button>`}</div><div id="xGuests"></div>
     <div class="two" style="margin-top:12px"><label class="field"><span>Tax ($)</span><input id="xTax" inputmode="decimal" value="${(st.tax / 100).toFixed(2)}"></label>
     <label class="field"><span>Tip ($)</span><input id="xTip" inputmode="decimal" value="${(st.tip / 100).toFixed(2)}"></label></div>
     <div class="btnrow" style="margin-top:-4px;align-items:center;gap:6px"><span class="muted sm">${st.tip ? "Tip read from the receipt. Change it:" : "Tip not printed yet? Add it:"}</span>${[15, 18, 20].map(p => `<button type="button" class="btn ghost small" data-tip="${p}">${p}%</button>`).join("")}</div>
@@ -4226,7 +4282,7 @@ function itemizeDialog(eventId, restrict, seed, data, receipt, groupId) {
       const { shares, total } = computeShares(items, st.tax, st.tip); const split = Object.keys(shares); if (!split.length) return toast("Assign at least one line.");
       const paidBy = el("xPayer").value; const involved = [...new Set([...split, paidBy])];
       const rec = { desc: el("xDesc").value.trim() || data.merchant || "Receipt", amountCents: total, paidBy, split, shares, involved, eventId: eventId || null, groupId: groupId || (eventId && (S.events.get(eventId) || {}).groupId) || matchGroupId(involved), addedBy: myUid(), createdAt: Date.now(),
-        items: items.filter(it => it.cents).map(it => ({ name: it.name, cents: it.cents, uids: [...it.uids] })), tax: st.tax, tip: st.tip, merchant: data.merchant || "", receipt: receipt || "" };
+        items: items.filter(it => it.cents).map(it => ({ name: it.name, cents: it.cents, uids: [...it.uids] })), tax: st.tax, tip: st.tip, merchant: data.merchant || "", receipt: receipt || "", guestNames: guestNamesFor(involved) };
       rec.groupId = groupId || (eventId && (S.events.get(eventId) || {}).groupId) || null;
       try { await saveExpense(rec); closeDialog(); toast("Itemized expense added"); } catch (e) { toast("Couldn't save that expense: " + e.message); }
     });
@@ -4245,6 +4301,13 @@ function itemizeDialog(eventId, restrict, seed, data, receipt, groupId) {
     });
   };
   el("itzAdd").onclick = () => { items.push({ name: "", cents: 0, uids: new Set() }); el("itz").insertAdjacentHTML("beforeend", rowHtml(items[items.length - 1], items.length - 1)); wireRows(); el("itz").lastElementChild.querySelector(".nm").focus(); };
+  if (el("xAddGuest")) el("xAddGuest").onclick = () => guestAdder(el("xGuests"), (id, name) => {
+    if (people.some(([u]) => u === id)) { toast(`${first(name)} is already on the list.`); return; }
+    people.push([id, { name }]);
+    document.querySelectorAll("#itz .itz-item .who").forEach(w => w.querySelector(".all").insertAdjacentHTML("beforebegin", `<button type="button" data-who="${esc(id)}">${esc(first(name))}</button>`));
+    if (!el("xPayer").querySelector(`option[value="${CSS.escape(id)}"]`)) el("xPayer").insertAdjacentHTML("beforeend", `<option value="${esc(id)}">${esc(first(name))}</option>`);
+    wireRows();
+  });
   el("xTax").oninput = e => { st.tax = toCents(e.target.value); renderSum(); };
   el("xTip").oninput = e => { st.tip = toCents(e.target.value); renderSum(); };
   document.querySelectorAll("[data-tip]").forEach(b => b.onclick = () => { const { subtotal } = computeShares(items, 0, 0); st.tip = Math.round(subtotal * +b.dataset.tip / 100); el("xTip").value = (st.tip / 100).toFixed(2); renderSum(); });
@@ -4272,6 +4335,7 @@ const NOTIF_CATS = [
   { key: "invites", label: "Invites & RSVPs" },
   { key: "chat", label: "Group chat & comments" },
   { key: "reminders", label: "Day-of reminders & nudges" },
+  { key: "money", label: "Expenses & paybacks" },
   { key: "birthdays", label: "Birthdays" },
 ];
 function profileBody() {

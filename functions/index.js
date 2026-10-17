@@ -992,7 +992,7 @@ const mentionNotify = (c, url, where) => (c.mentions && c.mentions.length) ? not
 // Which notifCategory toggle (profile > Notifications) a push type falls under.
 // Types with no entry here (money reminders, admin content reports) always send --
 // only the four categories the person can actually see and turn off are gated.
-const NOTIF_CATEGORY = { event: "invites", meeting: "invites", rsvp: "invites", nudge: "reminders", reminder: "reminders", mention: "chat", comment: "chat", dm: "chat", friend: "invites", birthday: "birthdays" };
+const NOTIF_CATEGORY = { event: "invites", meeting: "invites", rsvp: "invites", nudge: "reminders", reminder: "reminders", mention: "chat", comment: "chat", dm: "chat", friend: "invites", birthday: "birthdays", money: "money" };
 // Every device for a set of users (native FCM tokens + web push subscriptions):
 // send, prune anything dead, and log the item to the Activity feed so it shows
 // in-app even for people who keep notifications (or this category) off.
@@ -1285,6 +1285,28 @@ exports.onGroupComment = onDocumentCreated({ document: "groups/{gid}/comments/{c
 });
 
 // Expense discussion -> tell the people involved.
+// A new expense tells everyone on it what they owe (or, for the payer, what's owed to them). The person who
+// added it already knows. Guests keyed by phone have no account to reach.
+const dollars = c => "$" + (Math.round(c || 0) / 100).toFixed(2);
+exports.onExpenseAdded = onDocumentCreated({ document: "expenses/{xid}", ...PUSH }, async e => {
+  const x = e.data && e.data.data(); if (!x || !x.amountCents) return;
+  const people = [...new Set((x.involved || []).filter(u => typeof u === "string" && u && !u.startsWith("ph:")))];
+  const adder = x.addedBy || "", adderSnap = adder ? await db.doc("users/" + adder).get() : null; const adderName = firstName(adderSnap && adderSnap.get("name")) || "Someone";
+  const payerSnap = x.paidBy && x.paidBy !== adder ? await db.doc("users/" + x.paidBy).get().catch(() => null) : null;
+  const payerName = x.paidBy === adder ? adderName : (payerSnap && payerSnap.exists ? firstName(payerSnap.get("name")) : (x.guestNames || {})[x.paidBy] || "someone");
+  const split = (x.split || []).filter(Boolean), even = split.length ? Math.floor(x.amountCents / split.length) : 0;
+  const shareOf = u => x.shares ? (x.shares[u] || 0) : (split.includes(u) ? even : 0);
+  const url = "/#/x/" + e.params.xid, desc = x.desc || "an expense";
+  for (const u of people) {
+    if (u === adder) continue;
+    const share = shareOf(u);
+    let body;
+    if (u === x.paidBy) { const owed = x.amountCents - share; body = `You paid ${dollars(x.amountCents)}; ${owed > 0 ? dollars(owed) + " is owed back to you" : "nothing is owed back"}.`; }
+    else if (share > 0) body = `Your share is ${dollars(share)} · ${payerName} paid.`;
+    else continue;
+    await notify([u], `${adderName} added ${desc}`, body, url, { type: "money", actorId: adder });
+  }
+});
 exports.onExpenseComment = onDocumentCreated({ document: "expenses/{xid}/comments/{cid}", ...PUSH }, async e => {
   const c = e.data && e.data.data(); if (!c) return;
   const x = (await db.doc("expenses/" + e.params.xid).get()).data(); if (!x) return;
@@ -1367,7 +1389,7 @@ const payOf = u => { const o = {}; for (const k of PAY_KEYS) o[k] = String((u &&
 const samePay = (x, y) => PAY_KEYS.every(k => String((x && x[k]) || "") === String((y && y[k]) || ""));
 exports.onExpensePay = onDocumentWritten({ document: "expenses/{id}" }, async e => {
   const after = e.data.after.exists ? e.data.after.data() : null; if (!after) return;
-  const uids = [...new Set((after.involved || []).filter(u => typeof u === "string" && u && !u.startsWith("demo-")))]; if (!uids.length) return;
+  const uids = [...new Set((after.involved || []).filter(u => typeof u === "string" && u && !u.startsWith("demo-") && !u.startsWith("ph:")))]; if (!uids.length) return;
   const have = after.pay || {}; const missing = uids.filter(u => !have[u]); if (!missing.length) return;   // a profile change comes through onUserPhone
   const snaps = await db.getAll(...missing.map(u => db.doc("users/" + u)));
   const up = {}; snaps.forEach((s, i) => { up["pay." + missing[i]] = payOf(s.exists ? s.data() : null); });
@@ -1385,7 +1407,29 @@ exports.onUserPhone = onDocumentWritten({ document: "users/{uid}" }, async e => 
   if (!after.phoneE164 || after.phoneE164 === before.phoneE164) return;
   const n = await claimPhoneInvites(e.params.uid, after.phoneE164, after.name);
   if (n) logger.info(`onUserPhone: linked ${n} texted event invite(s) to ${e.params.uid}`);
+  const m = await claimGuestMoney(e.params.uid, after.phoneE164);
+  if (m) logger.info(`onUserPhone: ${m} expense/payment record(s) moved from phone guest to ${e.params.uid}`);
 });
+// Expenses and paybacks that named this person by phone ("ph:+1…") before they joined now carry their uid.
+async function claimGuestMoney(uid, phoneE164) {
+  const gid = "ph:" + phoneE164; let n = 0;
+  const swap = v => v === gid ? uid : v;
+  const rekey = o => { if (!o || typeof o !== "object") return o; const r = {}; for (const [k, v] of Object.entries(o)) r[swap(k)] = v; return r; };
+  for (const col of ["expenses", "settlements"]) {
+    const q = await db.collection(col).where("involved", "array-contains", gid).get();
+    for (const d of q.docs) {
+      const x = d.data(); const up = { involved: [...new Set((x.involved || []).map(swap))] };
+      if (x.split) up.split = [...new Set(x.split.map(swap))];
+      if (x.paidBy) up.paidBy = swap(x.paidBy); if (x.from) up.from = swap(x.from); if (x.to) up.to = swap(x.to);
+      if (x.shares) up.shares = rekey(x.shares);
+      if (Array.isArray(x.items)) up.items = x.items.map(it => ({ ...it, uids: [...new Set((it.uids || []).map(swap))] }));
+      if (x.guestNames && x.guestNames[gid]) { up.guestNames = { ...x.guestNames }; delete up.guestNames[gid]; }
+      if (x.pay !== undefined) up["pay." + uid] = payOf((await db.doc("users/" + uid).get()).data());
+      await d.ref.update(up); n++;
+    }
+  }
+  return n;
+}
 // ---------- Friends & private messages ----------
 // friendships/{a_b} (uids sorted) = a request (status "pending", requestedBy) or a friendship
 // ("accepted"). dms/{a_b} is the conversation (written here from each message) and

@@ -992,3 +992,9 @@ body.replaying #app *{animation-play-state:paused!important}
 .btn.scan{display:flex;width:100%;justify-content:center;margin-top:14px;padding:12px 14px;border:2px solid var(--accent);background:#FFF3F0;color:var(--accent-strong);font-weight:700;border-radius:14px}
 .btn.scan:active{background:#FFE4DE}
 .ledger[data-xrow]{cursor:pointer}
+
+/* Someone not on Friendly, added inside an expense dialog. */
+.guest-add{margin-top:8px;padding:10px;border:1px dashed var(--line);border-radius:12px;display:grid;gap:8px}
+.guest-add .two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.guest-add input{width:100%;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;background:#fff}
+.cbox .muted{font-weight:400}
