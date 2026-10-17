@@ -204,7 +204,7 @@ export function startParticles(canvas, id, custom) {
   let idleT = 0;
   function frame(now) {
     if (!running) return;
-    if (document.hidden || document.body.classList.contains("dlg-open")) { raf = 0; clearTimeout(idleT); idleT = setTimeout(() => { if (running) { last = performance.now(); raf = requestAnimationFrame(frame); } }, 300); return; }
+    if (document.hidden || document.body.classList.contains("dlg-open") || document.body.classList.contains("replaying")) { raf = 0; clearTimeout(idleT); idleT = setTimeout(() => { if (running) { last = performance.now(); raf = requestAnimationFrame(frame); } }, 300); return; }
     const dt = Math.min((now - last) / 1000, .05); last = now;
     ctx.clearRect(0, 0, W, H);
     for (const p of parts) {

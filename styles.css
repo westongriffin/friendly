@@ -976,3 +976,7 @@ p .linkish{display:inline;margin:0;padding:0;color:var(--accent)}
 .style-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .style-chips button{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:6px 11px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
 .style-chips button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+
+/* While Dot's intro replays over the app, the app underneath doesn't paint or animate */
+body.replaying #app{visibility:hidden}
+body.replaying #app *{animation-play-state:paused!important}

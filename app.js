@@ -181,7 +181,7 @@ async function registerPush(uid) {
     if (perm.receive !== "granted") perm = await Push.requestPermissions();
     if (perm.receive !== "granted") return;
     Push.addListener("registration", async t => { try { await updateDoc(doc(db, "users", uid), { pushTokens: arrayUnion(t.value) }); } catch {} });
-    Push.addListener("pushNotificationActionPerformed", a => { const url = a && a.notification && a.notification.data && a.notification.data.url; if (url) { location.hash = routeTail(url); focusRoute(); } });
+    Push.addListener("pushNotificationActionPerformed", a => { S._notifTapAt = Date.now(); try { fz.add("notification tap"); if (endReplay) endReplay(true); } catch {} const url = a && a.notification && a.notification.data && a.notification.data.url; if (url) { location.hash = routeTail(url); focusRoute(); } });
     await Push.register();
   } catch {}
 }
@@ -986,6 +986,7 @@ const FZ_KEY = "friendlyFreezeTrace";
 const fz = { log: [], tick: Date.now(), stalled: false,
   add(s) { this.log.push(new Date().toTimeString().slice(0, 8) + " " + s); if (this.log.length > 50) this.log.shift(); },
   save() { try { localStorage.setItem(FZ_KEY, JSON.stringify({ hb: Date.now(), stalled: this.stalled, log: this.log, v: APP_V + " / " + (nativeVersion || ""), route: location.hash })); } catch {} } };
+fz.add("boot " + (location.hash || "#/").slice(0, 60)); fz.save();
 setInterval(() => { const now = Date.now(), gap = now - fz.tick; fz.tick = now; if (gap > 3000 && gap < 90000 && !document.hidden) { fz.stalled = true; fz.add(`STALL ${Math.round(gap / 100) / 10}s on ${location.hash || "#/"}`); } fz.save(); }, 1000);
 document.addEventListener("visibilitychange", () => { fz.tick = Date.now(); fz.add("app " + document.visibilityState); fz.save(); });
 window.addEventListener("hashchange", () => fz.add("go " + location.hash.slice(0, 60)));
@@ -1045,11 +1046,23 @@ document.addEventListener("visibilitychange", () => {
   const away = hiddenAt ? Date.now() - hiddenAt : 0; hiddenAt = 0; markSeen();
   if (away >= AWAY_FOR_INTRO && S.ready && window.Blip && !document.querySelector(".splash")) replaySplash();   // away 10 minutes or more
 });
+// While it plays, the app underneath is hidden and its animations pause (body.replaying), so only Dot is moving:
+// replaying over a busy event page (theme animations, particles, a burst of updates) stalled iPhones. A tapped
+// notification ends it at once, since you asked to go somewhere.
+let endReplay = null;
 function replaySplash() {
+  if (S._notifTapAt && Date.now() - S._notifTapAt < 4000) return;
   const o = document.createElement("div"); o.className = "splash splash-replay"; o.innerHTML = splashInner("Getting everyone here…"); document.body.appendChild(o);
   const svg = o.querySelector(".splash-blip"); if (!svg) { o.remove(); return; }
-  const stop = window.Blip.play(svg, { dur: 1.7, delay: 1.65 });
-  setTimeout(() => { o.classList.add("out"); setTimeout(() => { stop(); o.remove(); }, 450); }, 6000);   // same flat 6 seconds as the opening intro
+  document.body.classList.add("replaying"); fz.add("intro replay start");
+  let stop = () => {}; try { stop = window.Blip.play(svg, { dur: 1.7, delay: 1.65 }); } catch {}
+  let ended = false;
+  endReplay = fast => {
+    if (ended) return; ended = true; endReplay = null;
+    document.body.classList.remove("replaying"); fz.add("intro replay end" + (fast ? " (notification)" : ""));
+    o.classList.add("out"); setTimeout(() => { try { stop(); } catch {} o.remove(); }, fast ? 200 : 450);
+  };
+  setTimeout(() => endReplay && endReplay(false), 6000);   // same flat 6 seconds as the opening intro
 }
 // What shows while the account is still loading: the real header and tabs, with soft placeholder cards.
 function loadingShell() {
