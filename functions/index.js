@@ -862,6 +862,20 @@ ${extraHead}
 // by phone, verify the password server-side via Identity Toolkit (the client
 // never learns the real email), and hand back a one-time custom token.
 const WEB_API_KEY = "AIzaSyA_lgyYmCL6HnoFPn4Ux89bD6iI_fazkmA";
+// The page's watchdog thread reports a hung main thread (and the recovery). Lands in the bug feed as a diag line.
+exports.hang = onRequest({ region: "us-central1", invoker: "public", memory: "256MiB", maxInstances: 2 }, async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  if (req.method === "OPTIONS") { res.set("Access-Control-Allow-Methods", "POST, OPTIONS"); res.set("Access-Control-Allow-Headers", "Content-Type"); res.status(204).send(""); return; }
+  if (req.method !== "POST") { res.status(405).send(""); return; }
+  let d = {}; try { d = typeof req.body === "string" ? JSON.parse(req.body) : (req.body || {}); } catch {}
+  if (d.kind !== "hung" && d.kind !== "resumed") { res.status(400).send(""); return; }
+  const steps = (Array.isArray(d.steps) ? d.steps : []).slice(-10).map(s => String(s).slice(0, 120));
+  const text = d.kind === "hung"
+    ? `WATCHDOG: the page's main thread stopped answering for ${Number(d.gapS) || 0}s (reported by its worker thread, so the process was alive: a hang, not a kill). Last steps:\n` + steps.join("\n")
+    : `WATCHDOG: the page came back after ${Number(d.hungFor) || 0}s. Last steps:\n` + steps.join("\n");
+  await db.collection("bugs").add({ uid: String(d.uid || "").slice(0, 40) || "unknown", name: "diag", diag: true, status: "open", platform: "ios", version: String(d.v || "").slice(0, 40), route: "", createdAt: Date.now(), text }).catch(() => {});
+  res.status(200).send("ok");
+});
 exports.phoneSignIn = onRequest({ region: "us-central1", invoker: "public", memory: "256MiB" }, async (req, res) => {
   res.set("Access-Control-Allow-Origin", SITE);
   res.set("Access-Control-Allow-Methods", "POST, OPTIONS");

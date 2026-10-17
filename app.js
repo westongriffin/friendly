@@ -783,6 +783,7 @@ window.go = path => { location.hash = path; };
 
 // ---------- auth ----------
 onAuthStateChanged(auth, async u => {
+  dogSay({ uid: (u && u.uid) || "" });
   if (u) { try { localStorage.setItem("friendlyKnown", "1"); } catch {} }
   S.subs.forEach(fn => fn()); S.subs = [];
   S.user = u;
@@ -1013,9 +1014,24 @@ function withInputKept(fn) {
 // heartbeat, saved every second. When the page's code stalls 3+ seconds while on screen, that's logged; the next
 // sign-in reports any session that stalled, so a freeze on a phone tells us what was running.
 const FZ_KEY = "friendlyFreezeTrace";
+// A watchdog on its own thread. The page tells it every second that it's alive, and each step it takes; if the
+// page's main thread stops answering for six seconds while on screen, the watchdog reports to the server by itself,
+// and again when the page comes back. iOS killing the page takes the watchdog with it, so a report here means a
+// hang, not a kill. Reports carry no personal data beyond the account id and the step labels.
+const HANG_URL = "https://us-central1-friendly-6992a.cloudfunctions.net/hang";
+let dog = null;
+function dogSay(m) { try { if (dog) dog.postMessage(m); } catch {} }
+try {
+  const src = `let last=Date.now(),vis=true,steps=[],uid="",v="",hungAt=0,strikes=0;const U=${JSON.stringify(HANG_URL)};
+onmessage=e=>{const d=e.data||{};if(d.step){steps.push(d.step);if(steps.length>10)steps.shift();}if(d.uid)uid=d.uid;if(d.v)v=d.v;if(typeof d.vis==="boolean")vis=d.vis;last=Date.now();strikes=0;
+if(hungAt){fetch(U,{method:"POST",body:JSON.stringify({kind:"resumed",uid,v,hungFor:Math.round((Date.now()-hungAt)/1000),steps})}).catch(()=>{});hungAt=0;}};
+setInterval(()=>{if(!vis||hungAt)return;const gap=Date.now()-last;if(gap>6000){if(++strikes<2)return;hungAt=last;fetch(U,{method:"POST",body:JSON.stringify({kind:"hung",uid,v,gapS:Math.round(gap/1000),steps})}).catch(()=>{});}else strikes=0;},1000);`;
+  dog = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+  dog.postMessage({ v: APP_V + " / " + (NATIVE ? "native" : "web"), vis: document.visibilityState === "visible" });
+} catch (e) { console.warn("watchdog unavailable:", e.message); }
 const deviceLine = () => { const m = /OS (\d+[_.]\d+(?:[_.]\d+)?)/.exec(navigator.userAgent || ""); return (m ? "iOS " + m[1].replace(/_/g, ".") : (navigator.userAgent || "").slice(0, 60)) + " · " + (window.screen ? screen.width + "x" + screen.height : ""); };
 const fz = { log: [], tick: Date.now(), stalled: false,
-  add(s) { this.log.push(new Date().toTimeString().slice(0, 8) + " " + s); if (this.log.length > 50) this.log.shift(); },
+  add(s) { this.log.push(new Date().toTimeString().slice(0, 8) + " " + s); if (this.log.length > 50) this.log.shift(); dogSay({ step: s }); },
   save() { try { localStorage.setItem(FZ_KEY, JSON.stringify({ hb: Date.now(), stalled: this.stalled, log: this.log, v: APP_V + " / " + (nativeVersion || ""), route: location.hash })); } catch {} } };
 // iOS kills the page to get memory back (in the background, or when a system screen like the contacts permission
 // comes up); the app reloads it at once. Telling that reload apart from a fresh launch: per-session storage lives
@@ -1035,8 +1051,8 @@ try { const pk = JSON.parse(localStorage.getItem("friendlyPicker") || "null"); l
     const quiet = i >= 0 && log.slice(i + 1).every(s => / (app hidden|app visible|photo picked .*|redraw .*|STALL .*)$/.test(s));
     if (quiet && age < (pk.stage === "picker open" ? 15 * 60000 : 45000)) { KILL_PICKER = pk; KILLED_RELOAD = true; } } } catch {}
 fz.add((KILLED_RELOAD ? (KILL_PICKER ? "boot after iOS killed the page under the camera " : "boot after iOS killed the page ") : "boot ") + (location.hash || "#/").slice(0, 60)); fz.save();
-setInterval(() => { const now = Date.now(), gap = now - fz.tick; fz.tick = now; if (gap > 3000 && gap < 90000 && !document.hidden) { fz.stalled = true; fz.add(`STALL ${Math.round(gap / 100) / 10}s on ${location.hash || "#/"}`); } fz.save(); }, 1000);
-document.addEventListener("visibilitychange", () => { fz.tick = Date.now(); fz.add("app " + document.visibilityState); fz.save(); });
+setInterval(() => { const now = Date.now(), gap = now - fz.tick; fz.tick = now; if (gap > 3000 && gap < 90000 && !document.hidden) { fz.stalled = true; fz.add(`STALL ${Math.round(gap / 100) / 10}s on ${location.hash || "#/"}`); } fz.save(); dogSay({ beat: 1 }); }, 1000);
+document.addEventListener("visibilitychange", () => { fz.tick = Date.now(); fz.add("app " + document.visibilityState); fz.save(); dogSay({ vis: document.visibilityState === "visible" }); });
 window.addEventListener("hashchange", () => fz.add("go " + location.hash.slice(0, 60)));
 window.addEventListener("pagehide", () => { fz.add("page closed"); fz.save(); });
 function reportFreezeTrace() {
