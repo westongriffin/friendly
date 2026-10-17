@@ -3974,7 +3974,7 @@ function moneyBody() {
   <div class="card">${rows.length ? rows.map(r => {
     if (r.kind === "s") return `<div class="ledger"><div class="li pay">⤴</div><div style="flex:1"><b>${esc(nameOf(r.from))} paid ${esc(nameOf(r.to))}</b><div class="muted sm">${r.note ? esc(r.note) + " · " : ""}${new Date(r.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(r.amountCents)}</span>${r.addedBy === me ? `<button class="btn ghost small" data-dels="${r.id}">✕</button>` : ""}</div>`;
     const n = (r.split || []).length || 1;
-    return `<div class="ledger"><div class="li">🧾</div><div style="flex:1"><b>${esc(r.desc)}</b><div class="muted sm">${esc(nameOf(r.paidBy))} paid · ${r.shares ? "itemized, " + n + " people" : `split ${n} way${n > 1 ? "s" : ""}`} · ${new Date(r.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(r.amountCents)}</span><button class="btn ghost small" data-xopen="${r.id}" title="Details & discussion">💬</button>${r.addedBy === me ? `<button class="btn ghost small" data-dele="${r.id}">✕</button>` : ""}</div>`;
+    return `<div class="ledger"><div class="li">🧾</div><div style="flex:1"><b>${esc(r.desc)}</b><div class="muted sm">${esc(nameOf(r.paidBy))} paid · ${r.shares ? "itemized, " + n + " people" : `split ${n} way${n > 1 ? "s" : ""}`} · ${new Date(r.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(r.amountCents)}</span><button class="btn ghost small" data-xopen="${r.id}" title="Details & discussion">💬</button>${r.addedBy === me ? `<button class="btn ghost small" data-dele="${r.id}" title="Delete" style="margin-left:6px">✕</button>` : ""}</div>`;
   }).join("") : emptyState("💸", "No shared costs yet", "Add an expense after your next hangout.", "happy")}</div>`;
 }
 function wireMoney() {
@@ -3987,8 +3987,19 @@ function wireMoney() {
   document.querySelectorAll("[data-cashapp]").forEach(b => b.onclick = () => payCashApp(b.dataset.cashapp, +b.dataset.amt));
   document.querySelectorAll("[data-zelle]").forEach(b => b.onclick = () => payZelle(b.dataset.zelle, +b.dataset.amt));
   document.querySelectorAll("[data-record]").forEach(b => b.onclick = () => { const [f, t, a] = b.dataset.record.split("|"); openSettle(f, t, +a); });
-  document.querySelectorAll("[data-dele]").forEach(b => b.onclick = () => deleteDoc(doc(db, "expenses", b.dataset.dele)).catch(e => toast(e.message)));
-  document.querySelectorAll("[data-dels]").forEach(b => b.onclick = () => deleteDoc(doc(db, "settlements", b.dataset.dels)).catch(e => toast(e.message)));
+  document.querySelectorAll("[data-dele]").forEach(b => b.onclick = () => deleteWithUndo("expenses", b.dataset.dele, S.expenses.get(b.dataset.dele), "expense"));
+  document.querySelectorAll("[data-dels]").forEach(b => b.onclick = () => deleteWithUndo("settlements", b.dataset.dels, (S.settlements || new Map()).get(b.dataset.dels), "payment"));
+}
+// Deleting from the ledger asks first and can be undone for a few seconds: the ✕ sits right beside the details
+// button, and one tap there used to erase an expense for everyone with no way back.
+async function deleteWithUndo(col, id, data, what) {
+  const label = data && (data.desc || data.note) ? ` "${String(data.desc || data.note).slice(0, 40)}"` : "";
+  const ok = confirm(`Delete this ${what}${label}? It disappears for everyone on it.`); fz.tick = Date.now();   // the system dialog pauses the page; not a stall
+  if (!ok) return;
+  const copy = data ? { ...data } : null; if (copy) delete copy.id;
+  fz.add(`${what} deleted by tap ${String(id).slice(0, 6)}`); fz.save();
+  try { await deleteDoc(doc(db, col, id)); } catch (e) { return toast("Couldn't delete: " + e.message); }
+  toast(`${what[0].toUpperCase() + what.slice(1)} deleted`, copy ? "Undo" : null, copy ? () => setDoc(doc(db, col, id), copy).then(() => toast("Restored")).catch(e => toast("Couldn't restore: " + e.message)) : null);
 }
 // ---------- EXPENSE PAGE (details + discussion) ----------
 function expenseBody(id) {
