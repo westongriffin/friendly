@@ -25,7 +25,7 @@ const APP_V = (() => { try { return new URL(import.meta.url).searchParams.get("v
 // pings it every second, and if the page stops answering for six seconds while on screen the worker reports that
 // to the server itself (a page iOS kills takes the worker with it, so such a report means a hang, not a kill).
 const HANG_URL = "https://us-central1-friendly-6992a.cloudfunctions.net/hang";
-let dog = null, prevTrace = null, prevCt = null, bootDiagResolve = null;
+let dog = null, prevTrace = null, prevCt = null, prevOlder = null, bootDiagResolve = null;
 const bootDiag = new Promise(r => { bootDiagResolve = r; });
 function dogSay(m) { try { if (dog) dog.postMessage(m); } catch {} }
 const LS = { m: new Map(), touched: new Set(), ok: false,
@@ -42,11 +42,11 @@ try {
     LS.ok = !!d.prev.ok;
     for (const [k, v] of Object.entries(d.prev.kv || {})) if (!LS.touched.has(k)) LS.m.set(k, v);
     if (migrateLS && LS.ok) for (const [k, v] of LS.m) dogSay({ kv: [k, v] });
-    prevTrace = d.prev.trace || null; prevCt = d.prev.ct || null; bootDiagResolve(true); };
+    prevTrace = d.prev.trace || null; prevCt = d.prev.ct || null; prevOlder = d.prev.older || null; bootDiagResolve(true); };
   dog.postMessage({ vis: document.visibilityState === "visible" });
   setTimeout(() => { if (typeof S !== "undefined" && S && !S._authKnown) { S._authKnown = true; if (typeof openPendingNotif === "function") openPendingNotif(); } }, 3000);
 } catch (e) { console.warn("storage worker unavailable:", e.message); }
-setTimeout(() => bootDiagResolve(false), 2500);
+setTimeout(() => bootDiagResolve(false), 10000);   // a cold start with a busy database can take a while to answer
 bootDiag.then(ok => { if (!ok) console.warn("storage worker did not answer; device settings will not persist this session"); });
 if (/^\d+$/.test(APP_V)) LS.set("friendlyV", APP_V);   // read by index.html at the next start (see there)
 
@@ -1092,8 +1092,16 @@ setInterval(() => { const now = Date.now(), gap = now - fz.tick; fz.tick = now; 
 document.addEventListener("visibilitychange", () => { fz.tick = Date.now(); fz.add("app " + document.visibilityState); fz.save(); dogSay({ vis: document.visibilityState === "visible" }); });
 window.addEventListener("hashchange", () => fz.add("go " + location.hash.slice(0, 60)));
 window.addEventListener("pagehide", () => { fz.add("page closed"); fz.save(); });
+// Reports wait for the worker's copy of the previous session and only confirm it as handled once a signed-in
+// session has had the chance to report it; a trace an earlier boot never got to report comes along too.
 async function reportFreezeTrace() {
-  await bootDiag; const tr = prevTrace; prevTrace = null;
+  await bootDiag;
+  if (!myUid()) return;
+  if (prevOlder && prevOlder.log) { const o = prevOlder; prevOlder = null; addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `freeze trace, reported late (an earlier session; its next launch did not get to report it), last heartbeat ${new Date(o.hb).toTimeString().slice(0, 8)}, ${deviceLine()}:\n` + o.log.join("\n"), route: o.route, version: o.v, platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now(), tracedAt: o.hb }).catch(() => {}); }
+  const tr = prevTrace; prevTrace = null;
+  try { if (tr) reportFreezeTraceOf(tr); } finally { dogSay({ ackPrev: 1 }); }
+}
+function reportFreezeTraceOf(tr) {
   // Report a session that stalled, or one that ended while on screen (its last step isn't going to the background
   // or closing): that's a force-quit during a hang, or a crash.
   const lastStep = String((tr && tr.log && tr.log[tr.log.length - 1]) || "");
