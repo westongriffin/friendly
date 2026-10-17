@@ -4206,7 +4206,8 @@ function itemizeDialog(eventId, restrict, seed, data, receipt, groupId) {
     <button type="button" class="btn small" id="itzAdd" style="margin-top:8px">＋ Add a line</button>
     <div class="two" style="margin-top:12px"><label class="field"><span>Tax ($)</span><input id="xTax" inputmode="decimal" value="${(st.tax / 100).toFixed(2)}"></label>
     <label class="field"><span>Tip ($)</span><input id="xTip" inputmode="decimal" value="${(st.tip / 100).toFixed(2)}"></label></div>
-    <div class="btnrow" style="margin-top:-4px">${[15, 18, 20].map(p => `<button type="button" class="btn ghost small" data-tip="${p}">Tip ${p}%</button>`).join("")}</div>
+    <div class="btnrow" style="margin-top:-4px;align-items:center;gap:6px"><span class="muted sm">${st.tip ? "Tip read from the receipt. Change it:" : "Tip not printed yet? Add it:"}</span>${[15, 18, 20].map(p => `<button type="button" class="btn ghost small" data-tip="${p}">${p}%</button>`).join("")}</div>
+    <p class="muted sm" style="margin:4px 0 0">Receipts usually print before the tip is written in. Whatever you enter splits in proportion to each person's lines, same as the tax.</p>
     <div class="itz-sum card" id="itzSum"></div>`,
     "Add expense", async () => {
       const unassigned = items.filter(it => it.cents && !it.uids.size).length;
