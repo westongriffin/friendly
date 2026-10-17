@@ -18,7 +18,13 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Instrument+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@500;600&family=Fraunces:opsz,wght@9..144,500;9..144,600&family=DM+Serif+Display&family=Syne:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Unbounded:wght@600;700&family=Pacifico&family=Caprasimo&family=Righteous&family=Bungee&family=VT323&display=swap" media="print" onload="this.media='all'"><noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Instrument+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@500;600&family=Fraunces:opsz,wght@9..144,500;9..144,600&family=DM+Serif+Display&family=Syne:wght@600;700;800&family=Space+Grotesk:wght@500;600;700&family=Unbounded:wght@600;700&family=Pacifico&family=Caprasimo&family=Righteous&family=Bungee&family=VT323&display=swap"></noscript>
-<style>body{margin:0;background:#BFE7C6}</style>
+<style>
+/* Painted before any file has downloaded. When iOS kills the page (memory) and it reloads, or on a slow start,
+   this is what shows instead of a blank green screen: the intro's gradient with a still Dot. */
+body{margin:0;background:#BFE7C6}
+.splash{position:fixed;inset:0;display:grid;place-content:center;justify-items:center;background:linear-gradient(160deg,#BFE7C6,#7CC79B 55%,#1F5A3A)}
+.boot-dot{width:112px;height:112px}
+</style>
 <script>
 // Load the app at the version named in version.json, fetched fresh every open (the page itself may sit in a
 // 10-minute CDN or WebView cache; the versioned asset URLs never do). The check never blocks: it waits at most
@@ -48,7 +54,7 @@
 </script>
 </head>
 <body>
-<div id="app"><div class="splash"></div></div>
+<div id="app"><div class="splash"><svg class="boot-dot" viewBox="0 0 100 100" aria-hidden="true"><path d="M50 9c25 0 42 17 42 42S75 92 50 92 8 76 8 51 25 9 50 9z" fill="#FFC145"/><ellipse cx="36" cy="46" rx="4.6" ry="7.2" fill="#2A2019"/><ellipse cx="64" cy="46" rx="4.6" ry="7.2" fill="#2A2019"/><circle cx="37.5" cy="43" r="1.7" fill="#fff"/><circle cx="65.5" cy="43" r="1.7" fill="#fff"/><circle cx="25" cy="60" r="5.5" fill="#FF6B57" opacity=".55"/><circle cx="75" cy="60" r="5.5" fill="#FF6B57" opacity=".55"/><path d="M41 63q9 8 18 0" stroke="#2A2019" stroke-width="3.2" fill="none" stroke-linecap="round"/></svg></div></div>
 <div id="toast" role="status"></div>
 <!-- ?v= is bumped with the service-worker CACHE version on every deploy so the
      CDN (10-minute cache) can never pair a new index.html with an old script. -->

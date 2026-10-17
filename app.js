@@ -987,8 +987,12 @@ const deviceLine = () => { const m = /OS (\d+[_.]\d+(?:[_.]\d+)?)/.exec(navigato
 const fz = { log: [], tick: Date.now(), stalled: false,
   add(s) { this.log.push(new Date().toTimeString().slice(0, 8) + " " + s); if (this.log.length > 50) this.log.shift(); },
   save() { try { localStorage.setItem(FZ_KEY, JSON.stringify({ hb: Date.now(), stalled: this.stalled, log: this.log, v: APP_V + " / " + (nativeVersion || ""), route: location.hash })); } catch {} } };
-try { const prev = localStorage.getItem(FZ_KEY); if (prev) localStorage.setItem("friendlyFreezePrev", prev); } catch {}
-fz.add("boot " + (location.hash || "#/").slice(0, 60)); fz.save();
+// iOS kills the page to get memory back (in the background, or when a system screen like the contacts permission
+// comes up); the app reloads it at once. Such a reload boots within a second or two of the dead page's last
+// heartbeat, while a force-quit and relaunch takes far longer, so the heartbeat age tells the two apart.
+let KILLED_RELOAD = false, killedAfterS = 0;
+try { const prev = localStorage.getItem(FZ_KEY); if (prev) { localStorage.setItem("friendlyFreezePrev", prev); const p = JSON.parse(prev); const last = String((p.log || []).slice(-1)[0] || ""); killedAfterS = Math.round((Date.now() - (p.hb || 0)) / 1000); KILLED_RELOAD = !!(p.hb && killedAfterS < 8 && !/ (app hidden|page closed)$/.test(last)); } } catch {}
+fz.add((KILLED_RELOAD ? "boot after iOS killed the page " : "boot ") + (location.hash || "#/").slice(0, 60)); fz.save();
 setInterval(() => { const now = Date.now(), gap = now - fz.tick; fz.tick = now; if (gap > 3000 && gap < 90000 && !document.hidden) { fz.stalled = true; fz.add(`STALL ${Math.round(gap / 100) / 10}s on ${location.hash || "#/"}`); } fz.save(); }, 1000);
 document.addEventListener("visibilitychange", () => { fz.tick = Date.now(); fz.add("app " + document.visibilityState); fz.save(); });
 window.addEventListener("hashchange", () => fz.add("go " + location.hash.slice(0, 60)));
@@ -999,7 +1003,9 @@ function reportFreezeTrace() {
   // or closing): that's a force-quit during a hang, or a crash.
   const lastStep = String((tr && tr.log && tr.log[tr.log.length - 1]) || "");
   const endedOnScreen = tr && tr.log && tr.log.length && !/ (app hidden|page closed)$/.test(lastStep);
-  if (!tr || !(tr.stalled || endedOnScreen) || !myUid()) return;
+  if (!tr || !myUid()) return;
+  if (KILLED_RELOAD) { addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `page killed by iOS and reloaded ${killedAfterS}s after its last heartbeat (${deviceLine()}), on ${tr.route || "?"}; last steps:\n` + (tr.log || []).slice(-8).join("\n"), route: tr.route, version: tr.v, platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now(), tracedAt: tr.hb }).catch(() => {}); return; }
+  if (!(tr.stalled || endedOnScreen)) return;
   addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `freeze trace (previous session ${tr.stalled ? "stalled" : "ended while on screen"}, last heartbeat ${new Date(tr.hb).toTimeString().slice(0, 8)}, ${deviceLine()}):\n` + tr.log.join("\n"), route: tr.route, version: tr.v, platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now(), tracedAt: tr.hb }).catch(() => {});
 }
 function render() {
@@ -1740,7 +1746,28 @@ function reportContactsTrace() {
   let tr = null; try { tr = JSON.parse(localStorage.getItem(CT_KEY) || "null"); localStorage.removeItem(CT_KEY); } catch {}
   if (!tr || !myUid()) return;
   const alive = Math.round((tr.hb - tr.last) / 1000);
+  // The page died while Add people was open and reloaded itself (the route survives a reload): put the person back
+  // where they were. If it died under Apple's contacts permission screen, iOS has their answer by now, so the
+  // contacts list loads straight away.
+  if (KILLED_RELOAD && tr.route && tr.route === (location.hash || "").split("?")[0]) {
+    addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `contacts: iOS killed the page mid-flow (${deviceLine()}), reopened Add people on reload. Steps:\n` + (tr.steps || []).join("\n"), route: tr.route, version: tr.v, platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now(), tracedAt: tr.t0 }).catch(() => {});
+    resumeAddPeople(/showing Apple's permission screen|book load|asking iOS/.test(String((tr.steps || []).slice(-1)[0] || "")));
+    return;
+  }
   addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `contacts trace (${deviceLine()}): app closed mid-flow. Code kept running ${alive}s after the last step${alive < 2 ? " (looks FROZEN)" : " (code alive, screen not responding?)"}.\n` + tr.steps.join("\n"), route: tr.route, version: tr.v, platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now(), tracedAt: tr.t0 }).catch(() => {});
+}
+function resumeAddPeople(openContacts) {
+  let tries = 0;
+  const tick = () => {
+    if (location.hash.split("?")[0] !== (S.route && S.route.name === "event" ? "#/e/" + S.route.id : S.route && S.route.name === "group" ? "#/g/" + S.route.id : "")) return;
+    const ev = S.route.name === "event" && S.events.get(S.route.id), g = S.route.name === "group" && S.groups.get(S.route.id);
+    if ((!ev && !g) || !el("addPeopleBtn")) { if (tries++ < 40) setTimeout(tick, 400); return; }
+    if (el("appDialog")) return;
+    if (ev) openEventInviteDialog(ev); else openInviteDialog(g);
+    toast("Picking up where you left off", null, null, "happy");
+    if (openContacts) setTimeout(() => { const b = el("invPick"); if (b) b.click(); }, 500);
+  };
+  tick();
 }
 function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pendingPhones = new Map(), submitLabel = "Add & send", knownLabel = "On Friendly · added right away", phoneLabel = "Gets a text with the join link", onSubmit }) {
   const me = myUid(); const picked = [];   // { name, phone, e164, uid|null }

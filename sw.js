@@ -3,7 +3,7 @@
 // network-first with a short timeout (fresh when online, instant from the copy on a dead or crawling
 // connection); the versioned Firebase SDK and font files never change, so they're cache-first.
 // Bump CACHE on deploy.
-const CACHE = "friendly-fb-v205";
+const CACHE = "friendly-fb-v206";
 const SHELL = [
   "./", "./index.html", "./styles.css", "./app.js", "./blip.js", "./themes.js", "./version.json",
   "./firebase-config.js", "./manifest.webmanifest",
@@ -44,9 +44,21 @@ function versioned(req) {
     return res;
   }).catch(() => caches.match(keyOf(url)).then(old => old || Response.error())));
 }
+// The app's page comes straight from the cache when we have it, and the network copy refreshes the cache in the
+// background. After iOS kills the page (to get memory back) it reloads at once, and that reload has to paint even
+// with no signal: waiting on the network here is what left phones on a blank green screen.
+function pageFirst(e) {
+  const req = e.request, url = new URL(req.url), keys = [url.origin + "/", url.origin + "/index.html"];
+  const net = fetch(req).then(res => { if (res.ok) { const a = res.clone(), b = res.clone(); caches.open(CACHE).then(c => { c.put(keys[0], a); c.put(keys[1], b); }); } return res; });
+  return caches.match(keys[0]).then(hit => hit || caches.match(keys[1])).then(hit => {
+    if (hit) { e.waitUntil(net.catch(() => {})); return hit; }
+    return net.catch(() => Response.error());
+  });
+}
 self.addEventListener("fetch", e => {
   if (e.request.method !== "GET") return;
   const url = new URL(e.request.url);
+  if (url.origin === location.origin && e.request.mode === "navigate" && (url.pathname === "/" || url.pathname === "/index.html")) { e.respondWith(pageFirst(e)); return; }
   if (url.origin === location.origin && url.searchParams.has("v")) { e.respondWith(versioned(e.request)); return; }
   if (url.origin === location.origin) { e.respondWith(fresh(e.request, url.pathname.endsWith("version.json") ? 2500 : 4000)); return; }
   if (IMMUTABLE.test(url.href)) {
