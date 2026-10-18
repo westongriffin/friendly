@@ -4116,18 +4116,33 @@ function expenseBody(id) {
     const status = payer ? `<span class="pill ok">Paid the bill</span>` : paid ? `<span class="pill ok">Paid${paid.at ? " · " + new Date(paid.at).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : ""}</span>` : `<span class="pill due">Unpaid</span>`;
     const acts = payer || !cents ? "" : paid ? (canManage || paid.by === me ? `<button class="btn ghost small" data-munpaid="${esc(u)}">Mark unpaid</button>` : "")
       : `${canManage && u !== me ? `<button class="btn small" data-remind="${esc(u)}">${isGuest(u) ? "💬 Text" : "🔔 Remind"}</button>` : ""}${canManage || u === me ? `<button class="btn small" data-mpaid="${esc(u)}">${u === me ? "I paid" : "Mark paid"}</button>` : ""}`;
-    return `<div class="member-row x-person" data-xperson="${esc(u)}">${avatar(u, "lg")}<div style="flex:1;min-width:0"><b>${esc(nameOf(u))}${u === me ? " (you)" : ""}</b><div class="x-status">${status}</div></div><div class="x-acts"><span class="amt sm">${fmt$(cents)}</span>${acts ? `<div class="btnrow" style="gap:6px;justify-content:flex-end">${acts}</div>` : ""}</div></div>`; }).join("")}</div>
+    return `<div class="member-row x-person" data-xperson="${esc(u)}">${avatar(u, "lg")}<div style="flex:1;min-width:0"><b>${esc(nameOf(u))}${u === me ? " (you)" : ""}</b><div class="x-status">${status}</div></div><div class="x-acts"><span class="amt sm">${fmt$(cents)}</span>${acts ? `<div class="btnrow" style="gap:6px;justify-content:flex-end">${acts}</div>` : ""}</div></div>${u === me && !payer && !paid && cents ? payBar(x.paidBy, cents) : ""}`; }).join("")}</div>
   ${(x.items || []).length ? `<div class="section-head" style="margin-top:22px"><h2>Receipt${x.merchant ? " · " + esc(x.merchant) : ""}</h2></div>
   <div class="card">${x.items.map(it => `<div class="member-row"><div style="flex:1;min-width:0"><b>${esc(it.name)}</b><div class="muted sm">${(it.uids || []).map(u => esc(first(nameOf(u)))).join(", ") || "unassigned"}</div></div><span class="amt sm">${fmt$(it.cents)}</span></div>`).join("")}
     ${x.tax ? `<div class="member-row"><div style="flex:1"><b>Tax</b><div class="muted sm">split in proportion</div></div><span class="amt sm">${fmt$(x.tax)}</span></div>` : ""}
     ${x.tip ? `<div class="member-row"><div style="flex:1"><b>Tip</b><div class="muted sm">split in proportion</div></div><span class="amt sm">${fmt$(x.tip)}</span></div>` : ""}</div>` : ""}
   <div class="card th-plain" id="wall" style="margin-top:22px"><p class="muted">Loading…</p></div>`;
 }
+// What you owe on this expense, and the ways to send it to whoever covered the bill (their preferred one first).
+function payBar(to, cents) {
+  const o = payInfoOf(to), who = esc(first(nameOf(to)));
+  const ways = { venmo: o.venmo && ["data-xvenmo", "Venmo"], cashapp: o.cashapp && ["data-xcashapp", "Cash App"], zelle: o.zelle && ["data-xzelle", "Zelle"], apple: o.phone && ["data-xapple", " Cash"] };
+  const order = [o.payPref, "venmo", "cashapp", "zelle", "apple"].filter((k, i, arr) => k && ways[k] && arr.indexOf(k) === i);
+  const btns = isGuest(to) ? `<button class="btn small primary" data-xtext="1">💬 Text ${who}</button>`
+    : order.map((k, i) => `<button class="btn small ${i === 0 ? "primary" : ""}" ${ways[k][0]}="1">${i === 0 ? "Pay with " : ""}${ways[k][1]}</button>`).join("");
+  return `<div class="x-pay"><div class="x-pay-head">Pay ${who} <b>${fmt$(cents)}</b></div>${btns ? `<div class="btnrow" style="gap:6px">${btns}</div>` : `<p class="muted sm" style="margin:0">${who} hasn't added Venmo, Zelle, or Cash App yet. Pay them however you like, then tap I paid.</p>`}</div>`;
+}
 function wireExpensePage() {
   const x = S.expenses.get(S.route.id); if (!x) return;
   const pseudo = { id: x.id, _col: ["expenses", x.id], _manage: false, title: x.desc };
   if (el("viewReceipt")) el("viewReceipt").onclick = () => lightbox(x.receipt);
   const share = u => x.shares ? (x.shares[u] || 0) : Math.round(x.amountCents / ((x.split || []).length || 1));
+  const mine = share(myUid());
+  document.querySelectorAll("[data-xvenmo]").forEach(b => b.onclick = () => payVenmo(x.paidBy, mine, "pay", x.id));
+  document.querySelectorAll("[data-xcashapp]").forEach(b => b.onclick = () => payCashApp(x.paidBy, mine, x.id));
+  document.querySelectorAll("[data-xzelle]").forEach(b => b.onclick = () => payZelle(x.paidBy, mine, x.id));
+  document.querySelectorAll("[data-xapple]").forEach(b => b.onclick = () => payApple(x.paidBy, mine, x.id));
+  document.querySelectorAll("[data-xtext]").forEach(b => b.onclick = () => textGuest(x.paidBy, mine, "owe"));
   // Paid: a payback for this expense (so balances move) plus a mark on the expense itself (so everyone on it sees the status).
   document.querySelectorAll("[data-mpaid]").forEach(b => b.onclick = async () => {
     const u = b.dataset.mpaid; b.disabled = true;
@@ -4153,7 +4168,7 @@ function wireExpensePage() {
     const b = el("wall"); if (b) withInputKept(() => { b.innerHTML = wallInner(pseudo, "Discussion"); wireWall(pseudo); });
   }, e => toast(e.message)));
 }
-function payVenmo(uid, cents, txn) { const v = payInfoOf(uid).venmo; if (!v) return; window.open(`https://venmo.com/${encodeURIComponent(v.replace(/^@/, ""))}?txn=${txn}&amount=${(cents / 100).toFixed(2)}&note=${encodeURIComponent("Friendly 🤝")}`, "_blank"); if (txn === "pay") markPaid(myUid(), uid, cents, "Venmo"); else toast("Request sent in Venmo."); }
+function payVenmo(uid, cents, txn, expenseId) { const v = payInfoOf(uid).venmo; if (!v) return; const x = expenseId && S.expenses.get(expenseId); window.open(`https://venmo.com/${encodeURIComponent(v.replace(/^@/, ""))}?txn=${txn}&amount=${(cents / 100).toFixed(2)}&note=${encodeURIComponent((x && x.desc ? x.desc + " · " : "") + "Friendly 🤝")}`, "_blank"); if (txn === "pay") markPaid(myUid(), uid, cents, "Venmo", expenseId); else toast("Request sent in Venmo."); }
 // Marks a payment as made. Undo is offered right away, and every settlement can
 // be removed later from the Activity list too.
 async function markPaid(from, to, cents, note, expenseId) {
@@ -4174,12 +4189,12 @@ function textGuest(id, cents, dir) {
   const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?";
   location.href = "sms:" + id.slice(3) + sep + "body=" + encodeURIComponent(body);
 }
-function payApple(uid, cents) { const p = payInfoOf(uid).phone; if (!p) return; const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?"; location.href = "sms:" + p.replace(/[^+\d]/g, "") + sep + "body=" + encodeURIComponent(`Sending $${(cents / 100).toFixed(2)} Apple Cash for our Friendly tab 🤝`); markPaid(myUid(), uid, cents, "Apple Cash"); }
-function payCashApp(uid, cents) { const t = (payInfoOf(uid).cashapp || "").replace(/^\$/, ""); if (!t) return; window.open(`https://cash.app/$${encodeURIComponent(t)}/${(cents / 100).toFixed(2)}`, "_blank"); markPaid(myUid(), uid, cents, "Cash App"); }
+function payApple(uid, cents, expenseId) { const p = payInfoOf(uid).phone; if (!p) return; const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?"; location.href = "sms:" + p.replace(/[^+\d]/g, "") + sep + "body=" + encodeURIComponent(`Sending $${(cents / 100).toFixed(2)} Apple Cash for our Friendly tab 🤝`); markPaid(myUid(), uid, cents, "Apple Cash", expenseId); }
+function payCashApp(uid, cents, expenseId) { const t = (payInfoOf(uid).cashapp || "").replace(/^\$/, ""); if (!t) return; window.open(`https://cash.app/$${encodeURIComponent(t)}/${(cents / 100).toFixed(2)}`, "_blank"); markPaid(myUid(), uid, cents, "Cash App", expenseId); }
 // Zelle lives inside each bank's app and has no payment links, so the best we can do is hand over the handle.
-function payZelle(uid, cents) {
+function payZelle(uid, cents, expenseId) {
   const z = payInfoOf(uid).zelle; if (!z) return;
-  const done = () => dialog(`<h3>Pay with Zelle</h3><p>Send <b>${fmt$(cents)}</b> to <b>${esc(first(nameOf(uid)))}</b> in your bank app. Their Zelle is <b class="mono">${esc(z)}</b>${navigator.clipboard ? " (copied)" : ""}.</p><p class="muted sm">When it's sent, mark it paid so the balance clears for both of you.</p>`, "I sent it", () => { closeDialog(); markPaid(myUid(), uid, cents, "Zelle"); });
+  const done = () => dialog(`<h3>Pay with Zelle</h3><p>Send <b>${fmt$(cents)}</b> to <b>${esc(first(nameOf(uid)))}</b> in your bank app. Their Zelle is <b class="mono">${esc(z)}</b>${navigator.clipboard ? " (copied)" : ""}.</p><p class="muted sm">When it's sent, mark it paid so the balance clears for both of you.</p>`, "I sent it", () => { closeDialog(); markPaid(myUid(), uid, cents, "Zelle", expenseId); });
   if (navigator.clipboard) navigator.clipboard.writeText(z).then(done, done); else done();
 }
 const PAY_METHODS = { venmo: "Venmo", apple: "Apple Cash", zelle: "Zelle", cashapp: "Cash App" };

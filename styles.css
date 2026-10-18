@@ -1004,3 +1004,7 @@ body.replaying #app *{animation-play-state:paused!important}
 .pill.ok{background:#E6F6EC;border-color:#BFE7CB;color:#1F6B3A}
 .pill.due{background:#FFF1EE;border-color:#FFD2C9;color:#B4412F}
 .x-acts{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+
+/* Expense page: your share, with the ways to pay whoever covered it. */
+.x-pay{margin:-4px 14px 12px 70px;padding:10px 12px;border-radius:14px;background:var(--surface2);display:grid;gap:8px}
+.x-pay-head{font-size:14px}
