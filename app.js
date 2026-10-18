@@ -1720,7 +1720,7 @@ function wireHome() {
   document.querySelectorAll("[data-filter]").forEach(b => b.onclick = () => { homeFilter = b.dataset.filter; calDay = null; render(); });
   document.querySelectorAll("[data-bplan]").forEach(b => b.onclick = () => { const x = upcomingBirthdays(400).find(y => y.uid === b.dataset.bplan); if (x) planBirthday(x); });
   document.querySelectorAll("[data-bdismiss]").forEach(b => b.onclick = () => { try { const d = JSON.parse(LS.get("friendlyBdayDismissed") || "[]"); d.push(b.dataset.bdismiss); LS.set("friendlyBdayDismissed", JSON.stringify(d.slice(-40))); } catch {} render(); });
-  document.querySelectorAll("[data-hide-tray]").forEach(b => b.onclick = e => { e.stopPropagation(); LS.set("friendlyTrayHidden", todayStr()); const c = b.closest(".cur-tray"); if (c) { c.classList.add("fade-away"); setTimeout(render, 350); } else render(); });
+  document.querySelectorAll("[data-hide-tray]").forEach(b => b.onclick = e => { e.stopPropagation(); LS.set("friendlyTrayHidden2", todayStr()); const c = b.closest(".cur-tray"); if (c) { c.classList.add("fade-away"); setTimeout(render, 350); } else render(); });
   { const tray = document.querySelector(".cur-tray.first"), tabc = document.querySelector(".tabs .tab-curate");   // the tray's pointer aims at the Curate tab
     if (tray && tabc) { const r = tabc.getBoundingClientRect(), tr = tray.getBoundingClientRect(); tray.style.setProperty("--ptr", Math.max(16, Math.round(tr.right - (r.left + r.width / 2) - 6)) + "px"); } }
   document.querySelectorAll("[data-hide-today]").forEach(b => b.onclick = e => { e.stopPropagation(); let h = []; try { h = JSON.parse(LS.get("friendlyTodayHidden") || "[]"); } catch {} h = [...h, b.dataset.hideToday].slice(-30); try { LS.set("friendlyTodayHidden", JSON.stringify(h)); } catch {} render(); });
@@ -2491,7 +2491,7 @@ function curateTray(upcoming, first) {
   if (isDemo() || !(S.profile.city || "").trim()) return "";
   const t = todayStr(), soon = upcoming.some(e => e.date >= t && e.date <= addDays(t, 7)), dow = new Date().getDay(), weekendish = dow >= 4 || dow === 0;
   if (soon && !weekendish) return "";
-  if (LS.get("friendlyTrayHidden") === t) return "";
+  if (LS.get("friendlyTrayHidden2") === t) return "";
   const picks = topPicks(6, 3); if (!picks.some(coverUrl)) return needIdeaCard(upcoming);
   return `<section class="cur-tray ${first ? "first" : ""}" aria-label="Dot's picks"><span class="ptr" aria-hidden="true"></span>
     <div class="cur-tray-head">${dot("thinking", 22)}<b>Dot's picks for ${weekendish && picks.every(n => (n.tags || []).includes("weekend")) ? "this weekend" : "the week ahead"}</b><button type="button" class="link-btn" data-go="#/curate">See all</button><button type="button" class="tray-x" data-hide-tray="1" aria-label="Hide until tomorrow">✕</button></div>
