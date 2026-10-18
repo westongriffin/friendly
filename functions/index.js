@@ -1441,13 +1441,13 @@ async function allocatePaybacks(from, to) {
   if (!from || !to || from === to) return 0;
   const [xs, ss] = await Promise.all([db.collection("expenses").where("involved", "array-contains", from).get(), db.collection("settlements").where("involved", "array-contains", from).get()]);
   const pool = ss.docs.filter(d => d.get("from") === from && d.get("to") === to && !d.get("expenseId"));
-  let left = pool.reduce((n, d) => n + (d.get("amountCents") || 0), 0); const sid = pool.length ? pool.map(d => d.id).sort().join("+").slice(0, 60) : "";
+  let left = pool.reduce((n, d) => n + (d.get("amountCents") || 0), 0); const sids = pool.map(d => d.id).sort(), sid = sids[0] || "";
   const owed = xs.docs.filter(d => d.get("paidBy") === to && (d.get("split") || []).includes(from)).sort((a, b) => (a.get("createdAt") || 0) - (b.get("createdAt") || 0));
   let changed = 0;
   for (const d of owed) {
     const x = d.data(), share = x.shares ? (x.shares[from] || 0) : Math.round((x.amountCents || 0) / ((x.split || []).length || 1)), mark = (x.paid || {})[from];
     if (mark && !mark.auto) continue;   // marked by hand or by a payback that named this expense
-    if (share > 0 && left >= share) { left -= share; if (!mark) { await d.ref.update({ ["paid." + from]: { at: Date.now(), by: from, sid, auto: true } }); changed++; } }
+    if (share > 0 && left >= share) { left -= share; if (!mark || (mark.sids || []).join() !== sids.join()) { await d.ref.update({ ["paid." + from]: { at: (mark && mark.at) || Date.now(), by: from, sid, sids, auto: true } }); changed++; } }
     else if (mark) { await d.ref.update({ ["paid." + from]: FieldValue.delete() }); changed++; }
   }
   return changed;

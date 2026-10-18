@@ -400,7 +400,9 @@ service cloud.firestore {
         && request.resource.data.addedBy == uid()
         && uid() in request.resource.data.involved
         && (!isDemoUser() || request.resource.data.involved.hasOnly(demoUids()));
-      allow update, delete: if signedIn() && uid() == resource.data.addedBy;
+      allow update: if signedIn() && uid() == resource.data.addedBy;
+      // Either side of a payback can take it back (the person paid can say it never arrived).
+      allow delete: if signedIn() && (uid() == resource.data.addedBy || uid() == resource.data.from || uid() == resource.data.to);
     }
   }
 }
