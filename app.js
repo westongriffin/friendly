@@ -802,7 +802,7 @@ const tailOf = url => routeTail(url).split("?")[0];
 // tapped notification can cold-start the app.
 let focusKey = "";
 function focusRoute() {
-  const q = S.route.q || {}; if (!q.to && !q.c && !q.photo && !q.who && !q.pair) return;
+  const q = S.route.q || {}; if (!q.to && !q.c && !q.photo && !q.who && !q.pair && !q.night) return;
   const key = location.hash; if (focusKey === key) return; focusKey = key;
   let tries = 0;
   const tick = () => {
@@ -814,8 +814,9 @@ function focusRoute() {
     const sec = q.to && document.getElementById(q.to);
     // The specific thing behind the alert: a person's row on an expense, a request, a guest's chip, a settle-up row.
     const who = q.who && whoTarget(q.who, sec), pair = q.pair && document.querySelector(`[data-pair="${CSS.escape(q.pair)}"]`);
-    const specific = msg || who || pair;
-    const target = specific || ((!q.c && !q.who && !q.pair || tries > 16) && sec);   // give the specific thing 4 seconds to load, then settle for its section
+    const night = q.night && document.querySelector(`[data-nk="${CSS.escape(q.night)}"]`);
+    const specific = msg || who || pair || night;
+    const target = specific || ((!q.c && !q.who && !q.pair && !q.night || tries > 16) && sec);   // give the specific thing 4 seconds to load, then settle for its section
     if (!target) { if (tries < 60) setTimeout(tick, 250); return; }
     target.scrollIntoView({ block: "center" });
     target.classList.add("focus-flash"); setTimeout(() => target.classList.remove("focus-flash"), 2400);
@@ -1464,7 +1465,7 @@ function shell(body) {
     ${T("home", "Events", "#/")}
     ${T("groups", "Groups", "#/groups")}
     ${T("money", "Money", "#/money")}
-    ${T("curate", `<span class="curate-lbl">${CURATE_LABEL}<i class="spark">✦</i></span>`, "#/curate")}
+    ${curateTab(tab === "curate")}
   </nav>
   <main class="wrap">${updateBanner()}${inviteBanner()}${body}</main>
   ${edgeDotHtml()}`;
@@ -1676,7 +1677,7 @@ function homeBody() {
   return `
   ${notifCard()}
   ${todayCards}
-  ${needIdeaCard(upcoming)}
+  ${curateTray(upcoming, !todayCards && !notifCard())}
   ${birthdayCard()}
   <div class="section-head"><h2>${homeView === "calendar" ? "Calendar" : "Upcoming"}</h2><span class="btnrow head-tools"><button class="icon-btn" id="viewToggle" title="${homeView === "calendar" ? "Show as cards" : "Show as a calendar"}" aria-label="${homeView === "calendar" ? "Show as cards" : "Show as a calendar"}">${homeView === "calendar" ? "🗂" : "📅"}</button><button class="icon-btn" data-go="#/drafts" title="Drafts" aria-label="Drafts${(S.drafts || []).length ? ", " + S.drafts.length + " saved" : ""}">📝${(S.drafts || []).length ? `<span class="badge">${S.drafts.length}</span>` : ""}</button><button class="btn primary small" data-go="#/new">＋ New event</button></span></div>
   ${filterBar}
@@ -1719,6 +1720,9 @@ function wireHome() {
   document.querySelectorAll("[data-filter]").forEach(b => b.onclick = () => { homeFilter = b.dataset.filter; calDay = null; render(); });
   document.querySelectorAll("[data-bplan]").forEach(b => b.onclick = () => { const x = upcomingBirthdays(400).find(y => y.uid === b.dataset.bplan); if (x) planBirthday(x); });
   document.querySelectorAll("[data-bdismiss]").forEach(b => b.onclick = () => { try { const d = JSON.parse(LS.get("friendlyBdayDismissed") || "[]"); d.push(b.dataset.bdismiss); LS.set("friendlyBdayDismissed", JSON.stringify(d.slice(-40))); } catch {} render(); });
+  document.querySelectorAll("[data-hide-tray]").forEach(b => b.onclick = e => { e.stopPropagation(); LS.set("friendlyTrayHidden", todayStr()); const c = b.closest(".cur-tray"); if (c) { c.classList.add("fade-away"); setTimeout(render, 350); } else render(); });
+  { const tray = document.querySelector(".cur-tray.first"), tabc = document.querySelector(".tabs .tab-curate");   // the tray's pointer aims at the Curate tab
+    if (tray && tabc) { const r = tabc.getBoundingClientRect(), tr = tray.getBoundingClientRect(); tray.style.setProperty("--ptr", Math.max(16, Math.round(tr.right - (r.left + r.width / 2) - 6)) + "px"); } }
   document.querySelectorAll("[data-hide-today]").forEach(b => b.onclick = e => { e.stopPropagation(); let h = []; try { h = JSON.parse(LS.get("friendlyTodayHidden") || "[]"); } catch {} h = [...h, b.dataset.hideToday].slice(-30); try { LS.set("friendlyTodayHidden", JSON.stringify(h)); } catch {} render(); });
   if (el("pastToggle")) el("pastToggle").onclick = () => { S.pastOpen = !S.pastOpen; if (S.pastOpen) startPast(); render(); };
   if (homeView === "calendar") startPast();
@@ -2285,7 +2289,7 @@ function nightCardHtml(n, id) {
   S._nightById = S._nightById || {}; S._nightById[id] = n;
   const eat = n.stops.find(x => x.kind === "eat"), tix = n.ticketUrl || (n.stops.find(x => x.kind === "do" && x.url) || {}).url;
   const th = themeOf(n.theme || "midnight"), cover = coverUrl(n);
-  return `<div class="card night t-${esc(th.id)} ${cover ? "has-cover" : ""}">
+  return `<div class="card night t-${esc(th.id)} ${cover ? "has-cover" : ""}" data-nk="${esc(nightKey(n))}">
     <div class="night-head" style="--th-ink:${cover ? "#fff" : esc(th.ink)};font-family:${esc(th.font)},system-ui">${cover ? `<img class="night-cover" src="${esc(cover)}" alt="">` : `<div class="ev-card-bg"></div>`}<div class="night-head-in"><span class="night-emoji">${esc(n.emojis || n.emoji || "🌆")}</span><div class="night-when">${esc(nightWhen(n))}</div><h3>${esc(n.title)}</h3></div></div>
     <div class="night-body">
     <div class="stops">${n.stops.map(x => `<div class="stop"><span class="t">${esc(x.time)}</span><span><b>${esc(x.name)}</b>${x.note ? `<small>${esc(x.note)}</small>` : ""}</span></div>`).join("")}</div>
@@ -2357,7 +2361,10 @@ function curateBody() {
   const t = todayStr(), dow = new Date().getDay(), fri = addDays(t, dow === 6 ? -1 : dow === 0 ? -2 : 5 - dow), sun = addDays(fri, 2);
   const fits = n => curFilter === "tonight" ? n.date === t : curFilter === "weekend" ? n.date >= (t > fri ? t : fri) && n.date <= sun : (n.tags || []).includes(curFilter);
   const filtered = nights.filter(fits).sort((a, b) => ((b.src === curFilter) - (a.src === curFilter)) || (a.date + (a.start || "")).localeCompare(b.date + (b.start || "")));
-  const all = filtered.length ? filtered : nights, shown = S._curMore === curFilter ? all : all.slice(0, 4), extra = all.length - shown.length;
+  const all = filtered.length ? filtered : nights; let shown = S._curMore === curFilter ? all : all.slice(0, 4); const extra = all.length - shown.length;
+  const want = S.route.q && S.route.q.night, picked = want && nights.find(n => nightKey(n) === want);
+  if (picked && !shown.includes(picked)) shown = [picked, ...shown];
+  if (d) markCuratedSeen();
   const phaseText = { starting: "Warming up", searching: "Searching what's on and pairing places to eat", sorting: "Sorting the good ones" }[S._curPhase] || "Looking around";
   const lead = !d && !S._curError ? `Give me a minute. ${phaseText} within ${myMiles()} miles of ${city}…` : S._curError ? "I couldn't look around just now (" + S._curError + "). Try again in a bit." : shown.length ? (filtered.length ? CURATE_LEADS[curFilter] : "Nothing tagged for that yet, so here's everything I found.") : "Nothing yet. Build your own and I'll go looking.";
   return `<div class="section-head"><h2>${CURATE_LABEL}</h2></div>
@@ -2445,6 +2452,37 @@ function wireCurate() {
   wireNightCards();
 }
 // The row on the Events tab: shows up when the week ahead is empty, or from Thursday on for the weekend.
+// Curate's picks as the rest of the app shows them: the tab carries the covers of the top picks and how many are new
+// since you last looked; the Events tab gets a tray of them from Thursday on (or when the week ahead is empty).
+const nightKey = n => String(n.coverId || ((n.title || "") + "|" + (n.date || "")));
+const upcomingNights = () => ((S.curated && S.curated.nights) || []).filter(n => !n.date || n.date >= todayStr());
+function topPicks(max) {
+  const ns = upcomingNights(), wk = n => (n.tags || []).includes("weekend") ? 0 : 1;
+  return ns.filter(n => coverUrl(n)).sort((a, b) => wk(a) - wk(b) || (a.date + (a.start || "")).localeCompare(b.date + (b.start || ""))).slice(0, max);
+}
+const curSeen = () => { try { return new Set(JSON.parse(LS.get("friendlyCurSeen") || "[]")); } catch { return new Set(); } };
+function markCuratedSeen() {
+  const ns = upcomingNights(); if (!ns.length) return;
+  const seen = curSeen(), before = seen.size; ns.forEach(n => seen.add(nightKey(n)));
+  if (seen.size !== before) try { LS.set("friendlyCurSeen", JSON.stringify([...seen].slice(-120))); } catch {}
+}
+function curateTab(on) {
+  const picks = topPicks(3), seen = curSeen(), fresh = upcomingNights().filter(n => !seen.has(nightKey(n))).length;
+  const cov = picks.map(coverUrl);
+  const stack = cov.length ? `<span class="cur-stack" aria-hidden="true">${cov.length > 2 ? `<img class="s0" src="${esc(cov[1])}" alt="">` : ""}${cov.length > 1 ? `<img class="s1" src="${esc(cov[cov.length > 2 ? 2 : 1])}" alt="">` : ""}<span class="cur-front">${cov.map((u, i) => `<img src="${esc(u)}" alt="" style="animation-delay:${-i * 3}s${cov.length === 1 ? ";animation:none" : ""}">`).join("")}</span></span>` : "";
+  return `<button class="tab tab-curate ${on ? "on" : ""} ${cov.length ? "has-picks" : ""}" data-go="#/curate" aria-label="${CURATE_LABEL}${fresh ? `, ${fresh} new pick${fresh > 1 ? "s" : ""}` : ""}">${stack}<span class="curate-lbl">${CURATE_LABEL}<i class="spark">✦</i></span>${fresh && !on ? `<span class="cur-new">${fresh > 9 ? "9+" : fresh} new</span>` : ""}</button>`;
+}
+// The weekend tray: three picks with their covers, "See all", and a close that hides it until tomorrow.
+function curateTray(upcoming, first) {
+  if (isDemo() || !(S.profile.city || "").trim()) return "";
+  const t = todayStr(), soon = upcoming.some(e => e.date >= t && e.date <= addDays(t, 7)), dow = new Date().getDay(), weekendish = dow >= 4 || dow === 0;
+  if (soon && !weekendish) return "";
+  if (LS.get("friendlyTrayHidden") === t) return "";
+  const picks = topPicks(6); if (!picks.length) return needIdeaCard(upcoming);
+  return `<section class="cur-tray ${first ? "first" : ""}" aria-label="Dot's picks"><span class="ptr" aria-hidden="true"></span>
+    <div class="cur-tray-head">${dot("thinking", 28)}<b>Dot's picks for ${weekendish && picks.every(n => (n.tags || []).includes("weekend")) ? "this weekend" : "the week ahead"}</b><button type="button" class="link-btn" data-go="#/curate">See all</button><button type="button" class="tray-x" data-hide-tray="1" aria-label="Hide until tomorrow">✕</button></div>
+    <div class="cur-tray-row">${picks.map(n => `<button type="button" class="cur-pick" data-go="#/curate?night=${encodeURIComponent(nightKey(n))}"><img src="${esc(coverUrl(n))}" alt="" loading="lazy"><b>${esc(n.title)}</b><span>${esc(nightWhen(n))}</span></button>`).join("")}</div></section>`;
+}
 function needIdeaCard(upcoming) {
   if (!window.Blip || isDemo()) return "";
   const t = todayStr(), soon = upcoming.some(e => e.date >= t && e.date <= addDays(t, 7)), dow = new Date().getDay(), weekendish = dow >= 4 || dow === 0;
