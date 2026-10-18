@@ -1026,19 +1026,20 @@ body.replaying #app *{animation-play-state:paused!important}
 .cur-new{position:absolute;top:-8px;right:-4px;background:#E2472F;color:#fff;border-radius:999px;padding:0 6px;font-size:10px;font-weight:700;line-height:15px;border:2px solid var(--bg);white-space:nowrap;animation:cur-badge 4.5s ease-in-out infinite}
 @keyframes cur-badge{0%,86%,100%{transform:scale(1)}90%{transform:scale(1.18)}94%{transform:scale(.96)}}
 /* The weekend tray on the Events tab. */
-.cur-tray{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:12px 0 12px 12px;box-shadow:var(--shadow-lg);margin:6px 0 14px;animation:tray-in .4s ease-out both}
+.cur-tray{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:8px 0 10px 10px;box-shadow:var(--shadow);margin:6px 0 14px;animation:tray-in .4s ease-out both}
 .cur-tray .ptr{display:none;position:absolute;top:-6px;right:var(--ptr,46px);width:11px;height:11px;background:var(--surface);border-left:1px solid var(--line);border-top:1px solid var(--line);transform:rotate(45deg)}
 .cur-tray.first .ptr{display:block}
-.cur-tray-head{display:flex;align-items:center;gap:8px;padding-right:8px}
-.cur-tray-head b{flex:1;min-width:0;font-size:14px}
-.cur-tray-head .link-btn{border:0;background:none;color:var(--accent-strong);font:inherit;font-weight:700;font-size:13px;padding:6px;cursor:pointer}
-.tray-x{width:30px;height:30px;border:0;border-radius:50%;background:var(--surface2);color:var(--muted);font-size:12px;cursor:pointer;flex:none}
-.cur-tray-row{margin-top:10px;display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;padding-right:12px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.cur-tray-head{display:flex;align-items:center;gap:6px;padding-right:6px}
+.cur-tray-head b{flex:1;min-width:0;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cur-tray-head .link-btn{border:0;background:none;color:var(--accent-strong);font:inherit;font-weight:700;font-size:13px;padding:4px 6px;cursor:pointer}
+.tray-x{width:26px;height:26px;border:0;border-radius:50%;background:var(--surface2);color:var(--muted);font-size:11px;cursor:pointer;flex:none}
+.cur-tray-row{margin-top:6px;display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;padding-right:10px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .cur-tray-row::-webkit-scrollbar{display:none}
-.cur-pick{flex:none;width:132px;scroll-snap-align:start;color:inherit;background:none;border:0;padding:0;text-align:left;font:inherit;cursor:pointer}
-.cur-pick img{width:132px;height:80px;border-radius:12px;object-fit:cover;display:block;background:var(--surface2)}
-.cur-pick b{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:6px;font-size:12.5px;line-height:1.3}
-.cur-pick span{display:block;font-size:11.5px;color:var(--muted)}
+.cur-pick{flex:1 0 214px;max-width:100%;display:flex;align-items:center;gap:10px;padding:5px 10px 5px 5px;border-radius:12px;background:var(--surface2);scroll-snap-align:start;color:inherit;border:0;text-align:left;font:inherit;cursor:pointer;min-width:0}
+.cur-pick img{width:50px;height:50px;border-radius:9px;object-fit:cover;object-position:50% 35%;flex:none;background:var(--line)}
+.cp-txt{min-width:0;display:block}
+.cur-pick b{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:13px;line-height:1.25}
+.cp-txt>span{display:block;margin-top:2px;font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cur-tray.fade-away{opacity:0;transform:translateY(-6px);transition:opacity .3s,transform .3s}
 @keyframes tray-in{0%{opacity:0;transform:translateY(-8px)}100%{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.cur-front img,.cur-new,.cur-tray{animation:none}}

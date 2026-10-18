@@ -2480,8 +2480,8 @@ function curateTray(upcoming, first) {
   if (LS.get("friendlyTrayHidden") === t) return "";
   const picks = topPicks(6); if (!picks.length) return needIdeaCard(upcoming);
   return `<section class="cur-tray ${first ? "first" : ""}" aria-label="Dot's picks"><span class="ptr" aria-hidden="true"></span>
-    <div class="cur-tray-head">${dot("thinking", 28)}<b>Dot's picks for ${weekendish && picks.every(n => (n.tags || []).includes("weekend")) ? "this weekend" : "the week ahead"}</b><button type="button" class="link-btn" data-go="#/curate">See all</button><button type="button" class="tray-x" data-hide-tray="1" aria-label="Hide until tomorrow">✕</button></div>
-    <div class="cur-tray-row">${picks.map(n => `<button type="button" class="cur-pick" data-go="#/curate?night=${encodeURIComponent(nightKey(n))}"><img src="${esc(coverUrl(n))}" alt="" loading="lazy"><b>${esc(n.title)}</b><span>${esc(nightWhen(n))}</span></button>`).join("")}</div></section>`;
+    <div class="cur-tray-head">${dot("thinking", 22)}<b>Dot's picks for ${weekendish && picks.every(n => (n.tags || []).includes("weekend")) ? "this weekend" : "the week ahead"}</b><button type="button" class="link-btn" data-go="#/curate">See all</button><button type="button" class="tray-x" data-hide-tray="1" aria-label="Hide until tomorrow">✕</button></div>
+    <div class="cur-tray-row">${picks.map(n => `<button type="button" class="cur-pick" data-go="#/curate?night=${encodeURIComponent(nightKey(n))}"><img src="${esc(coverUrl(n))}" alt="" loading="lazy"><span class="cp-txt"><b>${esc(n.title)}</b><span>${esc(nightWhen(n))}</span></span></button>`).join("")}</div></section>`;
 }
 function needIdeaCard(upcoming) {
   if (!window.Blip || isDemo()) return "";
