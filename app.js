@@ -2367,9 +2367,8 @@ function curateBody() {
   if (d) markCuratedSeen();
   const phaseText = { starting: "Warming up", searching: "Searching what's on and pairing places to eat", sorting: "Sorting the good ones" }[S._curPhase] || "Looking around";
   const lead = !d && !S._curError ? `Give me a minute. ${phaseText} within ${myMiles()} miles of ${city}…` : S._curError ? "I couldn't look around just now (" + S._curError + "). Try again in a bit." : shown.length ? (filtered.length ? CURATE_LEADS[curFilter] : "Nothing tagged for that yet, so here's everything I found.") : "Nothing yet. Build your own and I'll go looking.";
-  return `<div class="section-head"><h2>${CURATE_LABEL}</h2></div>
-  <div class="cur-where"><button type="button" class="btn small cur-city" id="curCityBtn">📍 <span>${esc(city)}</span></button>${milesSelect("curMiles")}<button type="button" class="btn primary small" id="curBuild">✨ Build me a night</button><button type="button" class="btn small" id="curBrowse">🔎 Browse ideas</button></div>
-  <div class="dot-say" style="margin-top:4px">${dot(d ? "happy" : "thinking", 52)}<div class="say-bubble">${esc(lead)}</div></div>
+  return `<div class="section-head cur-head"><h2>${CURATE_LABEL}</h2><span class="cur-loc"><button type="button" class="cur-loc-city" id="curCityBtn" aria-label="Change city">📍 <span>${esc(city)}</span></button>${milesSelect("curMiles")}</span></div>
+  <div class="dot-say cur-dot">${dot(d ? "happy" : "thinking", 48)}<div class="say-bubble">${esc(lead)}<div class="cur-acts"><button type="button" class="btn small primary" id="curBuild">✨ Build me a night</button><button type="button" class="btn small" id="curBrowse">🔎 Browse ideas</button></div></div></div>
   <div class="chiprow">${CURATE_FILTERS.map(([k, l]) => `<button type="button" class="fchip ${curFilter === k ? "on" : ""}" data-cf="${k}">${l}</button>`).join("")}</div>
   ${!d && !S._curError ? `<div class="card empty compact">${dot("thinking", 64)}<p class="muted" style="margin:6px 0 0">Searching what's on, pairing dinners, checking the times. About half a minute the first time.</p></div>` : ""}
   ${S._curError ? `<div style="text-align:center;margin-bottom:12px"><button type="button" class="btn" id="curRetry">Try again</button></div>` : ""}

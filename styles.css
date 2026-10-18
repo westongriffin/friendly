@@ -1044,3 +1044,14 @@ body.replaying #app *{animation-play-state:paused!important}
 .cur-tray.fade-away{opacity:0;transform:translateY(-6px);transition:opacity .3s,transform .3s}
 @keyframes tray-in{0%{opacity:0;transform:translateY(-8px)}100%{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.cur-front img,.cur-new,.cur-tray{animation:none}}
+
+/* Curate header: where Dot is looking (city and radius) in one pill beside the title; Dot's two offers sit in its bubble. */
+.cur-head{margin-bottom:10px}
+.cur-loc{display:inline-flex;align-items:center;min-width:0;max-width:62%;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:0 4px 0 12px;height:36px;box-shadow:var(--shadow)}
+.cur-loc-city{border:0;background:none;font:inherit;font-weight:600;font-size:13.5px;color:var(--ink);display:inline-flex;align-items:center;gap:4px;min-width:0;padding:0;cursor:pointer}
+.cur-loc-city span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cur-loc .miles-sel{border:0!important;border-left:1px solid var(--line)!important;border-radius:0!important;background-color:transparent!important;box-shadow:none!important;height:22px!important;min-height:0!important;margin:0 0 0 8px!important;padding:0 18px 0 8px!important;font-size:13px!important;font-weight:600;color:var(--muted)}
+.cur-dot{margin:0 0 12px}
+.cur-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.cur-acts .btn{margin:0}
+.cur-acts .btn:not(.primary){background:var(--surface);border:1px solid var(--line)}
