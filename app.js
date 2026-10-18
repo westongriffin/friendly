@@ -3350,8 +3350,7 @@ const rshow = k => REACTS[k] || (/^e[0-9a-f_]+$/.test(k) ? k.slice(1).split("_")
 // sheet listing everyone under each emoji. groups = [[emoji, [uids]], ...].
 const reactGroups = new Map();
 const andList = xs => xs.length <= 1 ? (xs[0] || "") : xs.length === 2 ? xs.join(" and ") : xs.slice(0, -1).join(", ") + ", and " + xs[xs.length - 1];
-// Who reacted (PREVIEW, admins only until Wes signs off; then drop the isAdmin() checks): press and hold any
-// reaction to see who's behind it. Rows register each item's reactions as they render (reactWhoLine draws nothing);
+// Who reacted: press and hold any reaction to see who's behind it. Rows register each item's reactions as they render (reactWhoLine draws nothing);
 // the hold opens a sheet with everyone, the pressed emoji first.
 function reactWhoLine(key, groups) {
   groups = groups.filter(([, us]) => us && us.length);
@@ -3372,7 +3371,6 @@ const rxKeyOf = b => {
 };
 let rxHold = 0, rxFired = 0;
 document.addEventListener("pointerdown", e => {
-  if (!isAdmin()) return;
   const b = e.target.closest && e.target.closest(RX_SEL); if (!b) return;
   const k = rxKeyOf(b); if (!k || !reactGroups.has(k[0])) return;
   const x0 = e.clientX, y0 = e.clientY;
@@ -3384,7 +3382,7 @@ document.addEventListener("pointerdown", e => {
 }, true);
 // The press that opened the sheet doesn't also toggle the reaction, and iOS doesn't pop its copy/lookup menu.
 document.addEventListener("click", e => { if (Date.now() - rxFired < 800 && e.target.closest && e.target.closest(RX_SEL)) { e.preventDefault(); e.stopPropagation(); } }, true);
-document.addEventListener("contextmenu", e => { if (isAdmin() && e.target.closest && e.target.closest(RX_SEL)) e.preventDefault(); }, true);
+document.addEventListener("contextmenu", e => { if (e.target.closest && e.target.closest(RX_SEL)) e.preventDefault(); }, true);
 const firstGrapheme = v => { try { return [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(v)][0].segment; } catch { return [...v][0]; } };
 let replyTo = null;   // { id, name, ctx } while composing a threaded reply
 const parentPatch = ev => replyTo && replyTo.ctx === ev.id ? { parentId: replyTo.id } : {};
