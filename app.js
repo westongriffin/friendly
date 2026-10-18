@@ -4264,11 +4264,11 @@ async function markPaid(from, to, cents, note, expenseId) {
 }
 // After a payment app opens, nothing is marked until the person says the money went: when they come back to
 // Friendly (or after a few seconds if the app opened beside it) they're asked once.
-function askIfSent(to, cents, method, expenseId) {
+function askIfSent(to, cents, method, expenseId, onNo) {
   let asked = false; const t0 = Date.now();
   const ask = () => { if (asked) return; asked = true; document.removeEventListener("visibilitychange", onVis); clearTimeout(timer);
     dialog(`<h3>Did it go through?</h3><p>Did you send <b>${fmt$(cents)}</b> to <b>${esc(first(nameOf(to)))}</b> with ${esc(method)}?</p><p class="muted sm">It's marked paid only once you say so, for both of you.</p>`, "Yes, mark it paid", () => { closeDialog(); markPaid(myUid(), to, cents, method, expenseId); });
-    const c = el("dlgCancel"); if (c) c.textContent = "Not yet"; };
+    const c = el("dlgCancel"); if (c) { c.textContent = "Not yet"; if (onNo) c.addEventListener("click", onNo); } };
   const onVis = () => { if (document.visibilityState === "visible" && Date.now() - t0 > 600) setTimeout(ask, 350); };
   document.addEventListener("visibilitychange", onVis);
   const timer = setTimeout(() => { if (document.visibilityState === "visible") ask(); }, 6000);
@@ -4283,7 +4283,23 @@ function textGuest(id, cents, dir) {
   const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?";
   location.href = "sms:" + id.slice(3) + sep + "body=" + encodeURIComponent(body);
 }
-function payApple(uid, cents, expenseId) { const p = payInfoOf(uid).phone; if (!p) return; const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?"; location.href = "sms:" + p.replace(/[^+\d]/g, "") + sep + "body=" + encodeURIComponent(`Sending $${(cents / 100).toFixed(2)} Apple Cash for our Friendly tab 🤝`); askIfSent(uid, cents, "Apple Cash", expenseId); }
+// One-tap Apple Cash (PREVIEW, admins only until Wes signs off): the "Friendly Pay" Shortcut runs iPhone's Send
+// Payment action with Apple Pay, the person and amount filled in, then reopens Friendly (Apple still asks for Face ID).
+const PAY_SHORTCUT_URL = "https://raw.githubusercontent.com/westongriffin/friendly/main/shortcuts/Friendly%20Pay.shortcut";
+const payShortcutOn = () => NATIVE && IOS && isAdmin();
+function payViaShortcut(uid, cents, expenseId) {
+  const to = toE164(payInfoOf(uid).phone || ""), x = expenseId && S.expenses.get(expenseId);
+  const run = () => { location.href = "shortcuts://run-shortcut?name=" + encodeURIComponent("Friendly Pay") + "&input=text&text=" + encodeURIComponent(JSON.stringify({ to, amt: (cents / 100).toFixed(2), note: ((x && x.desc) || "Friendly") + " · Friendly" })); askIfSent(uid, cents, "Apple Cash", expenseId, () => LS.remove("friendlyPayShortcut")); };   // "Not yet" brings the setup back next time
+  if (LS.get("friendlyPayShortcut") === "1") return run();
+  dialog(`<h3>Apple Cash in one tap <span class="muted sm">(preview, only you see this)</span></h3>
+    <p>Add the free <b>Friendly Pay</b> shortcut once. After that, Cash opens Apple Pay with ${esc(first(nameOf(uid)))} and <b>${fmt$(cents)}</b> already filled in. You confirm with Face ID.</p>
+    <div class="stack"><button type="button" class="btn" id="fpAdd">1. Add the shortcut</button><button type="button" class="btn primary" id="fpRun">2. Pay ${fmt$(cents)} now</button><button type="button" class="btn ghost" id="fpSms">Use Messages instead</button></div>`, null, null);
+  el("fpAdd").onclick = () => window.open(PAY_SHORTCUT_URL, "_blank");
+  el("fpRun").onclick = () => { LS.set("friendlyPayShortcut", "1"); closeDialog(); run(); };
+  el("fpSms").onclick = () => { closeDialog(); payApple(uid, cents, expenseId, true); };
+}
+function payApple(uid, cents, expenseId, plain) {
+  if (payShortcutOn() && !plain && toE164(payInfoOf(uid).phone || "")) return payViaShortcut(uid, cents, expenseId); const p = payInfoOf(uid).phone; if (!p) return; const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?"; location.href = "sms:" + p.replace(/[^+\d]/g, "") + sep + "body=" + encodeURIComponent(`Sending $${(cents / 100).toFixed(2)} Apple Cash for our Friendly tab 🤝`); askIfSent(uid, cents, "Apple Cash", expenseId); }
 function payCashApp(uid, cents, expenseId) { const t = (payInfoOf(uid).cashapp || "").replace(/^\$/, ""); if (!t) return; window.open(`https://cash.app/$${encodeURIComponent(t)}/${(cents / 100).toFixed(2)}`, "_blank"); askIfSent(uid, cents, "Cash App", expenseId); }
 // Zelle lives inside each bank's app and has no payment links, so the best we can do is hand over the handle.
 function payZelle(uid, cents, expenseId) {
