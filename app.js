@@ -4329,7 +4329,7 @@ function textGuest(id, cents, dir) {
 // Payment action with Apple Pay, the person and amount filled in, then reopens Friendly (Apple still asks for Face ID).
 // iCloud link (opens straight in Shortcuts with Add Shortcut); shared from Wes's iPhone Oct 18. The signed file in
 // shortcuts/ (built by shortcuts/build-pay.py) is the same shortcut.
-const PAY_SHORTCUT_URL = "https://www.icloud.com/shortcuts/b0b202fe90884373abaeac0d4a4f7629";
+const PAY_SHORTCUT_URL = "https://raw.githubusercontent.com/westongriffin/friendly/main/shortcuts/Friendly%20Pay.shortcut?v=3";   // v3 under test; back to an iCloud link once it works (v2's was b0b202fe90884373abaeac0d4a4f7629)
 const payShortcutOn = () => NATIVE && IOS && isAdmin();
 function payViaShortcut(uid, cents, expenseId) {
   const to = toE164(payInfoOf(uid).phone || ""), x = expenseId && S.expenses.get(expenseId);

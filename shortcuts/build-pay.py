@@ -1,4 +1,4 @@
-# Builds "Friendly Pay" (v2). Input is JSON from Friendly:
+# Builds "Friendly Pay" (v3). Input is JSON from Friendly:
 #   {"to": "+12145551234", "amt": 9.65, "note": "White Box Roastery Co. · Friendly", "vcf": "BEGIN:VCARD ... END:VCARD"}
 # 1. Reads the four values.
 # 2. Turns the vCard text into a contact (a .vcf file -> Get Contacts from Input), so Apple's payment sheet can show
@@ -21,22 +21,15 @@ amount = {"Value": {"Magnitude": ref(u_amt, "Amount", Aggrandizements=[{"Type": 
           "WFSerializationType": "WFQuantityFieldValue"}
 pay = lambda recipients: A("is.workflow.actions.venmo.pay", UUID=U(), ShowWhenRun=True, WFVenmoActionRecipients=recipients,
                            WFVenmoActionAmount=amount, WFVenmoActionNote=tok([ref(u_note, "Note")]))
+# v3: the contact-card steps (Set Name -> Get Contacts -> If) made v2 fail with "There was a problem running the
+# shortcut", so they're out; the person goes in as their number, as in v1 (which ran), and only the amount format
+# changed from v1.
 acts = [
   A("is.workflow.actions.detect.dictionary", UUID=u_dict, WFInput={"Value": {"Type": "ExtensionInput"}, "WFSerializationType": "WFTextTokenAttachment"}),
   A("is.workflow.actions.getvalueforkey", UUID=u_to, CustomOutputName="Number", WFDictionaryKey="to", WFInput=att(ref(u_dict, "Dictionary"))),
   A("is.workflow.actions.getvalueforkey", UUID=u_amt, CustomOutputName="Amount", WFDictionaryKey="amt", WFInput=att(ref(u_dict, "Dictionary"))),
   A("is.workflow.actions.getvalueforkey", UUID=u_note, CustomOutputName="Note", WFDictionaryKey="note", WFInput=att(ref(u_dict, "Dictionary"))),
-  A("is.workflow.actions.getvalueforkey", UUID=u_vcf, CustomOutputName="Card", WFDictionaryKey="vcf", WFInput=att(ref(u_dict, "Dictionary"))),
-  A("is.workflow.actions.setitemname", UUID=u_file, WFName="Friendly.vcf", WFInput=att(ref(u_vcf, "Card"))),
-  A("is.workflow.actions.detect.contacts", UUID=u_contacts, WFInput=att(ref(u_file, "Renamed Item"))),
-  A("is.workflow.actions.conditional", GroupingIdentifier=g_if, WFControlFlowMode=0,
-    WFConditions={"Value": {"WFActionParameterFilterPrefix": 1, "WFActionParameterFilterTemplates": [
-      {"WFCondition": 100, "WFInput": {"Type": "Variable", "Variable": att(ref(u_contacts, "Contacts"))}}]},
-      "WFSerializationType": "WFContentPredicateTableTemplate"}),
-  pay(att(ref(u_contacts, "Contacts"))),
-  A("is.workflow.actions.conditional", GroupingIdentifier=g_if, WFControlFlowMode=1),
   pay(att(ref(u_to, "Number"))),
-  A("is.workflow.actions.conditional", GroupingIdentifier=g_if, WFControlFlowMode=2, UUID=U()),
   A("is.workflow.actions.openapp", WFAppIdentifier="com.officialfriendly.app",
     WFSelectedApp={"BundleIdentifier": "com.officialfriendly.app", "Name": "Friendly", "TeamIdentifier": "L7H9872BR2"}),
 ]
