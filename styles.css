@@ -1055,3 +1055,14 @@ body.replaying #app *{animation-play-state:paused!important}
 .cur-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .cur-acts .btn{margin:0}
 .cur-acts .btn:not(.primary){background:var(--surface);border:1px solid var(--line)}
+/* Who reacted: a tappable line under any reaction row, and the sheet it opens */
+.react-who{display:block;background:none;border:0;padding:3px 0 0;margin:0;font:inherit;font-size:12px;color:inherit;opacity:.72;text-align:left;cursor:pointer;text-decoration:underline;text-decoration-color:rgba(127,127,127,.45);text-underline-offset:2px}
+.hype-bar + .react-who{text-align:center;margin:6px auto 0}
+.pv-who-line .react-who{color:rgba(255,255,255,.75);padding:0 0 8px}
+.rs-row{display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--line)}
+.rs-row:first-of-type{border-top:0}
+.rs-e{font-size:24px;line-height:1;width:30px;flex:none;text-align:center;padding-top:2px}
+.rs-people{display:flex;flex-wrap:wrap;gap:8px 14px}
+.rs-p{display:inline-flex;align-items:center;gap:6px;font-size:14px;font-weight:600}
+body:has(.photo-viewer) .dlg-backdrop{z-index:1060}
+body:has(.photo-viewer) .app-dialog[open]{z-index:1061}

@@ -3225,7 +3225,7 @@ function eventInner(ev) {
     const n = Object.values(ev.hypes || {}).filter(v => v === h).length;
     const mine = (ev.hypes || {})[me] === h;
     return `<button class="hype ${mine ? "on" : ""}" data-hype="${h}">${h}${n ? `<b>${n}</b>` : ""}</button>`;
-  }).join("")}</div>`;
+  }).join("")}</div>${reactWhoLine("hype:" + ev.id, HYPES.map(h => [h, Object.keys(ev.hypes || {}).filter(u => (ev.hypes || {})[u] === h)]))}`;
 
   const setBy = (ev.rsvpSetBy || {})[me];
   const rsvpBtns = (ev.invitedUids || []).includes(me) ? `
@@ -3346,6 +3346,27 @@ const REACTS = { heart: "❤️", laugh: "😂", fire: "🔥", up: "👍", wow: 
 const QUICK_REACTS = ["❤️", "😂", "🔥", "👍", "😮", "🎉", "😍", "🙏"];
 const rkey = e => Object.keys(REACTS).find(k => REACTS[k] === e) || "e" + [...e].map(ch => ch.codePointAt(0).toString(16)).join("_");
 const rshow = k => REACTS[k] || (/^e[0-9a-f_]+$/.test(k) ? k.slice(1).split("_").map(h => String.fromCodePoint(parseInt(h, 16))).join("") : "");
+// Who reacted: a one-line summary under a reaction row ("Angel, Bea, and 2 others reacted"); tapping it opens a
+// sheet listing everyone under each emoji. groups = [[emoji, [uids]], ...].
+const reactGroups = new Map();
+const andList = xs => xs.length <= 1 ? (xs[0] || "") : xs.length === 2 ? xs.join(" and ") : xs.slice(0, -1).join(", ") + ", and " + xs[xs.length - 1];
+// Preview: shown only to admins (Wes) until he signs off; then drop the isAdmin() check.
+function reactWhoLine(key, groups) {
+  if (!isAdmin()) return "";
+  groups = groups.filter(([, us]) => us && us.length); if (!groups.length) return "";
+  reactGroups.set(key, groups);
+  const me = myUid(), seen = new Set(), people = [];
+  groups.forEach(([, us]) => us.forEach(u => { if (!seen.has(u)) { seen.add(u); people.push(u); } }));
+  people.sort((x, y) => (y === me) - (x === me));   // "You" first
+  const names = people.map(u => u === me ? "You" : first(nameOf(u)) || "Someone");
+  const shown = names.length > 3 ? [...names.slice(0, 2), `${names.length - 2} others`] : names;
+  return `<button type="button" class="react-who" data-rwho="${esc(key)}">${esc(andList(shown))} reacted</button>`;
+}
+function openReactSheet(key) {
+  const groups = reactGroups.get(key) || [], me = myUid(); if (!groups.length) return;
+  dialog(`<h3>Reactions</h3>${groups.map(([e, us]) => `<div class="rs-row"><span class="rs-e">${esc(e)}</span><div class="rs-people">${us.map(u => `<span class="rs-p">${avatar(u, "sm")}<span>${esc(u === me ? "You" : nameOf(u) || "Someone")}</span></span>`).join("")}</div></div>`).join("")}`, null, null);
+}
+document.addEventListener("click", e => { const b = e.target.closest && e.target.closest("[data-rwho]"); if (b) { e.preventDefault(); e.stopPropagation(); openReactSheet(b.dataset.rwho); } }, true);
 const firstGrapheme = v => { try { return [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(v)][0].segment; } catch { return [...v][0]; } };
 let replyTo = null;   // { id, name, ctx } while composing a threaded reply
 const parentPatch = ev => replyTo && replyTo.ctx === ev.id ? { parentId: replyTo.id } : {};
@@ -3371,7 +3392,7 @@ function openPhoto(ev, p) {
   const box = document.createElement("div"); box.className = "photo-viewer"; box.id = "photoViewer"; box._unsubs = [];
   box.innerHTML = `<div class="pv-top"><div class="pv-who">${avatar(p.addedBy)}<div><b>${esc(first(nameOf(p.addedBy)))}</b><div class="pv-sub">${esc(ev.title || "")}${p.createdAt ? " · " + esc(ago(p.createdAt)) : ""}</div></div></div><button type="button" class="pv-x" id="pvClose" aria-label="Close">✕</button></div>
     <div class="pv-img"><img id="pvImg" src="${esc(photoFullCache.get(p.id) || p.img)}" alt=""></div>
-    <div class="pv-panel"><div class="pv-reacts" id="pvReacts"></div>
+    <div class="pv-panel"><div class="pv-reacts" id="pvReacts"></div><div class="pv-who-line" id="pvWho"></div>
       <div class="pv-comments" id="pvComments"><p class="pv-empty">Loading comments…</p></div>
       <form class="pv-form" id="pvForm"><input id="pvText" placeholder="Add a comment…" maxlength="500" autocomplete="off" enterkeyhint="send"><button class="btn primary small" type="submit">Post</button></form></div>`;
   document.body.appendChild(box); lockScroll();
@@ -3382,6 +3403,7 @@ function openPhoto(ev, p) {
     const r = cur.reactions || {}, box2 = el("pvReacts"); if (!box2) return;
     box2.innerHTML = QUICK_REACTS.slice(0, 6).map(e => { const k = rkey(e), who = r[k] || [], on = who.includes(me);
       return `<button type="button" class="pv-react ${on ? "on" : ""}" data-pr="${k}" title="${esc(who.map(u => first(nameOf(u))).join(", "))}">${e}${who.length ? `<span>${who.length}</span>` : ""}</button>`; }).join("");
+    const who = el("pvWho"); if (who) who.innerHTML = reactWhoLine("photo:" + cur.id, Object.entries(r).filter(([k, us]) => rshow(k) && Array.isArray(us)).map(([k, us]) => [rshow(k), us]));
     box2.querySelectorAll("[data-pr]").forEach(b => b.onclick = () => { const k = b.dataset.pr, on = ((cur.reactions || {})[k] || []).includes(me);
       updateDoc(pref, { [`reactions.${k}`]: on ? arrayRemove(me) : arrayUnion(me) }).catch(e => toast(e.message)); });
   };
@@ -3418,6 +3440,7 @@ function wallInner(ev, title = "Party wall") {
     return `<div class="wall-msg${topId ? " reply" : ""}" data-cmsg="${esc(c.id)}">${avatar(c.authorId, "sm")}<div style="flex:1;min-width:0"><div class="wall-who">${esc(who)} <i>${ago(c.createdAt)}</i></div>
       ${c.gif ? `<img class="wall-img wall-gif" src="${esc(c.gif)}" alt="GIF">` : ""}${c.img ? `<img class="wall-img" src="${esc(c.img)}" alt="">` : ""}${c.text ? `<div class="wall-text">${renderText(c.text, c.mentions)}</div>` : ""}
       <div class="react-row">${rx.map(([k, us]) => `<button type="button" class="react ${us.includes(me) ? "on" : ""}" data-react="${c.id}|${k}">${rshow(k)} ${us.length}</button>`).join("")}<button type="button" class="react add" data-reactpick="${c.id}" title="React">＋</button><button type="button" class="react add" data-reply="${topId || c.id}|${esc(who)}">↩ Reply</button></div>
+      ${reactWhoLine("c:" + c.id, rx.map(([k, us]) => [rshow(k), us]))}
       ${(kids[c.id] || []).map(r => msg(r, c.id)).join("")}</div>
       ${c.authorId === me || isAdmin() ? `<button class="wall-del" data-delc="${c.id}" title="Delete">✕</button>` : `<button class="wall-del" data-more="comment|${c.id}" title="Report or block">⋯</button>`}</div>`;
   };
