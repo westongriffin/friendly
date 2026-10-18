@@ -802,23 +802,37 @@ const tailOf = url => routeTail(url).split("?")[0];
 // tapped notification can cold-start the app.
 let focusKey = "";
 function focusRoute() {
-  const q = S.route.q || {}; if (!q.to && !q.c && !q.photo) return;
+  const q = S.route.q || {}; if (!q.to && !q.c && !q.photo && !q.who && !q.pair) return;
   const key = location.hash; if (focusKey === key) return; focusKey = key;
   let tries = 0;
   const tick = () => {
     if (location.hash !== key) return;
     if (!S.user || !S.ready || document.querySelector(".splash")) { if (tries++ < 400) setTimeout(tick, 250); return; }
     tries++;
-    if (q.photo) { const ev = S.events.get(S.route.id), p = (S.photos || []).find(x => x.id === q.photo); if (ev && p) { openPhoto(ev, p); return; } if (tries < 60) setTimeout(tick, 250); return; }
+    if (q.photo) { const ev = S.events.get(S.route.id), p = (S.photos || []).find(x => x.id === q.photo); if (ev && p) { openPhoto(ev, p); if (q.c) flashWhenFound(() => document.querySelector(`#pvComments [data-cmsg="${CSS.escape(q.c)}"]`)); return; } if (tries < 60) setTimeout(tick, 250); return; }
     const msg = q.c && document.querySelector(`[data-cmsg="${CSS.escape(q.c)}"]`);
     const sec = q.to && document.getElementById(q.to);
-    const target = msg || ((!q.c || tries > 16) && sec);   // give a message 4 seconds to load, then settle for its section
+    // The specific thing behind the alert: a person's row on an expense, a request, a guest's chip, a settle-up row.
+    const who = q.who && whoTarget(q.who, sec), pair = q.pair && document.querySelector(`[data-pair="${CSS.escape(q.pair)}"]`);
+    const specific = msg || who || pair;
+    const target = specific || ((!q.c && !q.who && !q.pair || tries > 16) && sec);   // give the specific thing 4 seconds to load, then settle for its section
     if (!target) { if (tries < 60) setTimeout(tick, 250); return; }
     target.scrollIntoView({ block: "center" });
     target.classList.add("focus-flash"); setTimeout(() => target.classList.remove("focus-flash"), 2400);
   };
   tick();
 }
+// A person as the page shows them: an expense row, a friend request, a guest chip, else any avatar of theirs in the section.
+function whoTarget(uid, sec) {
+  const esc1 = CSS.escape(uid);
+  const direct = document.querySelector(`[data-xperson="${esc1}"]`); if (direct) return direct;
+  const req = document.querySelector(`#reqCard [data-friendaccept*="${esc1}"]`); if (req) return req.closest(".member-row") || req;
+  const chip = document.querySelector(`.guest-chip [data-viewprofile="${esc1}"]`); if (chip) return chip.closest(".guest-chip") || chip;
+  const pf = (sec || document).querySelector(`[data-pf="${esc1}"]`); if (pf) return pf.closest(".member-row, .guest-chip, .settle-row, .ledger") || pf;
+  return null;
+}
+// Flash something that is still loading (comments inside the photo viewer): look for it a few times, then give up.
+function flashWhenFound(find, tries = 20) { const t = find(); if (t) { t.scrollIntoView({ block: "center" }); t.classList.add("focus-flash"); setTimeout(() => t.classList.remove("focus-flash"), 2400); return; } if (tries > 0) setTimeout(() => flashWhenFound(find, tries - 1), 250); }
 window.go = path => { location.hash = path; };
 
 // ---------- auth ----------
@@ -3325,7 +3339,7 @@ function openPhoto(ev, p) {
   box._unsubs.push(onSnapshot(query(collection(db, "events", ev.id, "photos", p.id, "comments"), orderBy("createdAt")), snap => {
     const list = el("pvComments"); if (!list) return;
     const rows = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(visibleContent);
-    list.innerHTML = rows.length ? rows.map(c => `<div class="pv-c">${avatar(c.authorId, "sm")}<div class="pv-c-body"><b>${esc(first(c.authorName || nameOf(c.authorId)))}</b> ${renderText(c.text || "", c.mentions)}<div class="pv-sub">${esc(ago(c.createdAt))}${c.authorId === me || host ? ` · <button type="button" class="pv-del" data-pcdel="${c.id}">Delete</button>` : ""}</div></div></div>`).join("")
+    list.innerHTML = rows.length ? rows.map(c => `<div class="pv-c" data-cmsg="${esc(c.id)}">${avatar(c.authorId, "sm")}<div class="pv-c-body"><b>${esc(first(c.authorName || nameOf(c.authorId)))}</b> ${renderText(c.text || "", c.mentions)}<div class="pv-sub">${esc(ago(c.createdAt))}${c.authorId === me || host ? ` · <button type="button" class="pv-del" data-pcdel="${c.id}">Delete</button>` : ""}</div></div></div>`).join("")
       : `<p class="pv-empty">No comments yet. Say something nice.</p>`;
     list.querySelectorAll("[data-pcdel]").forEach(b => b.onclick = () => deleteDoc(doc(db, "events", ev.id, "photos", p.id, "comments", b.dataset.pcdel)).catch(e => toast(e.message)));
     list.scrollTop = list.scrollHeight;
@@ -4033,7 +4047,7 @@ function moneyBody() {
   <div class="tiles"><div class="card tile owe"><span class="muted sm">You owe</span><div class="amt">${fmt$(iOwe)}</div></div>
     <div class="card tile owed"><span class="muted sm">Owed to you</span><div class="amt">${fmt$(owed)}</div></div></div>
   ${!mine.length && rows.length ? `<div class="card empty compact">${dot("party", 72)}<b>All squared up</b><p class="muted">Nobody owes anybody. Nice.</p></div>` : ""}
-  ${mine.length ? `<div class="section-head"><h2>Settle up</h2>${pairs.length > 1 ? `<button class="btn small ${S.simplePay ? "primary" : ""}" id="simplePay" title="Combine debts into the fewest payments">${S.simplePay ? "✓ Fewest payments" : "Fewest payments"}</button>` : ""}</div><div class="stack">${mine.map(p => {
+  ${mine.length ? `<div class="section-head"><h2>Settle up</h2>${pairs.length > 1 ? `<button class="btn small ${S.simplePay ? "primary" : ""}" id="simplePay" title="Combine debts into the fewest payments">${S.simplePay ? "✓ Fewest payments" : "Fewest payments"}</button>` : ""}</div><div class="stack" id="settleCard">${mine.map(p => {
     const other = payInfoOf(p.from === me ? p.to : p.from);
     let pay = "";
     if (p.from === me) {
@@ -4050,7 +4064,7 @@ function moneyBody() {
     }
     else if (other.venmo) pay = `<button class="btn small venmo" data-request="${p.from}" data-amt="${p.amount}">Request</button>`;
     else if (isGuest(p.from)) pay = `<button class="btn small" data-text="${p.from}|${p.amount}|owed">💬 Text a reminder</button>`;
-    return `<div class="card settle-row"><div class="settle-top">${avatar(p.from)}<div style="flex:1"><b>${p.from === me ? "You owe " + esc(nameOf(p.to)) : esc(nameOf(p.from)) + " owes you"}</b></div><span class="amt sm">${fmt$(p.amount)}</span></div><div class="settle-actions">${pay}<button class="btn small" data-record="${p.from}|${p.to}|${p.amount}">${p.from === me ? "Mark as paid" : "Mark as received"}</button></div></div>`;
+    return `<div class="card settle-row" data-pair="${esc(p.from + "|" + p.to)}"><div class="settle-top">${avatar(p.from)}<div style="flex:1"><b>${p.from === me ? "You owe " + esc(nameOf(p.to)) : esc(nameOf(p.from)) + " owes you"}</b></div><span class="amt sm">${fmt$(p.amount)}</span></div><div class="settle-actions">${pay}<button class="btn small" data-record="${p.from}|${p.to}|${p.amount}">${p.from === me ? "Mark as paid" : "Mark as received"}</button></div></div>`;
   }).join("")}</div>` : ""}
   <div class="section-head"><h2>Activity</h2></div>
   <div class="card">${rows.length ? rows.map(r => {
@@ -4102,7 +4116,7 @@ function expenseBody(id) {
     const status = payer ? `<span class="pill ok">Paid the bill</span>` : paid ? `<span class="pill ok">Paid${paid.at ? " · " + new Date(paid.at).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : ""}</span>` : `<span class="pill due">Unpaid</span>`;
     const acts = payer || !cents ? "" : paid ? (canManage || paid.by === me ? `<button class="btn ghost small" data-munpaid="${esc(u)}">Mark unpaid</button>` : "")
       : `${canManage && u !== me ? `<button class="btn small" data-remind="${esc(u)}">${isGuest(u) ? "💬 Text" : "🔔 Remind"}</button>` : ""}${canManage || u === me ? `<button class="btn small" data-mpaid="${esc(u)}">${u === me ? "I paid" : "Mark paid"}</button>` : ""}`;
-    return `<div class="member-row x-person">${avatar(u, "lg")}<div style="flex:1;min-width:0"><b>${esc(nameOf(u))}${u === me ? " (you)" : ""}</b><div class="x-status">${status}</div></div><div class="x-acts"><span class="amt sm">${fmt$(cents)}</span>${acts ? `<div class="btnrow" style="gap:6px;justify-content:flex-end">${acts}</div>` : ""}</div></div>`; }).join("")}</div>
+    return `<div class="member-row x-person" data-xperson="${esc(u)}">${avatar(u, "lg")}<div style="flex:1;min-width:0"><b>${esc(nameOf(u))}${u === me ? " (you)" : ""}</b><div class="x-status">${status}</div></div><div class="x-acts"><span class="amt sm">${fmt$(cents)}</span>${acts ? `<div class="btnrow" style="gap:6px;justify-content:flex-end">${acts}</div>` : ""}</div></div>`; }).join("")}</div>
   ${(x.items || []).length ? `<div class="section-head" style="margin-top:22px"><h2>Receipt${x.merchant ? " · " + esc(x.merchant) : ""}</h2></div>
   <div class="card">${x.items.map(it => `<div class="member-row"><div style="flex:1;min-width:0"><b>${esc(it.name)}</b><div class="muted sm">${(it.uids || []).map(u => esc(first(nameOf(u)))).join(", ") || "unassigned"}</div></div><span class="amt sm">${fmt$(it.cents)}</span></div>`).join("")}
     ${x.tax ? `<div class="member-row"><div style="flex:1"><b>Tax</b><div class="muted sm">split in proportion</div></div><span class="amt sm">${fmt$(x.tax)}</span></div>` : ""}

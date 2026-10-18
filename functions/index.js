@@ -747,7 +747,7 @@ exports.onPhotoComment = onDocumentCreated({ document: "events/{eid}/photos/{pid
   const owner = p.exists && p.get("addedBy");
   if (owner && owner !== c.authorId)
     await notify([owner], `${firstName(c.authorName || "Someone")} commented on your photo`, `“${String(c.text || "").slice(0, 120)}” · ${ev.exists ? ev.get("title") : "your event"}`,
-      `/#/e/${eid}?photo=${pid}`, { type: "comment", actorId: c.authorId });
+      `/#/e/${eid}?photo=${pid}&c=${e.params.cid}`, { type: "comment", actorId: c.authorId });
 });
 exports.onPhotoCommentDeleted = onDocumentDeleted({ document: "events/{eid}/photos/{pid}/comments/{cid}" }, async e => {
   await db.doc(`events/${e.params.eid}/photos/${e.params.pid}`).update({ commentCount: FieldValue.increment(-1) }).catch(() => {});
@@ -1083,7 +1083,7 @@ exports.onEventCreated = onDocumentCreated({ document: "events/{id}", ...MAIL },
   const kind = ev.kind === "meeting" ? "meeting" : "event";
   await notify((ev.invitedUids || []).filter(u => u !== ev.hostId),
     firstName(nm[ev.hostId]) + " invited you" + (kind === "meeting" ? " to a meeting" : ""), (kind === "meeting" ? "📅 " : (ev.emoji || "🎉") + " ") + ev.title,
-    "/#/e/" + e.params.id, { type: kind, actorId: ev.hostId });
+    "/#/e/" + e.params.id + "?to=rsvpCard", { type: kind, actorId: ev.hostId });
   await Promise.all([sendInviteEmails(e.params.id, ev, "REQUEST"), writePreview(e.params.id, ev)]);
 });
 
@@ -1278,7 +1278,7 @@ exports.onNudge = onDocumentCreated({ document: "nudges/{id}", ...PUSH }, async 
     if (Date.now() - last < 12 * 3600e3) { await e.data.ref.update({ sent: 0, at: Date.now(), skipped: "too soon" }); return; }
     const share = x.shares ? (x.shares[n.to] || 0) : Math.round(x.amountCents / ((x.split || []).length || 1));
     const nm = await names([n.by, x.paidBy]);
-    await notify([n.to], firstName(nm[n.by]) + " sent a reminder: " + (x.desc || "an expense"), `Your share is ${dollars(share)} · pay ${firstName(nm[x.paidBy])} from the expense or the Money tab.`, "/#/x/" + n.expenseId, { type: "money", actorId: n.by });
+    await notify([n.to], firstName(nm[n.by]) + " sent a reminder: " + (x.desc || "an expense"), `Your share is ${dollars(share)} · pay ${firstName(nm[x.paidBy])} from the expense or the Money tab.`, "/#/x/" + n.expenseId + "?who=" + encodeURIComponent(n.to), { type: "money", actorId: n.by });
     await logRef.set({ at: Date.now() }); await e.data.ref.update({ sent: 1, at: Date.now() });
     return;
   }
@@ -1332,7 +1332,7 @@ exports.onExpenseAdded = onDocumentCreated({ document: "expenses/{xid}", ...PUSH
     if (u === x.paidBy) { const owed = x.amountCents - share; body = `You paid ${dollars(x.amountCents)}; ${owed > 0 ? dollars(owed) + " is owed back to you" : "nothing is owed back"}.`; }
     else if (share > 0) body = `Your share is ${dollars(share)} · ${payerName} paid.`;
     else continue;
-    await notify([u], `${adderName} added ${desc}`, body, url, { type: "money", actorId: adder });
+    await notify([u], `${adderName} added ${desc}`, body, url + "?who=" + encodeURIComponent(u), { type: "money", actorId: adder });
   }
 });
 exports.onExpenseComment = onDocumentCreated({ document: "expenses/{xid}/comments/{cid}", ...PUSH }, async e => {
@@ -1523,7 +1523,7 @@ exports.onFriendship = onDocumentWritten({ document: "friendships/{fid}", ...PUS
   const by = after.requestedBy, other = (after.uids || []).find(u => u !== by);
   const nm = u => firstName(((after.people || {})[u] || {}).name || "Someone");
   if (!before && after.status === "pending")
-    await notify([other], nm(by) + " wants to be friends on Friendly", "Accept to message each other.", "/#/messages?to=reqCard", { type: "friend", actorId: by });
+    await notify([other], nm(by) + " wants to be friends on Friendly", "Accept to message each other.", "/#/messages?to=reqCard&who=" + encodeURIComponent(by), { type: "friend", actorId: by });
   else if (after.status === "accepted" && (!before || before.status !== "accepted") && after.via !== "group")
     await notify([by], nm(other) + " accepted your friend request", "Say hi! 👋", "/#/m/" + e.params.fid, { type: "friend", actorId: other });
 });
@@ -1600,7 +1600,7 @@ exports.onRsvp = onDocumentUpdated({ document: "events/{id}", ...MAIL }, async e
     if (sbA[changed]) await e.data.after.ref.update({ ["rsvpSetBy." + changed]: FieldValue.delete() }).catch(() => {});
     const nm = await names([changed]);
     const word = { going: "is going to", maybe: "might come to", no: "can't make", waitlist: "joined the waitlist for", pending: "requested to join" }[a[changed]] || "updated";
-    await notify([after.hostId], firstName(nm[changed]) + " " + word, after.title, "/#/e/" + id + "?to=guestCard", { type: "rsvp", actorId: changed });
+    await notify([after.hostId], firstName(nm[changed]) + " " + word, after.title, "/#/e/" + id + "?to=guestCard&who=" + encodeURIComponent(changed), { type: "rsvp", actorId: changed });
     if (a[changed] === "going" && (b[changed] === "waitlist" || b[changed] === "pending"))
       await notify([changed], "You're in! " + after.title, b[changed] === "waitlist" ? "A spot opened up and it's yours." : "The host approved you.", "/#/e/" + id + "?to=rsvpCard", { type: "rsvp" });
   }
@@ -1611,7 +1611,7 @@ exports.onRsvp = onDocumentUpdated({ document: "events/{id}", ...MAIL }, async e
   const linkJoins = added.filter(u => (after.joinedVia || {})[u] === "link" && u !== after.hostId);
   if (linkJoins.length) {
     const nm = await names(linkJoins);
-    for (const u of linkJoins) await notify([after.hostId, ...(after.cohostUids || [])].filter(h => h !== u), firstName(nm[u]) + " joined via your link", after.title, "/#/e/" + id + "?to=guestCard", { type: "rsvp", actorId: u });
+    for (const u of linkJoins) await notify([after.hostId, ...(after.cohostUids || [])].filter(h => h !== u), firstName(nm[u]) + " joined via your link", after.title, "/#/e/" + id + "?to=guestCard&who=" + encodeURIComponent(u), { type: "rsvp", actorId: u });
   }
   // Edits to the essentials -> bump the sequence once and re-send invites.
   const essentials = ["title", "date", "time", "endTime", "location", "notes"];
@@ -1677,7 +1677,7 @@ exports.dailyReminders = onSchedule({ schedule: "0 9 * * *", timeZone: "America/
     if (net < 100) continue;
     const key = from + "_" + to; if (Date.now() - (log[key] || 0) < 3 * 86400e3) continue;
     const nm = await names([to]);
-    await notify([from], "You still owe " + firstName(nm[to]) + " $" + (net / 100).toFixed(2), "Settle up from the Money tab.", "/#/money", { type: "money" });
+    await notify([from], "You still owe " + firstName(nm[to]) + " $" + (net / 100).toFixed(2), "Settle up from the Money tab.", "/#/money?to=settleCard&pair=" + encodeURIComponent(from + "|" + to), { type: "money" });
     await db.doc("nudgeLog/" + key).set({ at: Date.now() }); nudged++;
   }
   if (nudged) logger.info("Money reminders sent: " + nudged);
