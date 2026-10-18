@@ -4340,7 +4340,15 @@ function payViaShortcut(uid, cents, expenseId) {
   dialog(`<h3>Apple Cash in one tap <span class="muted sm">(preview, only you see this)</span></h3>
     <p>Add the free <b>Friendly Pay</b> shortcut once. After that, Cash opens Apple Pay with ${esc(first(nameOf(uid)))} and <b>${fmt$(cents)}</b> already filled in. You confirm with Face ID.</p>
     <div class="stack"><button type="button" class="btn" id="fpAdd">1. Add the shortcut</button><button type="button" class="btn primary" id="fpRun">2. Pay ${fmt$(cents)} now</button><button type="button" class="btn ghost" id="fpSms">Use Messages instead</button></div>`, null, null);
-  el("fpAdd").onclick = () => window.open(PAY_SHORTCUT_URL, "_blank");
+  // Apple's Add Shortcut screen can't send anyone back, so when they return (the "◀ Friendly" corner link, or
+  // switching apps) this box is already on the next step: one button to pay.
+  const ready = () => { const d = el("appDialog"); if (!d || !el("fpAdd")) return;
+    d.querySelector(".dlg-inner").innerHTML = `<h3>You're set up</h3><p>Friendly Pay is added. Next time, Cash goes straight to Apple Pay.</p>
+      <div class="stack"><button type="button" class="btn primary" id="fpGo">Pay ${esc(first(nameOf(uid)))} ${fmt$(cents)} now</button><button type="button" class="btn ghost" id="fpLater">Not now</button></div>`;
+    el("fpGo").onclick = () => { LS.set("friendlyPayShortcut", "1"); closeDialog(); run(); };
+    el("fpLater").onclick = () => { LS.set("friendlyPayShortcut", "1"); closeDialog(); }; };
+  const onBack = () => { if (document.visibilityState === "visible") { document.removeEventListener("visibilitychange", onBack); setTimeout(ready, 300); } };
+  el("fpAdd").onclick = () => { document.addEventListener("visibilitychange", onBack); window.open(PAY_SHORTCUT_URL, "_blank"); };
   el("fpRun").onclick = () => { LS.set("friendlyPayShortcut", "1"); closeDialog(); run(); };
   el("fpSms").onclick = () => { closeDialog(); payApple(uid, cents, expenseId, true); };
 }
