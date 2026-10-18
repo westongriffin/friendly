@@ -860,7 +860,7 @@ onAuthStateChanged(auth, async u => {
   if (pendingJoin) location.hash = "#/join/" + pendingJoin;
   else if (/^(#\/?|#\/(money|groups|activity|photos|search|profile))$/.test(location.hash)) location.hash = "#/";
   if (NATIVE) registerPush(u.uid);
-  setTimeout(reportContactsTrace, 4000); setTimeout(reportFreezeTrace, 4500);
+  setTimeout(reportContactsTrace, 4000); setTimeout(reportFreezeTrace, 4500); setTimeout(resumePayAsk, 3000);
 });
 
 function subscribeAll(u) {
@@ -3350,23 +3350,41 @@ const rshow = k => REACTS[k] || (/^e[0-9a-f_]+$/.test(k) ? k.slice(1).split("_")
 // sheet listing everyone under each emoji. groups = [[emoji, [uids]], ...].
 const reactGroups = new Map();
 const andList = xs => xs.length <= 1 ? (xs[0] || "") : xs.length === 2 ? xs.join(" and ") : xs.slice(0, -1).join(", ") + ", and " + xs[xs.length - 1];
-// Preview: shown only to admins (Wes) until he signs off; then drop the isAdmin() check.
+// Who reacted (PREVIEW, admins only until Wes signs off; then drop the isAdmin() checks): press and hold any
+// reaction to see who's behind it. Rows register each item's reactions as they render (reactWhoLine draws nothing);
+// the hold opens a sheet with everyone, the pressed emoji first.
 function reactWhoLine(key, groups) {
-  if (!isAdmin()) return "";
-  groups = groups.filter(([, us]) => us && us.length); if (!groups.length) return "";
-  reactGroups.set(key, groups);
-  const me = myUid(), seen = new Set(), people = [];
-  groups.forEach(([, us]) => us.forEach(u => { if (!seen.has(u)) { seen.add(u); people.push(u); } }));
-  people.sort((x, y) => (y === me) - (x === me));   // "You" first
-  const names = people.map(u => u === me ? "You" : first(nameOf(u)) || "Someone");
-  const shown = names.length > 3 ? [...names.slice(0, 2), `${names.length - 2} others`] : names;
-  return `<button type="button" class="react-who" data-rwho="${esc(key)}">${esc(andList(shown))} reacted</button>`;
+  groups = groups.filter(([, us]) => us && us.length);
+  if (groups.length) reactGroups.set(key, groups); else reactGroups.delete(key);
+  return "";
 }
-function openReactSheet(key) {
-  const groups = reactGroups.get(key) || [], me = myUid(); if (!groups.length) return;
+function openReactSheet(key, firstEmoji) {
+  let groups = reactGroups.get(key) || []; const me = myUid(); if (!groups.length) return;
+  if (firstEmoji) groups = [...groups.filter(([e]) => e === firstEmoji), ...groups.filter(([e]) => e !== firstEmoji)];
   dialog(`<h3>Reactions</h3>${groups.map(([e, us]) => `<div class="rs-row"><span class="rs-e">${esc(e)}</span><div class="rs-people">${us.map(u => `<span class="rs-p">${avatar(u, "sm")}<span>${esc(u === me ? "You" : nameOf(u) || "Someone")}</span></span>`).join("")}</div></div>`).join("")}`, null, null);
 }
-document.addEventListener("click", e => { const b = e.target.closest && e.target.closest("[data-rwho]"); if (b) { e.preventDefault(); e.stopPropagation(); openReactSheet(b.dataset.rwho); } }, true);
+const RX_SEL = "[data-react],[data-hype],[data-pr]";
+const rxKeyOf = b => {
+  if (b.dataset.react) { const [cid, k] = b.dataset.react.split("|"); return ["c:" + cid, rshow(k)]; }
+  if (b.dataset.hype) return ["hype:" + ((S.route && S.route.id) || ""), b.dataset.hype];
+  if (b.dataset.pr) { const v = el("photoViewer"); return ["photo:" + ((v && v.dataset.pid) || ""), rshow(b.dataset.pr)]; }
+  return null;
+};
+let rxHold = 0, rxFired = 0;
+document.addEventListener("pointerdown", e => {
+  if (!isAdmin()) return;
+  const b = e.target.closest && e.target.closest(RX_SEL); if (!b) return;
+  const k = rxKeyOf(b); if (!k || !reactGroups.has(k[0])) return;
+  const x0 = e.clientX, y0 = e.clientY;
+  const off = () => ["pointerup", "pointercancel", "pointermove"].forEach(t => document.removeEventListener(t, cancel, true));
+  const cancel = ev => { if (ev.type === "pointermove" && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 10) return; clearTimeout(rxHold); off(); };
+  ["pointerup", "pointercancel", "pointermove"].forEach(t => document.addEventListener(t, cancel, true));
+  clearTimeout(rxHold);
+  rxHold = setTimeout(() => { off(); rxFired = Date.now(); openReactSheet(k[0], k[1]); }, 450);
+}, true);
+// The press that opened the sheet doesn't also toggle the reaction, and iOS doesn't pop its copy/lookup menu.
+document.addEventListener("click", e => { if (Date.now() - rxFired < 800 && e.target.closest && e.target.closest(RX_SEL)) { e.preventDefault(); e.stopPropagation(); } }, true);
+document.addEventListener("contextmenu", e => { if (isAdmin() && e.target.closest && e.target.closest(RX_SEL)) e.preventDefault(); }, true);
 const firstGrapheme = v => { try { return [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(v)][0].segment; } catch { return [...v][0]; } };
 let replyTo = null;   // { id, name, ctx } while composing a threaded reply
 const parentPatch = ev => replyTo && replyTo.ctx === ev.id ? { parentId: replyTo.id } : {};
@@ -3389,7 +3407,7 @@ function closePhoto() { const v = el("photoViewer"); if (!v) return; (v._unsubs 
 function openPhoto(ev, p) {
   closePhoto();
   const me = myUid(), host = ev.hostId === me || (ev.cohostUids || []).includes(me) || isAdmin();
-  const box = document.createElement("div"); box.className = "photo-viewer"; box.id = "photoViewer"; box._unsubs = [];
+  const box = document.createElement("div"); box.className = "photo-viewer"; box.id = "photoViewer"; box._unsubs = []; box.dataset.pid = p.id;
   box.innerHTML = `<div class="pv-top"><div class="pv-who">${avatar(p.addedBy)}<div><b>${esc(first(nameOf(p.addedBy)))}</b><div class="pv-sub">${esc(ev.title || "")}${p.createdAt ? " · " + esc(ago(p.createdAt)) : ""}</div></div></div><button type="button" class="pv-x" id="pvClose" aria-label="Close">✕</button></div>
     <div class="pv-img"><img id="pvImg" src="${esc(photoFullCache.get(p.id) || p.img)}" alt=""></div>
     <div class="pv-panel"><div class="pv-reacts" id="pvReacts"></div><div class="pv-who-line" id="pvWho"></div>
@@ -4095,18 +4113,21 @@ function editEvent(ev) {
 
 // ---------- MONEY ----------
 function pairwise() {
-  const owes = {};
-  const add = (d, c, cents) => { if (d === c || !cents) return; (owes[d] = owes[d] || {})[c] = (owes[d][c] || 0) + cents; };
+  // owes[d][c]: what d owes c; why[d][c]: the expenses (and paybacks) behind it, for the settle-up rows.
+  const owes = {}, why = {};
+  const add = (d, c, cents, label, paid) => { if (d === c || !cents) return; (owes[d] = owes[d] || {})[c] = (owes[d][c] || 0) + cents; ((why[d] = why[d] || {})[c] = why[d][c] || []).push({ label, cents, paid: !!paid }); };
   for (const x of S.expenses.values()) {
     // Itemized expenses carry exact per-person amounts; otherwise split evenly.
-    if (x.shares) { for (const [u, c] of Object.entries(x.shares)) if (knownPerson(u)) add(u, x.paidBy, c); continue; }
+    if (x.shares) { for (const [u, c] of Object.entries(x.shares)) if (knownPerson(u)) add(u, x.paidBy, c, x.desc || "Expense", (x.paid || {})[u]); continue; }
     const split = (x.split || []).filter(knownPerson); if (!split.length) continue;
     const base = Math.floor(x.amountCents / split.length); let rem = x.amountCents - base * split.length;
-    for (const u of split) add(u, x.paidBy, base + (rem-- > 0 ? 1 : 0));
+    for (const u of split) add(u, x.paidBy, base + (rem-- > 0 ? 1 : 0), x.desc || "Expense", (x.paid || {})[u]);
   }
-  for (const s of S.settlements.values()) add(s.to, s.from, s.amountCents);
+  for (const s of S.settlements.values()) add(s.to, s.from, s.amountCents, "Paid back");
   const pairs = []; const seen = new Set();
-  for (const a in owes) for (const b in owes[a]) { const k = a < b ? a + b : b + a; if (seen.has(k)) continue; seen.add(k); const net = (owes[a]?.[b] || 0) - (owes[b]?.[a] || 0); if (net > 0) pairs.push({ from: a, to: b, amount: net }); else if (net < 0) pairs.push({ from: b, to: a, amount: -net }); }
+  for (const a in owes) for (const b in owes[a]) { const k = a < b ? a + b : b + a; if (seen.has(k)) continue; seen.add(k); const net = (owes[a]?.[b] || 0) - (owes[b]?.[a] || 0);
+    const parts = (f, t) => [...((why[f] || {})[t] || []).map(x => ({ ...x, sign: 1 })), ...((why[t] || {})[f] || []).map(x => ({ ...x, sign: -1 }))];
+    if (net > 0) pairs.push({ from: a, to: b, amount: net, parts: parts(a, b) }); else if (net < 0) pairs.push({ from: b, to: a, amount: -net, parts: parts(b, a) }); }
   return pairs;
 }
 function moneyBody() {
@@ -4127,7 +4148,7 @@ function moneyBody() {
     if (p.from === me) pay = payBtns(p.to, p.amount);
     else if (other.venmo) pay = `<button class="btn small venmo" data-request="${p.from}" data-amt="${p.amount}">Request</button>`;
     else if (isGuest(p.from)) pay = `<button class="btn small" data-text="${p.from}|${p.amount}|owed">💬 Text a reminder</button>`;
-    return `<div class="card settle-row" data-pair="${esc(p.from + "|" + p.to)}"><div class="settle-top">${avatar(p.from)}<div style="flex:1"><b>${p.from === me ? "You owe " + esc(nameOf(p.to)) : esc(nameOf(p.from)) + " owes you"}</b></div><span class="amt sm">${fmt$(p.amount)}</span></div><div class="settle-actions">${pay}<button class="btn small" data-record="${p.from}|${p.to}|${p.amount}">${p.from === me ? "Mark as paid" : "Mark as received"}</button></div></div>`;
+    return `<div class="card settle-row" data-pair="${esc(p.from + "|" + p.to)}"><div class="settle-top">${avatar(p.from)}<div style="flex:1"><b>${p.from === me ? "You owe " + esc(nameOf(p.to)) : esc(nameOf(p.from)) + " owes you"}</b>${settleWhy(p, me)}</div><span class="amt sm">${fmt$(p.amount)}</span></div><div class="settle-actions">${pay}<button class="btn small" data-record="${p.from}|${p.to}|${p.amount}">${p.from === me ? "Mark as paid" : "Mark as received"}</button></div></div>`;
   }).join("")}</div>` : ""}
   <div class="section-head"><h2>Activity</h2></div>
   <div class="card">${rows.length ? rows.map(r => {
@@ -4266,12 +4287,35 @@ async function markPaid(from, to, cents, note, expenseId) {
 // Friendly (or after a few seconds if the app opened beside it) they're asked once.
 function askIfSent(to, cents, method, expenseId, onNo) {
   let asked = false; const t0 = Date.now();
-  const ask = () => { if (asked) return; asked = true; document.removeEventListener("visibilitychange", onVis); clearTimeout(timer);
+  // Kept on the phone too: iOS may reload Friendly while Apple Pay or Venmo is open, and the question must still come.
+  LS.set("friendlyPayPending", JSON.stringify({ to, cents, method, expenseId: expenseId || null, at: t0 }));
+  const ask = () => { if (asked) return; asked = true; LS.remove("friendlyPayPending"); document.removeEventListener("visibilitychange", onVis); clearTimeout(timer);
     dialog(`<h3>Did it go through?</h3><p>Did you send <b>${fmt$(cents)}</b> to <b>${esc(first(nameOf(to)))}</b> with ${esc(method)}?</p><p class="muted sm">It's marked paid only once you say so, for both of you.</p>`, "Yes, mark it paid", () => { closeDialog(); markPaid(myUid(), to, cents, method, expenseId); });
     const c = el("dlgCancel"); if (c) { c.textContent = "Not yet"; if (onNo) c.addEventListener("click", onNo); } };
   const onVis = () => { if (document.visibilityState === "visible" && Date.now() - t0 > 600) setTimeout(ask, 350); };
   document.addEventListener("visibilitychange", onVis);
   const timer = setTimeout(() => { if (document.visibilityState === "visible") ask(); }, 6000);
+}
+// What makes up a settle-up amount: each expense between the two of you, with the ones running the other way (and
+// paybacks) taken off, so a $1 you owe Sarah tucked inside "Sarah owes you $22.01" is still visible.
+function settleWhy(p, me) {
+  let parts = (p.parts || []).filter(x => x.cents); if (!parts.length) return "";
+  // Expenses already marked paid cancel against their paybacks; when the rest adds up to the amount, show only the rest.
+  const open = parts.filter(x => !x.paid && x.label !== "Paid back");
+  if (open.length && open.reduce((n, x) => n + x.sign * x.cents, 0) === p.amount) parts = open;
+  const yours = x => (x.sign > 0) === (p.from === me);   // you owe on this line
+  const shown = parts.sort((x, y) => (y.sign - x.sign) || (y.cents - x.cents)).slice(0, 4);
+  const line = shown.map(x => x.sign > 0 ? `${esc(x.label)} ${fmt$(x.cents)}` : `${x.label === "Paid back" ? (p.from === me ? "you paid back" : "they paid back") : `minus ${esc(x.label)}${yours(x) ? " (you owe)" : ""}`} ${fmt$(x.cents)}`).join(" · ");
+  return `<div class="settle-why">${line}${parts.length > shown.length ? ` · +${parts.length - shown.length} more` : ""}</div>`;
+}
+// After a reload, a payment that was in progress (under 20 minutes ago) asks its question once.
+async function resumePayAsk() {
+  await bootDiag; let p = null; try { p = JSON.parse(LS.get("friendlyPayPending") || "null"); } catch {}
+  if (!p || !p.to || !p.cents || Date.now() - (p.at || 0) > 20 * 60000 || !myUid()) { if (p) LS.remove("friendlyPayPending"); return; }
+  LS.remove("friendlyPayPending");
+  if (el("appDialog")) return;
+  dialog(`<h3>Did it go through?</h3><p>Did you send <b>${fmt$(p.cents)}</b> to <b>${esc(first(nameOf(p.to)))}</b> with ${esc(p.method)}?</p><p class="muted sm">It's marked paid only once you say so, for both of you.</p>`, "Yes, mark it paid", () => { closeDialog(); markPaid(myUid(), p.to, p.cents, p.method, p.expenseId || undefined); });
+  const c = el("dlgCancel"); if (c) c.textContent = "Not yet";
 }
 // A text to someone who isn't on Friendly: what they owe you and how to pay you, or what you owe them.
 function textGuest(id, cents, dir) {

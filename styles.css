@@ -1066,3 +1066,7 @@ body.replaying #app *{animation-play-state:paused!important}
 .rs-p{display:inline-flex;align-items:center;gap:6px;font-size:14px;font-weight:600}
 body:has(.photo-viewer) .dlg-backdrop{z-index:1060}
 body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
+
+.settle-why{font-size:12px;color:var(--muted);font-weight:500;line-height:1.35;margin-top:2px}
+/* Press-and-hold on a reaction shows who reacted: no text selection or iOS callout on those chips. */
+[data-react],[data-hype],[data-pr]{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
