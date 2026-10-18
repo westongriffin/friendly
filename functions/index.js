@@ -167,31 +167,57 @@ exports.onCoverRequest = onDocumentCreated({ document: "coverRequests/{id}", reg
 // Same request/response-doc pattern as covers: the app writes
 // receiptRequests/{id} with a photo; we write back itemized JSON.
 const RECEIPT_MODEL = "gemini-2.5-flash";
-async function readReceipt(dataUrl) {
-  const m = /^data:(image\/[a-z]+);base64,(.+)$/i.exec(dataUrl); if (!m) throw new Error("not an image");
+// Every charge on the receipt: items (a price in the price column on an indented add-on line counts, e.g. a $10
+// "Margarita" upgrade under a drink), fees and surcharges kept apart from tax, tax, tip. The answer is checked
+// against the printed subtotal and total; if it doesn't add up, the model is shown exactly what is off and asked
+// again (twice at most), and the reading that adds up best wins.
+const RECEIPT_PROMPT = `Read this receipt and return every charge on it.
+- items: each purchased item with the amount it adds to the bill. A price in the right-hand price column is its own charge, even when it sits on an indented modifier or add-on line under an item (for example "Margarita $10.00" under a drink, or "Extra shot 0.75"): add that amount to the item it belongs to. A price shown in parentheses inside an item's description (for example "House Milk ($0.26)") is usually already included in that item's price: do not add it again. Merge quantity lines into one item with the extended price. Apply per-line discounts.
+- fees: every surcharge, service charge, credit card fee, delivery, kitchen, health, or similar fee, each with its name and amount. Never fold a fee into tax.
+- tax: sales tax only. tip: gratuity or tip, including an automatic gratuity (0 if none is printed).
+- subtotal and total exactly as printed, and the merchant name.
+Check your work before answering: the items must add up to the printed subtotal, and subtotal + tax + fees + tip must equal the printed total. Prices on long receipts can sit a line above or below their item; use the subtotal to tell which line a price belongs to. Amounts are dollars as numbers. Ignore payment, change, card, and loyalty lines.`;
+const RECEIPT_SCHEMA = { type: "OBJECT", required: ["items"], properties: {
+  merchant: { type: "STRING" },
+  items: { type: "ARRAY", items: { type: "OBJECT", required: ["name", "price"], properties: { name: { type: "STRING" }, price: { type: "NUMBER" } } } },
+  fees: { type: "ARRAY", items: { type: "OBJECT", required: ["name", "amount"], properties: { name: { type: "STRING" }, amount: { type: "NUMBER" } } } },
+  subtotal: { type: "NUMBER" }, tax: { type: "NUMBER" }, tip: { type: "NUMBER" }, total: { type: "NUMBER" }
+} };
+const toC = v => Math.round((Number(v) || 0) * 100);
+function receiptGaps(d) {
+  const items = (d.items || []).reduce((n, i) => n + toC(i.price), 0), fees = (d.fees || []).reduce((n, f) => n + toC(f.amount), 0);
+  const sub = d.subtotal ? toC(d.subtotal) : null, total = d.total ? toC(d.total) : null;
+  const itemGap = sub == null ? 0 : sub - items, totalGap = total == null ? 0 : total - ((sub == null ? items : sub) + toC(d.tax) + fees + toC(d.tip));
+  return { items, fees, itemGap, totalGap, off: Math.abs(itemGap) + Math.abs(totalGap) };
+}
+async function askReceipt(mime, b64, extra) {
   const token = (await (await gauth.getClient()).getAccessToken()).token;
   const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${LOCATION}/publishers/google/models/${RECEIPT_MODEL}:generateContent`;
-  const body = {
-    contents: [{ role: "user", parts: [
-      { inlineData: { mimeType: m[1], data: m[2] } },
-      { text: "Read this receipt. List every purchased line item with its price after any per-line discount (merge quantity lines into one item with the extended price), plus subtotal, tax, tip (0 if none is printed), total, and the merchant name. Prices are dollars as numbers. Ignore payment, change, and loyalty lines." }
-    ] }],
-    generationConfig: {
-      temperature: 0, responseMimeType: "application/json",
-      responseSchema: { type: "OBJECT", required: ["items"], properties: {
-        merchant: { type: "STRING" },
-        items: { type: "ARRAY", items: { type: "OBJECT", required: ["name", "price"], properties: { name: { type: "STRING" }, price: { type: "NUMBER" } } } },
-        subtotal: { type: "NUMBER" }, tax: { type: "NUMBER" }, tip: { type: "NUMBER" }, total: { type: "NUMBER" }
-      } }
-    }
-  };
+  const body = { contents: [{ role: "user", parts: [{ inlineData: { mimeType: mime, data: b64 } }, { text: RECEIPT_PROMPT + (extra ? "\n\n" + extra : "") }] }],
+    generationConfig: { temperature: 0, responseMimeType: "application/json", responseSchema: RECEIPT_SCHEMA } };
   const r = await fetch(url, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!r.ok) throw new Error(RECEIPT_MODEL + " " + r.status + ": " + (await r.text()).slice(0, 160));
   const j = await r.json();
-  const text = ((((j.candidates || [])[0] || {}).content || {}).parts || []).map(p => p.text || "").join("");
-  const data = JSON.parse(text);
-  if (!Array.isArray(data.items) || !data.items.length) throw new Error("no line items found");
-  return data;
+  return JSON.parse(((((j.candidates || [])[0] || {}).content || {}).parts || []).map(p => p.text || "").join(""));
+}
+async function readReceipt(dataUrl) {
+  const m = /^data:(image\/[a-z]+);base64,(.+)$/i.exec(dataUrl); if (!m) throw new Error("not an image");
+  let best = await askReceipt(m[1], m[2]), g = receiptGaps(best), tries = 1;
+  const $ = c => "$" + (Math.abs(c) / 100).toFixed(2);
+  while (g.off > 1 && tries < 3) {
+    const sum = (best.subtotal ? toC(best.subtotal) : g.items) + toC(best.tax) + g.fees + toC(best.tip);
+    const fix = "Your last reading does not add up." +
+      (g.itemGap ? ` Your items add to ${$(g.items)} but the printed subtotal is ${$(toC(best.subtotal))} (${$(g.itemGap)} ${g.itemGap > 0 ? "missing: look for a priced add-on line" : "too much"}).` : "") +
+      (g.totalGap ? ` Subtotal + tax + fees + tip comes to ${$(sum)} but the printed total is ${$(toC(best.total))} (${$(g.totalGap)} ${g.totalGap > 0 ? "missing: look for a fee or surcharge line" : "too much"}).` : "") +
+      " Look at the receipt again line by line and answer with the corrected reading. Your last reading was: " + JSON.stringify(best);
+    let next; try { next = await askReceipt(m[1], m[2], fix); } catch (err) { logger.warn("receipt retry failed: " + err.message); break; }
+    const ng = receiptGaps(next); tries++;
+    if (ng.off < g.off && Array.isArray(next.items) && next.items.length) { best = next; g = ng; }
+  }
+  if (!Array.isArray(best.items) || !best.items.length) throw new Error("no line items found");
+  best.check = { itemGap: g.itemGap, totalGap: g.totalGap, tries };
+  logger.info(`receipt read in ${tries} tr${tries > 1 ? "ies" : "y"}, off by ${g.off} cents`);
+  return best;
 }
 
 exports.onReceiptRequest = onDocumentCreated({ document: "receiptRequests/{id}", region: "us-central1", timeoutSeconds: 120, memory: "512MiB" }, async e => {

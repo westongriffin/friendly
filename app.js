@@ -4109,6 +4109,7 @@ function expenseBody(id) {
   ${(x.items || []).length ? `<div class="section-head" style="margin-top:22px"><h2>Receipt${x.merchant ? " · " + esc(x.merchant) : ""}</h2></div>
   <div class="card">${x.items.map(it => `<div class="member-row"><div style="flex:1;min-width:0"><b>${esc(it.name)}</b><div class="muted sm">${(it.uids || []).map(u => esc(first(nameOf(u)))).join(", ") || "unassigned"}</div></div><span class="amt sm">${fmt$(it.cents)}</span></div>`).join("")}
     ${x.tax ? `<div class="member-row"><div style="flex:1"><b>Tax</b><div class="muted sm">split in proportion</div></div><span class="amt sm">${fmt$(x.tax)}</span></div>` : ""}
+    ${x.fees ? `<div class="member-row"><div style="flex:1"><b>${esc((x.feeNames || []).join(", ") || "Fees")}</b><div class="muted sm">split in proportion</div></div><span class="amt sm">${fmt$(x.fees)}</span></div>` : ""}
     ${x.tip ? `<div class="member-row"><div style="flex:1"><b>Tip</b><div class="muted sm">split in proportion</div></div><span class="amt sm">${fmt$(x.tip)}</span></div>` : ""}</div>` : ""}
   <div class="card th-plain" id="wall" style="margin-top:22px"><p class="muted">Loading…</p></div>`;
 }
@@ -4396,7 +4397,8 @@ function itemizeDialog(eventId, restrict, seed, data, receipt, groupId) {
   const people = [...pp.main, ...pp.others.filter(([u]) => u === seed.paidBy)];
   S._dlgGuests = {};
   const items = (data.items || []).map(it => ({ name: String(it.name || "Item").slice(0, 60), cents: toCents(it.price), uids: new Set() }));
-  const st = { tax: toCents(data.tax), tip: toCents(data.tip) };
+  const fees = Array.isArray(data.fees) ? data.fees.filter(f => f && toCents(f.amount)) : [];
+  const st = { tax: toCents(data.tax), tip: toCents(data.tip), fees: fees.reduce((n, f) => n + toCents(f.amount), 0) }, printed = toCents(data.total);
   const chips = it => people.map(([u, i]) => `<button type="button" class="${it.uids.has(u) ? "on" : ""}" data-who="${u}">${esc(first(i.name))}</button>`).join("");
   const rowHtml = (it, k) => `<div class="itz-item" data-k="${k}">
       <input class="nm" value="${esc(it.name)}" maxlength="60" aria-label="Item">
@@ -4408,24 +4410,31 @@ function itemizeDialog(eventId, restrict, seed, data, receipt, groupId) {
     <p class="muted sm" style="margin:-2px 0 6px">Tap who had each line. Tax and tip are split in proportion to what each person ordered.</p>
     <div id="itz">${items.map(rowHtml).join("")}</div>
     <div class="btnrow" style="margin-top:8px"><button type="button" class="btn small" id="itzAdd">＋ Add a line</button>${isDemo() ? "" : `<button type="button" class="btn ghost small" id="xAddGuest">＋ Someone not on Friendly</button>`}</div><div id="xGuests"></div>
-    <div class="two" style="margin-top:12px"><label class="field"><span>Tax ($)</span><input id="xTax" inputmode="decimal" value="${(st.tax / 100).toFixed(2)}"></label>
+    <div class="three" style="margin-top:12px"><label class="field"><span>Tax ($)</span><input id="xTax" inputmode="decimal" value="${(st.tax / 100).toFixed(2)}"></label>
+    <label class="field"><span>Fees ($)</span><input id="xFees" inputmode="decimal" value="${(st.fees / 100).toFixed(2)}"></label>
     <label class="field"><span>Tip ($)</span><input id="xTip" inputmode="decimal" value="${(st.tip / 100).toFixed(2)}"></label></div>
+    ${fees.length ? `<p class="muted sm" style="margin:-4px 0 6px">Fees on the receipt: ${fees.map(f => esc(f.name) + " " + fmt$(toCents(f.amount))).join(", ")}. They split in proportion, like the tax.</p>` : ""}
     <div class="btnrow" style="margin-top:-4px;align-items:center;gap:6px"><span class="muted sm">${st.tip ? "Tip read from the receipt. Change it:" : "Tip not printed yet? Add it:"}</span>${[15, 18, 20].map(p => `<button type="button" class="btn ghost small" data-tip="${p}">${p}%</button>`).join("")}</div>
     <p class="muted sm" style="margin:4px 0 0">Receipts usually print before the tip is written in. Whatever you enter splits in proportion to each person's lines, same as the tax.</p>
     <div class="itz-sum card" id="itzSum"></div>`,
     "Add expense", async () => {
       const unassigned = items.filter(it => it.cents && !it.uids.size).length;
       if (unassigned) return toast(unassigned + " line" + (unassigned > 1 ? "s" : "") + " still need" + (unassigned > 1 ? "" : "s") + " a person.");
-      const { shares, total } = computeShares(items, st.tax, st.tip); const split = Object.keys(shares); if (!split.length) return toast("Assign at least one line.");
+      const { shares, total } = computeShares(items, st.tax + st.fees, st.tip); const split = Object.keys(shares); if (!split.length) return toast("Assign at least one line.");
       const paidBy = el("xPayer").value; const involved = [...new Set([...split, paidBy])];
       const rec = { desc: el("xDesc").value.trim() || data.merchant || "Receipt", amountCents: total, paidBy, split, shares, involved, eventId: eventId || null, groupId: groupId || (eventId && (S.events.get(eventId) || {}).groupId) || matchGroupId(involved), addedBy: myUid(), createdAt: Date.now(),
-        items: items.filter(it => it.cents).map(it => ({ name: it.name, cents: it.cents, uids: [...it.uids] })), tax: st.tax, tip: st.tip, merchant: data.merchant || "", receipt: receipt || "", guestNames: guestNamesFor(involved) };
+        items: items.filter(it => it.cents).map(it => ({ name: it.name, cents: it.cents, uids: [...it.uids] })), tax: st.tax, tip: st.tip, fees: st.fees, feeNames: fees.map(f => String(f.name || "Fee").slice(0, 40)), merchant: data.merchant || "", receipt: receipt || "", guestNames: guestNamesFor(involved) };
       rec.groupId = groupId || (eventId && (S.events.get(eventId) || {}).groupId) || null;
       try { await saveExpense(rec); closeDialog(); toast("Itemized expense added"); } catch (e) { toast("Couldn't save that expense: " + e.message); }
     });
   const renderSum = () => {
-    const { shares, subtotal, total } = computeShares(items, st.tax, st.tip);
-    el("itzSum").innerHTML = `<div><span>Subtotal</span><b>${fmt$(subtotal)}</b></div><div><span>Tax + tip</span><b>${fmt$(st.tax + st.tip)}</b></div><div class="tot"><span>Total</span><b>${fmt$(total)}</b></div>
+    const { shares, subtotal, total } = computeShares(items, st.tax + st.fees, st.tip);
+    // Check the lines against the printed total: every line counts here, assigned or not, and a tip that wasn't on
+    // the receipt (added here) is left out, since the printed total can't include it.
+    const lines = items.reduce((n, it) => n + (it.cents || 0), 0), printedTip = toCents(data.tip);
+    const off = printed && Math.abs(printed - (lines + st.tax + st.fees + (printedTip ? st.tip : 0))) > 1 ? printed - (lines + st.tax + st.fees + (printedTip ? st.tip : 0)) : 0;
+    el("itzSum").innerHTML = `<div><span>Subtotal</span><b>${fmt$(subtotal)}</b></div><div><span>Tax${st.fees ? ", fees," : ""} + tip</span><b>${fmt$(st.tax + st.fees + st.tip)}</b></div><div class="tot"><span>Total</span><b>${fmt$(total)}</b></div>
+      ${off ? `<div class="itz-warn">The receipt's total is ${fmt$(printed)}, ${fmt$(Math.abs(off))} ${off > 0 ? "more" : "less"} than this. Check for a line or fee that's missing${off < 0 ? " or counted twice" : ""}.</div>` : ""}
       ${Object.entries(shares).map(([u, c]) => `<div><span>${esc(first(nameOf(u)))}</span><b>${fmt$(c)}</b></div>`).join("") || `<div class="muted">Assign lines to see who owes what.</div>`}`;
   };
   const wireRows = () => {
@@ -4447,6 +4456,7 @@ function itemizeDialog(eventId, restrict, seed, data, receipt, groupId) {
   });
   el("xTax").oninput = e => { st.tax = toCents(e.target.value); renderSum(); };
   el("xTip").oninput = e => { st.tip = toCents(e.target.value); renderSum(); };
+  el("xFees").oninput = e => { st.fees = toCents(e.target.value); renderSum(); };
   document.querySelectorAll("[data-tip]").forEach(b => b.onclick = () => { const { subtotal } = computeShares(items, 0, 0); st.tip = Math.round(subtotal * +b.dataset.tip / 100); el("xTip").value = (st.tip / 100).toFixed(2); renderSum(); });
   wireRows(); renderSum();
 }

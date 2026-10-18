@@ -1009,3 +1009,7 @@ body.replaying #app *{animation-play-state:paused!important}
 .x-pay{margin:-4px 14px 12px 70px;padding:12px;border-radius:14px;background:var(--surface);border:1px solid var(--line);display:grid;gap:10px}
 .apple-glyph{font-family:-apple-system,"SF Pro Text",system-ui,sans-serif;font-weight:600;font-size:1.08em;margin-right:1px;position:relative;top:-.5px}
 .x-pay-head{font-size:14px}
+
+/* Three fields in a row (Tax, Fees, Tip in itemize). */
+.three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.itz-warn{display:block!important;color:#B4412F;font-weight:600;font-size:13px;line-height:1.35;padding:6px 0}
