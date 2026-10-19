@@ -269,6 +269,8 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 const newId = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now() + "-" + Math.random().toString(36).slice(2)).replace(/-/g, "");
 const AV = ["#FF6B57", "#FFC145", "#2E9E6B", "#5B8CFF", "#E85D9E", "#8A6BE2", "#F2884B", "#3FB6C9"];
 const colorFor = id => { let h = 0; for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return AV[h % AV.length]; };
+// "Sixty Vines Plano, Dallas Parkway, Plano, TX, USA" -> "Sixty Vines Plano" for tiles and cards.
+const placeName = loc => { const s = String(loc || "").trim(), p = s.split(",")[0].trim(); return p.length >= 3 ? p : s; };
 const initials = n => (n || "?").trim().split(/\s+/).slice(0, 2).map(w => w[0].toUpperCase()).join("");
 const first = n => (n || "Someone").split(" ")[0];
 const fmt$ = c => (c < 0 ? "−" : "") + "$" + (Math.abs(c) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1061,7 +1063,7 @@ function payInfoOf(uid) {
 const nameHint = uid => (S.nameHints && S.nameHints.get(uid)) || "";
 const nameOf = uid => (S.contacts.get(uid) || {}).name || nameHint(uid) || "Someone";
 // data-pf: tapping anyone's picture opens their profile (see the capture listener below).
-function avatar(uid, cls = "") { const info = S.contacts.get(uid) || {}; const name = info.name || nameHint(uid); const pf = uid ? ` data-pf="${esc(uid)}"` : ""; if (info.photo) return `<span class="avatar ${cls} has-img"${pf}><img src="${esc(info.photo)}" alt=""></span>`; return `<span class="avatar ${cls}" style="background:${colorFor(uid)}"${pf}>${esc(initials(name || "?"))}</span>`; }
+function avatar(uid, cls = "") { const info = S.contacts.get(uid) || {}; const name = info.name || nameHint(uid); const pf = uid ? ` data-pf="${esc(uid)}"` : ""; if (info.photo) return `<span class="avatar ${cls} has-img"${pf}><img src="${esc(info.photo)}" alt=""></span>`; return `<span class="avatar ${cls}" style="background:${colorFor(uid)}"${pf}>${esc(/\bxs\b/.test(cls) ? initials(name || "?").slice(0, 1) : initials(name || "?"))}</span>`; }
 // Any profile picture opens that person's profile (with Add friend / Accept / Message), including event
 // guests you don't share a group with. Runs in the capture phase so a tap on a picture inside a row
 // that links elsewhere opens the profile instead. Skipped inside pickers, dialogs, and your own chip.
@@ -1644,6 +1646,15 @@ const wirePlusFields = pre => {
   if (m) m.onchange = () => { el(pre + "PlusCustomWrap").classList.toggle("hidden", m.value !== "custom"); if (m.value === "custom" && box) box.focus(); keep(); };
   if (box) box.oninput = keep;
 };
+// The faces on a tile are the people its count names: who's going (or, before anyone has answered, who's
+// invited), so "+2 · 5 going" adds up. Faces stay private until you've answered.
+function tileFaces(ev, word = "going") {
+  const r = ev.rsvps || {}, inv = ev.invitedUids || [], goers = inv.filter(u => r[u] === "going");
+  const going = ev.kind === "meeting" ? goers.length : goingCount(ev), byInvite = !going && inv.length > 0;
+  const pool = byInvite ? inv : goers, shown = canSeeGuests(ev) ? pool.slice(0, 3) : [], more = (byInvite ? inv.length : going) - shown.length;
+  return { faces: shown.map(u => avatar(u, "xs")).join("") + (shown.length && more > 0 ? `<span class="more">+${more}</span>` : ""),
+    label: byInvite ? `${inv.length} invited` : `${going} ${word}${ev.capacity > 0 ? " / " + ev.capacity : ""}` };
+}
 function goingCount(ev) { return (ev.invitedUids || []).reduce((t, u) => (ev.rsvps || {})[u] === "going" ? t + 1 + (((ev.plusOnes || {})[u]) || 0) : t, 0) + (ev.invitedPhones || []).filter(p => phoneStatus(ev, p) === "going").reduce((t, p) => t + 1 + phonePlus(ev, p), 0); }
 function isFull(ev) { return ev.capacity > 0 && goingCount(ev) >= ev.capacity; }
 function canManage(ev) { if (ev._manage != null) return ev._manage; return ev.hostId === myUid() || (ev.cohostUids || []).includes(myUid()); }
@@ -1710,7 +1721,7 @@ function homeBody() {
 
   let hiddenToday = []; try { hiddenToday = JSON.parse(LS.get("friendlyTodayHidden") || "[]"); } catch {}
   const todayEvs = upcoming.filter(e => e.date === todayStr() && !hiddenToday.includes(e.id + "|" + e.date)).slice(0, 2);
-  const todayCards = todayEvs.map(e => `<div class="card notif-card today-card" data-ev="${e.id}" role="button"><button type="button" class="today-x" data-hide-today="${e.id}|${e.date}" aria-label="Hide this">✕</button>${dotHat(56)}<div style="flex:1;min-width:0"><div class="eyebrow-sm">Today</div><b>${esc(e.title)}${e.time ? " · " + fmtTime(e.time) : ""}</b><div class="muted sm">${e.kind === "meeting" ? (e.invitedUids || []).filter(u => (e.rsvps || {})[u] === "going").length + " accepted" : goingCount(e) + " going"}${evStops(e).length ? " · " + evStops(e).length + " stops" : e.location ? " · " + esc(e.location) : ""}</div></div><span class="chev">›</span></div>`).join("");
+  const todayCards = todayEvs.map(e => `<div class="card notif-card today-card" data-ev="${e.id}" role="button"><button type="button" class="today-x" data-hide-today="${e.id}|${e.date}" aria-label="Hide this">✕</button>${dotHat(56)}<div style="flex:1;min-width:0"><div class="eyebrow-sm">Today</div><b>${esc(e.title)}${e.time ? " · " + fmtTime(e.time) : ""}</b><div class="muted sm">${e.kind === "meeting" ? (e.invitedUids || []).filter(u => (e.rsvps || {})[u] === "going").length + " accepted" : goingCount(e) + " going"}${evStops(e).length ? " · " + evStops(e).length + " stops" : e.location ? " · " + esc(placeName(e.location)) : ""}</div></div><span class="chev">›</span></div>`).join("");
   if ((S.profile.city || "").trim()) ensureCurated();
   return `
   ${notifCard()}
@@ -1729,8 +1740,7 @@ function eventCard(ev) {
   if (ev.kind === "meeting") return meetingCard(ev);
   const th = themeOf(ev.theme, ev.customTheme);
   const d = evDate(ev);
-  const going = goingCount(ev);
-  const guests = canSeeGuests(ev) ? (ev.invitedUids || []).slice(0, 3) : [];   // faces stay private until you've answered
+  const tf = tileFaces(ev);
   const myR = (ev.rsvps || {})[myUid()];
   const rsvpDot = myR ? `<span class="you-pill ${myR}">${{ going: "You're going", maybe: "Maybe", no: "Can't go", waitlist: "Waitlisted", pending: "Pending" }[myR] || ""}</span>` : "";
   const pills = `${isNewEvent(ev) ? `<span class="new-pill">New</span>` : ""}${rsvpDot}`;
@@ -1744,8 +1754,8 @@ function eventCard(ev) {
         <div class="ev-card-title" style="font-family:${esc(th.font)},system-ui">${esc(ev.title)}</div>
         <div class="ev-card-date">${MONTHS[d.getMonth()]} ${d.getDate()}${ev.time ? " · " + fmtTime(ev.time) : ""}${evStops(ev).length ? ` · <span class="ev-route">${evStops(ev).slice(0, 4).map(x => esc(x.emoji || "📍")).join("<i>›</i>")}</span>` : ""}</div>
         <div class="ev-card-foot">
-          <span class="mini-guests">${guests.map(u => avatar(u, "xs")).join("")}${guests.length && (ev.invitedUids || []).length > 3 ? `<span class="more">+${ev.invitedUids.length - 3}</span>` : ""}</span>
-          <span class="count">${going} going${ev.capacity > 0 ? " / " + ev.capacity : ""}</span>
+          <span class="mini-guests">${tf.faces}</span>
+          <span class="count">${tf.label}</span>
         </div>
       </div>
     </div>
@@ -2586,8 +2596,8 @@ function markCuratedSeen() {
 function curateTab(on) {
   const picks = topPicks(3), seen = curSeen(), fresh = upcomingNights().filter(n => !seen.has(nightKey(n))).length;
   const cov = picks.map(coverUrl);
-  const stack = cov.length ? `<span class="cur-stack" aria-hidden="true">${cov.length > 2 ? `<img class="s0" src="${esc(cov[1])}" alt="">` : ""}${cov.length > 1 ? `<img class="s1" src="${esc(cov[cov.length > 2 ? 2 : 1])}" alt="">` : ""}<span class="cur-front">${cov.map((u, i) => `<img src="${esc(u)}" alt="" style="animation-delay:${-i * 3}s${cov.length === 1 ? ";animation:none" : ""}">`).join("")}</span></span>` : "";
-  return `<button class="tab tab-curate ${on ? "on" : ""} ${cov.length ? "has-picks" : ""}" data-go="#/curate" aria-label="${CURATE_LABEL}${fresh ? `, ${fresh} new pick${fresh > 1 ? "s" : ""}` : ""}">${stack}<span class="curate-lbl">${CURATE_LABEL}<i class="spark">✦</i></span>${fresh && !on ? `<span class="cur-new">${fresh > 9 ? "9+" : fresh} new</span>` : ""}</button>`;
+  const stack = cov.length ? `<span class="cur-stack" aria-hidden="true">${cov.length > 2 ? `<img class="s0" src="${esc(cov[1])}" alt="">` : ""}${cov.length > 1 ? `<img class="s1" src="${esc(cov[cov.length > 2 ? 2 : 1])}" alt="">` : ""}<span class="cur-front">${cov.map((u, i) => `<img src="${esc(u)}" alt="" style="animation-delay:${-i * 3}s${cov.length === 1 ? ";animation:none" : ""}">`).join("")}</span>${fresh && !on ? `<span class="cur-new">${fresh > 9 ? "9+" : fresh}</span>` : ""}</span>` : "";
+  return `<button class="tab tab-curate ${on ? "on" : ""} ${cov.length ? "has-picks" : ""}" data-go="#/curate" aria-label="${CURATE_LABEL}${fresh ? `, ${fresh} new pick${fresh > 1 ? "s" : ""}` : ""}">${stack}<span class="curate-lbl">${CURATE_LABEL}<i class="spark">✦</i></span>${fresh && !on && !cov.length ? `<span class="cur-new">${fresh > 9 ? "9+" : fresh}</span>` : ""}</button>`;
 }
 // "Today · 7 PM", "Tomorrow · 6:30 PM", "Sat · 8 PM" within the week, else "Oct 25 · 5 PM".
 function shortWhen(n) {
@@ -5541,8 +5551,7 @@ function meetingCard(ev) {
   // Same size as an event tile so the grid stays even; a plain surface, a coral edge and a
   // "Meeting" tag are what set it apart.
   const d = evDate(ev); const myR = (ev.rsvps || {})[myUid()];
-  const going = (ev.invitedUids || []).filter(u => (ev.rsvps || {})[u] === "going").length;
-  const guests = canSeeGuests(ev) ? (ev.invitedUids || []).slice(0, 3) : [];   // faces stay private until you've answered
+  const tf = tileFaces(ev, "accepted");
   const pills = `${isNewEvent(ev) ? `<span class="new-pill">New</span>` : ""}${myR ? `<span class="you-pill ${myR}">${{ going: "Accepted", maybe: "Maybe", no: "Declined" }[myR] || ""}</span>` : ""}`;
   return `<a class="ev-card meet-tile ${ev._unjoined ? "unjoined" : ""}" data-ev="${ev.id}">
     <div class="ev-card-body">
@@ -5551,10 +5560,10 @@ function meetingCard(ev) {
       <div class="ev-card-text">
         <div class="ev-card-title">${esc(ev.title)}</div>
         <div class="ev-card-date">${MONTHS[d.getMonth()]} ${d.getDate()}${ev.time ? " · " + fmtTime(ev.time) : ""}${evStops(ev).length ? ` · <span class="ev-route">${evStops(ev).slice(0, 4).map(x => esc(x.emoji || "📍")).join("<i>›</i>")}</span>` : ""}</div>
-        ${evStops(ev).length ? `<div class="ev-card-loc">📋 ${evStops(ev).length} items</div>` : ev.location ? `<div class="ev-card-loc">📍 ${esc(ev.location)}</div>` : ""}
+        ${evStops(ev).length ? `<div class="ev-card-loc">📋 ${evStops(ev).length} items</div>` : ev.location ? `<div class="ev-card-loc">📍 ${esc(placeName(ev.location))}</div>` : ""}
         <div class="ev-card-foot">
-          <span class="mini-guests">${guests.map(u => avatar(u, "xs")).join("")}${guests.length && (ev.invitedUids || []).length > 3 ? `<span class="more">+${ev.invitedUids.length - 3}</span>` : ""}</span>
-          <span class="count">${going} accepted</span>
+          <span class="mini-guests">${tf.faces}</span>
+          <span class="count">${tf.label}</span>
         </div>
       </div>
     </div>

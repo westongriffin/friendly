@@ -661,7 +661,7 @@ html{background:var(--bg)}
 .splash.splash-leave{transition:opacity .6s ease,transform .6s cubic-bezier(.2,.7,.2,1);pointer-events:none}
 .splash.splash-leave.out{opacity:0;transform:scale(1.05)}
 /* meeting tiles: the status pills sit in their own row above the Meeting tag instead of floating over it */
-.meet-tile .ev-pills{position:static;justify-content:flex-start;max-width:none;margin:0 0 6px}
+.meet-tile .ev-pills{max-width:calc(100% - 128px)}   /* top right like event tiles; the Meeting tag keeps the left */
 /* Curate: "Within 25 mi" sits beside the city as a button-looking native picker */
 .miles-sel{appearance:none;-webkit-appearance:none;padding-right:28px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23776' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center;cursor:pointer;font:inherit}
 .cur-where{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:stretch;margin:-4px 0 12px}
@@ -1123,3 +1123,6 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 /* birthday card: on a phone the buttons drop under the text instead of squeezing it into a sliver */
 .notif-card .nc-text{min-width:min(220px,100%)}
 .notif-card .nc-btns{margin-left:auto}
+/* Curate's new-picks count sits on the photo stack like an app badge, inside the tab bar */
+.cur-stack .cur-new{top:-7px;right:-8px;padding:0 4px;min-width:15px;text-align:center;font-size:9.5px;line-height:13px;border-width:1.5px}
+.tab-curate > .cur-new{position:static;margin-left:3px;border:0;line-height:16px}
