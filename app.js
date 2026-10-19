@@ -2463,14 +2463,18 @@ function curateBody() {
   if (!city) return `<div class="section-head"><h2>${CURATE_LABEL}</h2></div>
     <div class="card empty">${dot("thinking", 72)}<b>Where are you?</b><p class="muted">Tell me your city and I'll find a few good nights out nearby, each with a place to eat and the timing worked out.</p><div class="btnrow" style="justify-content:center;gap:8px;flex-wrap:wrap"><div class="city-wrap"><input id="curCity" class="city-in" placeholder="Start typing a city" maxlength="60" autocomplete="off"></div>${milesSelect("curMiles0")}<button type="button" class="btn primary" id="curCitySave">Look around</button></div><p class="muted sm" style="margin-top:8px">No location tracking, just the city.</p></div>`;
   ensureCurated();
-  const d = S.curated, nights = (d && d.nights) || [];
+  // Nights that already started more than an hour ago drop off (a link straight to one still opens it).
+  const d = S.curated, nights = upcomingNights();
   // Tonight and This weekend go by the actual date; the rest by what Dot tagged. Four per filter, the ones from that
   // filter's own search first, the rest behind "More ideas".
   const t = todayStr(), dow = new Date().getDay(), fri = addDays(t, dow === 6 ? -1 : dow === 0 ? -2 : 5 - dow), sun = addDays(fri, 2);
-  const fits = n => curFilter === "tonight" ? n.date === t : curFilter === "weekend" ? n.date >= (t > fri ? t : fri) && n.date <= sun : (n.tags || []).includes(curFilter);
+  // Once this weekend's nights are over (Sunday evening), "This weekend" means the coming one.
+  let wkFrom = t > fri ? t : fri, wkTo = sun;
+  if (dow === 0 && !nights.some(n => n.date >= wkFrom && n.date <= wkTo)) { wkFrom = addDays(fri, 7); wkTo = addDays(sun, 7); }
+  const fits = n => curFilter === "tonight" ? n.date === t : curFilter === "weekend" ? n.date >= wkFrom && n.date <= wkTo : (n.tags || []).includes(curFilter);
   const filtered = nights.filter(fits).sort((a, b) => ((b.src === curFilter) - (a.src === curFilter)) || (a.date + (a.start || "")).localeCompare(b.date + (b.start || "")));
   const all = filtered.length ? filtered : nights; let shown = S._curMore === curFilter ? all : all.slice(0, 4); const extra = all.length - shown.length;
-  const want = S.route.q && S.route.q.night, picked = want && nights.find(n => nightKey(n) === want);
+  const want = S.route.q && S.route.q.night, picked = want && ((d && d.nights) || []).find(n => nightKey(n) === want);
   if (picked && !shown.includes(picked)) shown = [picked, ...shown];
   if (d) markCuratedSeen();
   const phaseText = { starting: "Warming up", searching: "Searching what's on and pairing places to eat", sorting: "Sorting the good ones" }[S._curPhase] || "Looking around";
@@ -2611,7 +2615,7 @@ function needIdeaCard(upcoming) {
   // A nudge, not a fixture: it shows for 30 seconds per visit to the app, then fades away.
   if (!S._ideaAt) { S._ideaAt = Date.now(); setTimeout(() => { const c = document.querySelector(".idea-row"); if (c) { c.classList.add("fade-away"); setTimeout(render, 500); } else render(); }, 30000); }
   if (Date.now() - S._ideaAt >= 30000) return "";
-  const city = (S.profile.city || "").trim(), nights = (S.curated && S.curated.nights) || [];
+  const city = (S.profile.city || "").trim(), nights = upcomingNights();
   const n = nights.find(x => (x.tags || []).includes("weekend")) || nights[0];
   const text = n ? `${n.title} · ${nightWhen(n)}. Two more where that came from.` : city ? "I'm putting a few ideas together." : "Tell me your city and I'll find a few nights out.";
   return `<div class="card notif-card idea-row" role="button" data-go="#/curate">${dot("thinking", 48)}<div style="flex:1;min-width:0"><b>Need an idea for ${weekendish ? "the weekend" : "this week"}?</b><div class="muted sm">${esc(text)}</div></div><span class="chev">›</span></div>`;
