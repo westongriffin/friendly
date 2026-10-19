@@ -25,8 +25,10 @@ loop that pins the page (frozen welcome screen). Re-entrant console calls are dr
 /* Painted before any file has downloaded. When iOS kills the page (memory) and it reloads, or on a slow start,
    this is what shows: the intro's first frame (the logo on its gradient), which the intro then animates from. */
 body{margin:0;background:#BFE7C6}
-.splash{position:fixed;inset:0;display:grid;place-content:center;justify-items:center;background:linear-gradient(160deg,#BFE7C6,#7CC79B 55%,#1F5A3A)}
-.boot-mark{width:calc(min(440px, 92vw) * .67);height:auto;display:block;transform:translateY(2px)}
+/* Same geometry as the iPhone launch image (a 2732px square scaled to fill the screen): the logo box is 774px wide,
+   centred, its baseline 65px below centre (logo units: 4300 wide, baseline 950 down a 1240-tall box). */
+.splash{position:fixed;inset:0;--sq:max(100vw,100vh);background:#7CC79B linear-gradient(160deg,#BFE7C6,#7CC79B 55%,#1F5A3A) center/var(--sq) var(--sq) no-repeat}
+.boot-mark{position:absolute;display:block;overflow:visible;width:calc(var(--sq) * .283309);height:auto;left:calc(50vw - var(--sq) * .1416545);top:calc(50vh - var(--sq) * .0388)}
 </style>
 <script>
 // Load the app at the version named in version.json, fetched fresh every open (the page itself may sit in a

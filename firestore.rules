@@ -88,7 +88,7 @@ service cloud.firestore {
     // A friend request by phone number: the server finds the account (onFriendRequest).
     match /friendRequests/{rid} {
       allow create: if signedIn() && !isDemoUser() && request.resource.data.from == uid()
-        && request.resource.data.keys().hasOnly(['from', 'fromName', 'phone', 'createdAt']);
+        && request.resource.data.keys().hasOnly(['from', 'fromName', 'name', 'phone', 'createdAt']);
       allow read, delete: if signedIn() && resource.data.from == uid();
     }
     // dms/{a_b}: the conversation (last message, read marks), written by onDmMessage; each person

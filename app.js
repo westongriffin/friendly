@@ -698,6 +698,11 @@ function birthdayCard() {
   const b = list.find(x => !dismissed.includes(x.uid + ":" + x.date)); if (!b) return "";
   return `<div class="card notif-card"><span class="notif-ico dot-ico">${dotHat(52)}</span><div style="flex:1"><b>${esc(first(b.name))}'s birthday is ${b.days === 0 ? "today" : b.days === 1 ? "tomorrow" : "in " + b.days + " days"}</b><div class="muted sm">${esc(fmtDay({ date: b.date }))}. A month out is the sweet spot to plan something.</div></div><span class="btnrow" style="gap:6px"><button class="btn primary small" data-bplan="${b.uid}">Plan something</button><button class="btn ghost small" data-bdismiss="${b.uid}:${b.date}">Later</button></span></div>`;
 }
+// +12145551234 -> (214) 555-1234 for US numbers; anything else is shown as stored.
+const fmtPhone = p => { const m = String(p || "").match(/^\+1(\d{3})(\d{3})(\d{4})$/); return m ? `(${m[1]}) ${m[2]}-${m[3]}` : String(p || ""); };
+const FRIEND_TEXT = "Hey! I'm on Friendly, our crew's home base for plans and settling up. Add me there so we can message: https://officialfriendly.com (free). Sign up with this number and my friend request will be waiting.";
+// My texted friend invites still waiting on someone to join, newest first, one per number.
+function invitedByText() { const seen = new Set(); return (S.textInvites || []).filter(r => r.status === "notOnFriendly").sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).filter(r => !seen.has(r.phone) && seen.add(r.phone)); }
 function smsLink(numbers, body) { const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?"; return "sms:" + numbers.map(n => n.replace(/[^+\d]/g, "")).join(",") + sep + "body=" + encodeURIComponent(body); }
 // Address autocomplete via Google Places (New). Active only once `mapsKey` is
 // set in firebase-config.js; without it the field stays a plain text box.
@@ -932,6 +937,11 @@ function subscribeAll(u) {
   add(on("friends", query(collection(db, "friendships"), where("uids", "array-contains", u.uid)), snap => {
     S.msgsReady = true;   // Messages appear only once the server side (rules) answers; until then nothing half-works
     S.friends = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); rebuildContacts(); renderSoon();
+  }));
+  // Friend invites I texted to numbers that weren't on Friendly yet: listed under "Invited by text" in Messages.
+  // When the person signs up with that number the server turns the invite into a real friend request.
+  add(on("textInvites", query(collection(db, "friendRequests"), where("from", "==", u.uid)), snap => {
+    S.textInvites = snap.docs.map(d => ({ id: d.id, ...d.data() })); renderSoon();
   }));
   add(on("dms", query(collection(db, "dms"), where("uids", "array-contains", u.uid)), snap => {
     S.dms = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); renderSoon();
@@ -1182,7 +1192,21 @@ function mountSplash(root, msg) {
   root.innerHTML = `<div class="splash">${splashInner(msg)}</div>`;
   if (splashStop) { splashStop(); splashStop = null; }
   const svg = root.querySelector(".splash-blip");
-  if (svg && window.Blip) { splashHold = true; splashStop = window.Blip.play(svg, { dur: 1.7, delay: 1.65, onDone: () => { splashHold = false; } }); }
+  if (svg && window.Blip) { splashHold = true; splashStop = window.Blip.play(svg, { dur: 1.7, delay: 1.65, onDone: () => { splashHold = false; }, align: NATIVE && IOS ? g => alignToLaunchImage(svg, g) : null }); }
+}
+// The iPhone launch image (Splash.imageset, 2732px square, shown scaled to fill the screen) has the logo at fixed
+// spots: its F starts at x 991.6 and the yellow dot sits at (1707.46, 1281.6). The intro's stage scales with the
+// screen's width instead, so on its own it starts a few points off (and further off on shorter phones). Move and
+// scale the stage so its F and dot land on the image's, and the hand-off from the launch image doesn't jump.
+// (The F's left edge is 0.07em into its glyph box; the stage draws the logo at 112px.)
+function alignToLaunchImage(svg, g) {
+  const W = innerWidth, H = innerHeight, Sq = Math.max(W, H), k = Sq / 2732, ox = (W - Sq) / 2, oy = (H - Sq) / 2;
+  const nF = ox + 991.6 * k, nX = ox + 1707.46 * k, nY = oy + 1281.6 * k;
+  const r = svg.getBoundingClientRect(), sc = r.width / 720; if (!sc) return;
+  const iF = r.left + (g.fx + 7.84) * sc, iX = r.left + g.dx * sc, iY = r.top + g.dy * sc;
+  const f = (nX - nF) / (iX - iF); if (!(f > .5 && f < 2)) return;
+  svg.style.transformOrigin = `${g.dx * sc}px ${g.dy * sc}px`;
+  svg.style.transform = `translate(${(nX - iX).toFixed(2)}px, ${(nY - iY).toFixed(2)}px) scale(${f.toFixed(4)})`;
 }
 // The intro plays again whenever the app comes back to the foreground after being away a while, as an overlay on top of the live app.
 let hiddenAt = 0;
@@ -1448,7 +1472,7 @@ function inviteBanner() {
   return `<div class="stack" style="margin-bottom:16px">${invites.map(g => {
     const host = ((g.members || {})[g.ownerId] || {}).name || nameOf(g.ownerId);
     return `<div class="card invite-row">
-      <span class="ge" style="background:${esc(g.color || "#FFE0B2")}">${esc(g.emoji || "🎉")}</span>
+      ${groupIcon(g)}
       <div style="flex:1;min-width:0"><b>${esc(g.name)}</b><div class="muted sm">${esc(host)} invited you to this group</div></div>
       <button class="btn small primary" data-accept="${g.id}">Join</button>
     </div>`; }).join("")}</div>`;
@@ -1470,7 +1494,7 @@ function shell(body) {
   ${isDemo() ? `<div class="demo-bar">${dot("happy", 26)}<span>Demo mode -- this is Riley, a shared public sandbox account. Explore freely; changes are visible to other visitors and reset nightly.</span></div>` : ""}
   <header class="topbar">
     <div class="brand has-dot"><span data-go="#/">${WORDMARK}</span><button type="button" class="brand-dot" id="brandDot" aria-label="A tip from Dot"></button></div>
-    <div class="topbar-right"><button class="bell" data-go="#/search" title="Search">🔍</button>${S.msgsReady ? `<button class="bell" data-go="#/messages" title="Messages">💬${msgBadge() ? `<span class="badge">${msgBadge()}</span>` : ""}</button>` : ""}<button class="bell" data-go="#/activity" title="Activity">🔔${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ""}</button>
+    <div class="topbar-right"><button class="bell" data-go="#/search" title="Search">🔍</button><button class="bell ${tab === "photos" ? "on" : ""}" data-go="#/photos" title="Memories" aria-label="Memories">📸</button>${S.msgsReady ? `<button class="bell" data-go="#/messages" title="Messages">💬${msgBadge() ? `<span class="badge">${msgBadge()}</span>` : ""}</button>` : ""}<button class="bell" data-go="#/activity" title="Activity">🔔${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ""}</button>
     <button class="me-chip" data-go="#/profile">${avatar(S.user.uid)}<span>${esc(first(p.name))}</span></button></div>
   </header>
   <div class="tabs-sentinel"></div>
@@ -1679,7 +1703,7 @@ function homeBody() {
   const groups = [...S.groups.values()];
   const filterBar = groups.length ? `<div class="chiprow">
     <button class="fchip ${homeFilter === "all" ? "on" : ""}" data-filter="all">All</button>
-    ${groups.map(g => `<button class="fchip ${homeFilter === g.id ? "on" : ""}" data-filter="${g.id}">${esc(g.emoji || "•")} ${esc(g.name)}</button>`).join("")}
+    ${groups.map(g => `<button class="fchip ${homeFilter === g.id ? "on" : ""}" data-filter="${g.id}">${groupMini(g)} ${esc(g.name)}</button>`).join("")}
     <button class="fchip ${homeFilter === "none" ? "on" : ""}" data-filter="none">Just friends</button>
   </div>` : "";
 
@@ -1756,12 +1780,70 @@ function groupsBody() {
   <p class="muted" style="margin:0 0 14px">Groups are your circles. Invite people once, then plan with them again and again. Everything in a group stays private to its members.</p>
   <div class="stack">${groups.length ? groups.map(groupRow).join("") : emptyState("👥", "No groups yet", "Create a group and invite friends by phone.", "idle")}</div>`;
 }
+// ---------- a group's look: icon (emoji or picture) on its color, and a cover (photo, Dot's painting, or the color) ----------
+const GROUP_COLORS = ["#FFE0B2", "#FFC2B3", "#FFE48A", "#BDEBD0", "#BFE0FF", "#D9CCFF", "#FFC9DE", "#E8DCCB"];
+const GROUP_EMOJIS = ["🎉", "🍕", "🏖️", "⛰️", "🎮", "🏈", "⚽", "🎸", "🍻", "🍷", "☕", "🎬", "🏃", "🚴", "🧗", "🏕️", "🎲", "📚", "🐶", "💼", "🏠", "👨‍👩‍👧", "✈️", "🌮"];
+function groupIcon(g, size = "") {
+  const bg = esc(g.color || GROUP_COLORS[0]);
+  return g.icon ? `<span class="ge ${size} has-img" style="background:${bg}"><img src="${esc(g.icon)}" alt=""></span>` : `<span class="ge ${size}" style="background:${bg}">${esc(g.emoji || "🎉")}</span>`;
+}
+// For one-line spots (chips, tags): a tiny picture, or the emoji.
+const groupMini = g => g.icon ? `<img class="ge-mini" src="${esc(g.icon)}" alt="">` : esc(g.emoji || "•");
+// The cover: the group's picture if it has one, else its color as a gradient scattered with its emoji.
+function groupCoverHtml(g, cls, extra = "") {
+  const c = g.color || GROUP_COLORS[0];
+  if (g.cover) return `<div class="${cls}" style="background-image:url('${esc(g.cover)}')">${extra}</div>`;
+  const spots = [[8, 18, -14], [26, 62, 10], [44, 14, 6], [62, 58, -8], [80, 20, 14], [92, 66, -4], [14, 84, 8], [70, 90, -12]];
+  const glyph = g.icon ? "" : esc(g.emoji || "🎉");
+  return `<div class="${cls} is-color" style="--gc:${esc(c)}">${glyph ? spots.map(([x, y, r]) => `<span class="gpat" style="left:${x}%;top:${y}%;--r:${r}deg">${glyph}</span>`).join("") : ""}${extra}</div>`;
+}
+// Square-crop a picture to `size` px (icons).
+async function squareImage(src, size = 256) {
+  const img = await loadPicked(src), s = Math.min(img.width, img.height), c = document.createElement("canvas"); c.width = c.height = size;
+  const x = c.getContext("2d"); x.imageSmoothingQuality = "high"; x.drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, size, size);
+  return c.toDataURL("image/jpeg", 0.86);
+}
+// Hosts: icon, color, and cover in one place, with a live preview.
+function openGroupLookDialog(g) {
+  const L = { emoji: g.emoji || "🎉", icon: g.icon || "", color: g.color || GROUP_COLORS[0], cover: g.cover || "", style: "surprise" };
+  const preview = () => `${groupCoverHtml(L, "gl-cover")}<div class="gl-row">${groupIcon(L, "xl")}<b>${esc(g.name)}</b></div>`;
+  dialog(`<h3>Group look</h3>
+    <div class="gl-preview" id="glPreview">${preview()}</div>
+    <div class="gl-label">Icon</div>
+    <div class="emoji-pick gl-emojis" id="glEmojis">${GROUP_EMOJIS.map(e => `<button type="button" data-ge="${e}" class="${!L.icon && L.emoji === e ? "on" : ""}">${e}</button>`).join("")}</div>
+    <div class="gl-actions"><input id="glAny" maxlength="8" placeholder="Any emoji" aria-label="Any emoji"><button type="button" class="btn small" id="glIconUp">📷 Picture</button><button type="button" class="btn small" id="glIconAi">✨ Dot makes one</button></div>
+    <div class="gl-label">Color</div>
+    <div class="gl-colors" id="glColors">${GROUP_COLORS.map(c => `<button type="button" data-gc="${c}" style="background:${c}" class="${L.color === c ? "on" : ""}" aria-label="Color ${c}"></button>`).join("")}</div>
+    <div class="gl-label">Cover</div>
+    <div class="gl-actions"><button type="button" class="btn small" id="glCoverUp">📷 Photo</button><button type="button" class="btn small" id="glCoverAi">✨ Dot paints one</button><button type="button" class="btn ghost small" id="glCoverOff">Use the color</button></div>
+    <div class="style-chips" id="glStyles">${COVER_STYLES.map(([k, l]) => `<button type="button" data-gs="${k}" class="${k === L.style ? "on" : ""}">${l}</button>`).join("")}</div>`, "Save", async () => {
+      try { await updateDoc(doc(db, "groups", g.id), { emoji: L.emoji, icon: L.icon, color: L.color, cover: L.cover }); closeDialog(); toast("Looking good ✨", null, null, "happy"); }
+      catch (e) { toast(e.message); }
+    });
+  const redraw = () => { el("glPreview").innerHTML = preview(); document.querySelectorAll("#glEmojis [data-ge]").forEach(b => b.classList.toggle("on", !L.icon && b.dataset.ge === L.emoji)); document.querySelectorAll("#glColors [data-gc]").forEach(b => b.classList.toggle("on", b.dataset.gc === L.color)); };
+  const busy = (b, on, label) => { b.disabled = on; if (label) b.textContent = label; };
+  document.querySelectorAll("#glEmojis [data-ge]").forEach(b => b.onclick = () => { L.emoji = b.dataset.ge; L.icon = ""; redraw(); });
+  el("glAny").oninput = () => { const v = el("glAny").value.trim(); if (v && !/[\p{L}\p{N}]/u.test(v)) { L.emoji = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(v)][0].segment; L.icon = ""; redraw(); } };
+  document.querySelectorAll("#glColors [data-gc]").forEach(b => b.onclick = () => { L.color = b.dataset.gc; redraw(); });
+  document.querySelectorAll("#glStyles [data-gs]").forEach(b => b.onclick = () => { L.style = b.dataset.gs; document.querySelectorAll("#glStyles [data-gs]").forEach(x => x.classList.toggle("on", x === b)); });
+  el("glIconUp").onclick = async () => { const f = await pickFile("image/*", "group icon"); if (!f) return; const b = el("glIconUp"); busy(b, true); try { L.icon = await squareImage(f, 256); redraw(); } catch (e) { toast("Couldn't use that picture"); } busy(b, false); };
+  el("glCoverUp").onclick = async () => { const f = await pickFile("image/*", "group cover"); if (!f) return; const b = el("glCoverUp"); busy(b, true); try { L.cover = await compressImage(f, 1200, 0.78, 260000); redraw(); } catch (e) { toast("Couldn't use that picture"); } busy(b, false); };
+  el("glCoverOff").onclick = () => { L.cover = ""; redraw(); };
+  el("glIconAi").onclick = async () => { const b = el("glIconAi"); busy(b, true, "✨ Making…");
+    try { const img = await generateCover(`A single playful sticker-style icon that captures a friend group called "${g.name}". One bold, simple object or symbol, centered, flat bright colors, plain solid light background. No people, no faces, no text, no letters, no numbers.`); L.icon = await squareImage(img, 256); redraw(); }
+    catch (e) { toast("Dot couldn't make one just now. Try again?"); } busy(b, false, "✨ Dot makes one"); };
+  el("glCoverAi").onclick = async () => { const b = el("glCoverAi"); busy(b, true, "✨ Painting…");
+    try { L.cover = await generateCover(`A wide, inviting cover image for a friend group called "${g.name}": a place, scene, or still life of things this crew would enjoy together, warm and full of atmosphere. Style: ${coverStylePrompt(L.style)}. No people, no faces, no text, no words, no letters.`); redraw(); }
+    catch (e) { toast("Dot couldn't paint one just now. Try again?"); } busy(b, false, "✨ Dot paints one"); };
+}
 function groupRow(g) {
   const n = (g.memberUids || []).length;
-  return `<a class="card group-row" data-group="${g.id}">
-    <span class="ge lg" style="background:${esc(g.color || "#FFE0B2")}">${esc(g.emoji || "🎉")}</span>
-    <div style="flex:1;min-width:0"><b>${esc(g.name)}${newCountFor("#/g/" + g.id) ? `<span class="new-count">${newCountFor("#/g/" + g.id)} new</span>` : ""}</b><div class="muted sm">${n} member${n === 1 ? "" : "s"}${g.ownerId === myUid() ? " · you host" : ""}</div></div>
-    <span class="chev">›</span></a>`;
+  const faces = (g.memberUids || []).slice(0, 4).map(u => avatar(u)).join("");
+  return `<a class="card group-tile" data-group="${g.id}">
+    ${groupCoverHtml(g, "gt-cover")}
+    <div class="gt-body">${groupIcon(g, "lg")}
+      <div class="gt-text"><b>${esc(g.name)}${newCountFor("#/g/" + g.id) ? `<span class="new-count">${newCountFor("#/g/" + g.id)} new</span>` : ""}</b><div class="muted sm">${n} member${n === 1 ? "" : "s"}${g.ownerId === myUid() ? " · you host" : ""}</div></div>
+      <span class="gt-faces">${faces}</span></div></a>`;
 }
 function wireGroups() {
   el("newGroupBtn").onclick = openGroupDialog;
@@ -1778,7 +1860,8 @@ function groupPageBody(gid) {
   const host = hostUids.includes(myUid());
   return `
   <button class="link-back" data-go="#/groups">‹ Groups</button>
-  <div class="group-hero"><span class="ge xl" style="background:${esc(g.color || "#FFE0B2")}">${esc(g.emoji || "🎉")}</span>
+  ${groupCoverHtml(g, "group-cover", host ? `<button type="button" class="cover-edit" id="editLook">🎨 Edit look</button>` : "")}
+  <div class="group-hero">${groupIcon(g, "xl")}
     <div><h1>${esc(g.name)}</h1><div class="muted">${members.length} member${members.length === 1 ? "" : "s"}</div></div></div>
   <div class="btnrow">
     <button class="btn primary" data-go="#/new">＋ Plan for this group</button>
@@ -1808,6 +1891,7 @@ function groupPageBody(gid) {
   </div>`;
 }
 function wireGroupPage() {
+  if (el("editLook")) el("editLook").onclick = () => { const g = S.groups.get(S.route.id); if (g) openGroupLookDialog(g); };
   const g = S.groups.get(S.route.id); if (!g) { document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go)); return; }
   markPeeked("#/g/" + g.id);
   if (el("inviteBtn")) el("inviteBtn").onclick = () => openInviteDialog(g);
@@ -2049,7 +2133,7 @@ function openInviteDialog(g) {
         if (Object.keys(updates).length) await updateDoc(doc(db, "groups", g.id), updates);
         closeDialog(); toast(direct.length ? direct.length + " added" + (texted.length ? ", texting the rest" : "") : texted.length ? "Opening Messages…" : "Invites sent", null, null, "happy");
         if (texted.length === 1) setTimeout(() => { location.href = smsLink([texted[0].e164], groupInviteText(g)); }, 400);
-        else if (texted.length > 1) setTimeout(() => openTextInviteDialog(texted, groupInviteText(g)), 400);
+        else if (texted.length > 1) setTimeout(() => openTextInviteDialog(texted, groupInviteText(g), "group"), 400);
       } catch (e) { toast(e.message); }
     }
   });
@@ -2076,12 +2160,12 @@ const INVITES_SHORTCUT_URL = "https://www.icloud.com/shortcuts/96d0a800f5d6409c9
 const AUTO_SEND = NATIVE && !IS_ANDROID && !!INVITES_SHORTCUT_URL;
 const autoSendReady = v => { try { if (v === undefined) return LS.get("friendlyAutoSend") === "1"; if (v) LS.set("friendlyAutoSend", "1"); else LS.remove("friendlyAutoSend"); } catch { return false; } };
 const shortcutRunUrl = (numbers, body) => "shortcuts://run-shortcut?name=" + encodeURIComponent("Friendly Invites") + "&input=text&text=" + encodeURIComponent(JSON.stringify({ m: body, p: numbers.map(n => n.replace(/[^+\d]/g, "")) }));
-function openTextInviteDialog(texted, text) {
+function openTextInviteDialog(texted, text, where = "event") {
   let idx = -1, active = false, wasHidden = false;
   // auto-send states: "offer" (setup card), "added" (back from the Add Shortcut screen), "ready", "sent", "off"
   let auto = AUTO_SEND && texted.length > 1 ? (autoSendReady() ? "ready" : "offer") : "off", pending = null;
   const n = texted.length;
-  const rowsHtml = () => texted.map((p, i) => `<div class="member-row" data-row="${i}"><div style="flex:1;min-width:0"><b>${esc(p.name)}</b><div class="muted sm mono">${esc(p.e164)}</div></div>${i < idx ? `<span class="sent-ok">✓ Sent</span>` : i === idx && active ? `<span class="sm" style="font-weight:700;color:var(--accent)">Sending…</span>` : `<button type="button" class="btn small" data-textone="${i}">Text</button>`}</div>`).join("");
+  const rowsHtml = () => texted.map((p, i) => `<div class="member-row" data-row="${i}"><div style="flex:1;min-width:0"><b>${esc(p.name)}</b><div class="muted sm">${esc(fmtPhone(p.e164))}</div></div>${i < idx ? `<span class="sent-ok">✓ Sent</span>` : i === idx && active ? `<span class="sm" style="font-weight:700;color:var(--accent)">Sending…</span>` : `<button type="button" class="btn small" data-textone="${i}">Text</button>`}</div>`).join("");
   const autoHtml = () => auto === "offer" ? `<div class="auto-card"><b>⚡ Send all ${n} at once</b><span class="new-tag">NEW</span>
       <p>Add Friendly's free iPhone Shortcut one time (about 5 seconds). After that, every invite goes out in one tap, from your number.</p>
       <button type="button" class="btn primary" id="autoSetup" style="width:100%">Set up auto-send</button>
@@ -2100,7 +2184,7 @@ function openTextInviteDialog(texted, text) {
     <div id="autoBox">${autoHtml()}</div>
     <button type="button" class="btn ${oneAtATime ? "" : "primary"}" id="textAll" style="width:100%;margin:10px 0 12px">💬 Send to all ${n}, one at a time${oneAtATime ? " instead" : ""}</button>
     <div class="stack" id="txtRows">${rowsHtml()}</div>
-    <p class="muted sm" style="margin:10px 0 0">You can always come back and text stragglers from the "Invited" list.</p>`, null, null);
+    <p class="muted sm" style="margin:10px 0 0">${{ friends: `You can always come back and text stragglers from <b>Invited by text</b> in Messages.`, group: `You can always come back and text stragglers from the <b>Invited</b> list in the group.`, event: `You can always come back and text stragglers from the event's <b>Guest list</b>.` }[where]}</p>`, null, null);
   const currentText = () => el("txtMsg").value;
   const renderRows = () => { const box = el("txtRows"); if (box) box.innerHTML = rowsHtml(); wireRowButtons(); };
   function renderAuto() {
@@ -2339,7 +2423,7 @@ async function pollNights(nights) {
     try { await addDoc(collection(db, "groups", gid, "polls"), { q, options, dates, votes: {}, authorId: myUid(), createdAt: Date.now() }); closeDialog(); toast("Poll's up. The winner becomes the plan in one tap.", null, null, "party"); go("#/g/" + gid); } catch (e) { toast(e.message); }
   };
   if (groups.length === 1) return make(groups[0].id);
-  dialog(`<h3>Which group?</h3><div class="stack">${groups.map(g => `<button type="button" class="btn" data-pg="${g.id}" style="text-align:left">${esc(g.emoji || "")} ${esc(g.name)}</button>`).join("")}</div>`, null, null);
+  dialog(`<h3>Which group?</h3><div class="stack">${groups.map(g => `<button type="button" class="btn" data-pg="${g.id}" style="text-align:left">${groupMini(g)} ${esc(g.name)}</button>`).join("")}</div>`, null, null);
   document.querySelectorAll("[data-pg]").forEach(b => b.onclick = () => make(b.dataset.pg));
 }
 // Resolve the city box and say so when it isn't a real place. allowEmpty: the profile may clear it.
@@ -3286,7 +3370,7 @@ function eventInner(ev) {
     <div class="ev-count">${countdown(ev)}</div>
     ${evStops(ev).length ? `<div class="ev-where"><button type="button" class="ev-where-btn" data-jump="planCard">🗺️ ${evStops(ev).length} stops, starting with ${esc(evStops(ev)[0].name || evStops(ev)[0].place)}${evStops(ev)[0].time ? " at " + esc(fmtTime(evStops(ev)[0].time)) : ""}</button></div>` : ev.location ? `<div class="ev-where"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}" target="_blank" rel="noopener" title="Open in Google Maps">📍 ${esc(ev.location)}</a></div>${/zoom|meet\.google|teams|http|online|call/i.test(ev.location) ? "" : `<details class="map-wrap"><summary>Show map</summary><iframe class="map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="https://maps.google.com/maps?q=${encodeURIComponent(ev.location)}&output=embed" title="Map"></iframe></details>`}` : ""}
     ${ev.food && !evStops(ev).length ? `<div class="ev-food">🍽️ ${esc(ev.food)}</div>` : ""}
-    <div class="ev-hosts">Hosted by ${hosts.map(u => esc(first(nameOf(u)))).join(" & ")}${grp ? ` · <span class="grp-tag">${esc(grp.emoji || "")} ${esc(grp.name)}</span>` : ""}</div>
+    <div class="ev-hosts">Hosted by ${hosts.map(u => esc(first(nameOf(u)))).join(" & ")}${grp ? ` · <span class="grp-tag">${groupMini(grp)} ${esc(grp.name)}</span>` : ""}</div>
     ${ev.capacity > 0 ? `<div class="ev-cap ${full ? "full" : ""}">${going} / ${ev.capacity} spots${full ? " · full" : ""}</div>` : ""}
     ${hypeBar}
   </div>
@@ -4663,7 +4747,6 @@ function profileBody() {
     <p class="muted sm">Your payment handles are shared only with people in your groups, so they can pay you back.</p>
     <button class="btn primary" id="saveProfile">Save profile</button>
   </div>
-  <button class="btn" id="memoriesBtn" style="margin-top:14px">📸 Memories: photos from all your events</button>
   <div class="section-head" style="margin-top:22px"><h2>Notifications</h2></div>
   <div class="card member-row"${NATIVE ? ' id="notifRow" style="cursor:pointer"' : ""}><span class="li">🔔</span><div style="flex:1;min-width:0"><b>${({ on: "On for this device", off: "Off", denied: "Blocked in your browser settings", unsupported: "Not available in this browser", native: "Managed in iPhone Settings" })[pushState()]}</b><div class="muted sm">${IOS && !STANDALONE && pushState() === "off" ? "Add Friendly to your Home Screen first (Share → Add to Home Screen)." : NATIVE ? "Tap to open Notification settings." : "Invites, comments, RSVPs, and day-of reminders."}</div></div>${NATIVE ? `<span class="chev">›</span>` : pushState() === "off" ? `<button class="btn small primary" id="pushToggle">Turn on</button>` : pushState() === "on" ? `<button class="btn small" id="pushToggle">Turn off</button>` : ""}</div>
   ${["native", "on"].includes(pushState()) ? `<div class="card" style="padding:12px 16px;margin-top:8px">
@@ -4749,7 +4832,6 @@ function wireProfile() {
       toast("Photo updated");
     } catch (e) { toast(e.message); }
   };
-  if (el("memoriesBtn")) el("memoriesBtn").onclick = () => go("#/photos");
   // Calendar feed: a private token on the profile, made on first use.
   const calUrl = async () => {
     let t = S.profile.calToken;
@@ -4840,7 +4922,9 @@ function openAddFriendsDialog() {
       toast("Looking them up…", null, null, "thinking");
       const results = await Promise.all(texted.map(async p => {
         try {
-          const ref = await addDoc(collection(db, "friendRequests"), { from: myUid(), fromName: S.profile.name || "", phone: p.e164, createdAt: Date.now() });
+          const waiting = (S.textInvites || []).find(r => r.phone === p.e164 && r.status === "notOnFriendly");
+          if (waiting) return { ...p, status: "notOnFriendly" };
+          const ref = await addDoc(collection(db, "friendRequests"), { from: myUid(), fromName: S.profile.name || "", name: p.name || "", phone: p.e164, createdAt: Date.now() });
           const status = await new Promise(res => { const t = setTimeout(() => { un(); res("sent"); }, 9000); const un = onSnapshot(ref, d => { const st = d.exists() && d.data().status; if (st) { clearTimeout(t); un(); res(st); } }, () => { clearTimeout(t); res("sent"); }); });
           return { ...p, status };
         } catch { return { ...p, status: "error" }; }
@@ -4849,8 +4933,8 @@ function openAddFriendsDialog() {
       const sent = results.filter(r => ["sent", "accepted", "pending", "already"].includes(r.status)).length;
       if (sent) toast(`${sent} friend request${sent === 1 ? "" : "s"} sent`, null, null, "happy");
       if (notOn.length) {
-        const text = `Hey! I'm on Friendly, our crew's home base for plans and settling up. Add me there so we can message: https://officialfriendly.com (free). Sign up with this number and my friend request will be waiting.`;
-        setTimeout(() => { if (notOn.length === 1) location.href = smsLink([notOn[0].e164], text); else openTextInviteDialog(notOn, text); }, 500);
+        const text = FRIEND_TEXT;
+        setTimeout(() => { if (notOn.length === 1) location.href = smsLink([notOn[0].e164], text); else openTextInviteDialog(notOn, text, "friends"); }, 500);
       }
     }
   });
@@ -4894,7 +4978,9 @@ function messagesBody() {
     <div class="card">${quiet.map(f => { const u = otherIn(f); return row(u, `<b>${esc(personName(u))}</b>`, `<button class="btn small" data-go="#/m/${f.id}">Message</button>`); }).join("")}</div>` : ""}
   ${out.length ? `<div class="section-head" style="margin-top:18px"><h2>Waiting on</h2></div>
     <div class="card">${out.map(f => { const u = otherIn(f); return row(u, `<b>${esc(personName(u))}</b><div class="muted sm">Friend request sent</div>`, `<button class="btn ghost small" data-friendcancel="${f.id}">Cancel</button>`); }).join("")}</div>` : ""}
-  ${!friends.length && !inc.length && !out.length ? emptyState("💬", "No friends yet", "Add friends to message them one-on-one, even if you're not in a group together.", "happy") : ""}`;
+  ${invitedByText().length ? `<div class="section-head" style="margin-top:18px"><h2>Invited by text</h2><span class="muted sm">not on Friendly yet</span></div>
+    <div class="card" id="textedCard">${invitedByText().map(r => `<div class="member-row" data-find="${esc(((r.name || "") + " " + r.phone).toLowerCase())}"><span class="avatar lg" style="background:#CBB;opacity:.6">💬</span><div style="flex:1;min-width:0"><b>${esc(r.name || fmtPhone(r.phone))}</b><div class="muted sm">${r.name ? esc(fmtPhone(r.phone)) + " · " : ""}texted ${ago(r.createdAt)}. Your request is waiting for them.</div></div><span class="btnrow" style="gap:6px"><button class="btn small" data-textagain="${r.id}">Text again</button><button class="btn ghost small" data-untext="${r.id}" aria-label="Remove">✕</button></span></div>`).join("")}</div>` : ""}
+  ${!friends.length && !inc.length && !out.length && !invitedByText().length ? emptyState("💬", "No friends yet", "Add friends to message them one-on-one, even if you're not in a group together.", "happy") : ""}`;
 }
 // Filter the inbox in place (no re-render), so typing never loses focus; re-applied after live refreshes.
 function filterMessages() {
@@ -4936,6 +5022,10 @@ function wireMessages() {
   wireFriendButtons();
   document.querySelectorAll("[data-frienddecline]").forEach(b => b.onclick = () => { const f = S.friends.get(b.dataset.frienddecline); if (f) dropFriendship(f, "Request declined"); });
   document.querySelectorAll("[data-friendcancel]").forEach(b => b.onclick = () => { const f = S.friends.get(b.dataset.friendcancel); if (f) dropFriendship(f, "Request canceled"); });
+  document.querySelectorAll("[data-textagain]").forEach(b => b.onclick = () => { const r = (S.textInvites || []).find(x => x.id === b.dataset.textagain); if (r) location.href = smsLink([r.phone], FRIEND_TEXT); });
+  // Removing drops every waiting invite to that number, so nothing turns into a request later.
+  document.querySelectorAll("[data-untext]").forEach(b => b.onclick = async () => { const r = (S.textInvites || []).find(x => x.id === b.dataset.untext); if (!r) return;
+    b.disabled = true; await Promise.all((S.textInvites || []).filter(x => x.phone === r.phone && x.status === "notOnFriendly").map(x => deleteDoc(doc(db, "friendRequests", x.id)).catch(() => {}))); toast("Invite removed"); });
 }
 
 // ---- One conversation, iMessage-style ----
@@ -5447,7 +5537,7 @@ function photosPageBody() {
   const ago1 = yearAgoEvents().filter(ev => (S.memories.get(ev.id) || []).length);
   const section = (ev, label) => `<div class="section-head" style="margin-top:18px"><h2>${label ? label + " · " : ""}${esc(ev.emoji || "")} ${esc(ev.title)}</h2><a class="muted sm" data-go="#/e/${ev.id}">${esc(fmtWhen(ev))} ›</a></div>
     <div class="photo-grid mem-grid">${(S.memories.get(ev.id) || []).map(p => `<div class="photo-tile"><img src="${esc(p.img)}" data-mem="${p.id}" data-mev="${ev.id}" alt="" loading="lazy">${photoBadges(p)}</div>`).join("")}</div>`;
-  return `<button class="link-back" data-go="#/profile">‹ Profile</button>
+  return `<button class="link-back" data-go="#/">‹ Back</button>
   <div class="section-head"><h2>Memories</h2><span class="muted sm">${(n => n + (n === 1 ? " photo" : " photos"))(evs.reduce((t, ev) => t + S.memories.get(ev.id).length, 0))}</span></div>
   ${S._memLoading ? `<p class="muted">Gathering photos…</p>` : ""}
   ${ago1.map(ev => section(ev, "🕰️ One year ago")).join("")}

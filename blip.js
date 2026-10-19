@@ -197,7 +197,9 @@
 
   // Play the origin story once inside svgEl (wordmark -> Blip over `dur` seconds), then idle.
   // Returns a stop() function. Waits briefly for the display font so the wordmark measures right.
-  function play(svgEl, { dur = 1.9, delay = .25, ink = INK, onDone } = {}) {
+  // opts.align(geo), if given, runs once the logo is laid out and before anything shows, so the page can move
+  // the stage (a CSS transform on svgEl) to sit exactly over a launch image; the resting logo follows it.
+  function play(svgEl, { dur = 1.9, delay = .25, ink = INK, onDone, align } = {}) {
     let stopped = false, raf = 0, done = false;
     const finish = () => { if (!done) { done = true; if (onDone) try { onDone(); } catch (e) {} } };
     const m = morph(svgEl, { ink });
@@ -205,6 +207,7 @@
     const start = () => {
       if (stopped) return;
       m.layout();
+      if (align) { try { align(m.geo()); } catch (e) {} }
       // the resting frame is the header logo itself, laid over the stage exactly where the animation's wordmark sits
       const g = m.geo(), r = svgEl.getBoundingClientRect(), k = r.width / 720;
       clone = document.createElement("div"); clone.className = "blip-logo-rest";
