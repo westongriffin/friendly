@@ -552,11 +552,24 @@ Reply with ONLY a JSON array of objects with these keys: "emoji" (one emoji), "t
 const CURATE_STYLES = ["candid documentary photograph", "35mm film photograph with fine grain", "editorial lifestyle photograph, shallow depth of field", "wide establishing photograph of the place", "close-up detail photograph of the food, drinks or activity", "street photography, candid moment"];
 // Each night gets a small painted cover made from its own scene (the ballgame and the tacos, not a stock palette).
 // Runs after curated/{city} changes; covers are keyed by title+date so unchanged nights keep theirs across rebuilds.
+// One painter per city at a time, one picture at a time, waiting out "busy" (429) answers: the nightly build writes
+// every city within minutes, and the old parallel painters (each publish re-triggering another painter for the same
+// nights) ran into Vertex's rate limit so most nights went without a cover. Our own coverIds/paintingUntil writes
+// don't start another painter; curateCoverSweep below picks up whatever is still missing.
+const coverIdsOf = x => ((x && x.nights) || []).map(n => n.coverId).filter(Boolean).sort().join();
 exports.onCuratedWritten = onDocumentWritten({ document: "curated/{cityKey}", region: "us-central1", timeoutSeconds: 540, memory: "1GiB" }, async e => {
   const after = e.data && e.data.after && e.data.after.exists ? e.data.after.data() : null; if (!after) return;
+  const before = e.data.before && e.data.before.exists ? e.data.before.data() : null;
+  const nudged = !before || (after.coverNudge || 0) !== (before.coverNudge || 0);
+  if (before && coverIdsOf(before) === coverIdsOf(after) && !nudged) return;   // our own bookkeeping writes
+  const ref = e.data.after.ref, t0 = Date.now();
+  await ref.update({ paintingUntil: t0 + 540e3 }).catch(() => {});
+  try { await paintCityCovers(ref, after, t0); } finally { await ref.update({ paintingUntil: 0 }).catch(() => {}); }
+});
+async function paintCityCovers(ref, after, t0) {
   const nights = (after.nights || []).filter(n => n.coverId);
-  const col = e.data.after.ref.collection("covers");
-  const have = new Set((await col.get()).docs.map(d => d.id));
+  const col = ref.collection("covers");
+  const have = new Set((await col.select().get()).docs.map(d => d.id));
   const todo = nights.filter(n => !have.has(n.coverId)).slice(0, 30);
   const shrink = async dataUrl => { const b64 = String(dataUrl).split(",")[1]; const out = await sharp(Buffer.from(b64, "base64")).resize({ width: 720, withoutEnlargement: true }).jpeg({ quality: 74 }).toBuffer(); return "data:image/jpeg;base64," + out.toString("base64"); };
   const paint = async n => {
@@ -565,15 +578,27 @@ exports.onCuratedWritten = onDocumentWritten({ document: "curated/{cityKey}", re
     const light = hr < 11 ? "soft morning daylight" : hr < 17 ? "bright natural daylight" : hr < 20 ? "early evening light" : "night, lit by the venue's own lights";
     const prompt = `${n.scene || n.title}, ${n.title || ""}. ${CURATE_STYLES[h % CURATE_STYLES.length]}, ${light}, real people and real places, natural true-to-life colors, not a cartoon`;
     let image = null;
-    try { image = (await geminiGenerate(prompt)).image; } catch (err) { logger.warn("cover via vertex failed: " + err.message); try { image = await pollinationsGenerate(prompt); } catch (e2) { logger.warn("cover fallback failed: " + e2.message); } }
+    for (let a = 0; a < 4 && !image; a++) {
+      try { image = (await geminiGenerate(prompt)).image; }
+      catch (err) { if (!/ 429/.test(err.message) || Date.now() - t0 > 400e3) { logger.warn("cover failed: " + err.message.slice(0, 120)); break; } await new Promise(r => setTimeout(r, 10e3 * 2 ** a + Math.random() * 5e3)); }
+    }
     if (image) { try { image = await shrink(image); } catch (e3) {} await col.doc(n.coverId).set({ image, title: n.title, createdAt: Date.now() }); have.add(n.coverId); }
   };
-  const publish = async () => { const ids = nights.map(n => n.coverId).filter(id => have.has(id)).sort(); const prev = (after.coverIds || []).slice().sort(); if (ids.join() !== prev.join()) await e.data.after.ref.update({ coverIds: ids }); };
+  let published = (after.coverIds || []).slice().sort().join();
+  const publish = async () => { const ids = nights.map(n => n.coverId).filter(id => have.has(id)).sort(); if (ids.join() !== published) { await ref.update({ coverIds: ids }); published = ids.join(); } };
   await publish();
-  for (let i = 0; i < todo.length; i += 3) { await Promise.all(todo.slice(i, i + 3).map(paint)); await publish(); }
+  for (const n of todo) { if (Date.now() - t0 > 420e3) break; await paint(n); await publish(); }
   // drop covers no night uses any more
   const keep = new Set(nights.map(n => n.coverId));
   await Promise.all([...have].filter(id => !keep.has(id)).map(id => col.doc(id).delete().catch(() => {})));
+}
+// Every 20 minutes: nudge the one city missing the most covers (and not being painted right now) so its painter
+// runs again. Cheap when everything is painted: it reads the city docs and stops.
+exports.curateCoverSweep = onSchedule({ schedule: "every 20 minutes", timeZone: "America/Chicago", timeoutSeconds: 60, memory: "256MiB" }, async () => {
+  const q = await db.collection("curated").get(), now = Date.now();
+  const missing = d => { const x = d.data(), have = new Set(x.coverIds || []); return ((x.nights || []).filter(n => n.coverId && !have.has(n.coverId))).length; };
+  const best = q.docs.filter(d => (d.get("paintingUntil") || 0) < now && missing(d) > 0).sort((a, b) => missing(b) - missing(a))[0];
+  if (best) { logger.info(`cover sweep: ${best.id} missing ${missing(best)}`); await best.ref.update({ coverNudge: now }); }
 });
 exports.curateCover = onRequest({ region: "us-central1", invoker: "public", memory: "256MiB" }, async (req, res) => {
   const c = String(req.query.c || "").replace(/[^a-z0-9-]/g, "").slice(0, 60), id = String(req.query.id || "").replace(/[^a-f0-9]/g, "").slice(0, 12);
@@ -1549,7 +1574,7 @@ exports.onFriendship = onDocumentWritten({ document: "friendships/{fid}", ...PUS
   const by = after.requestedBy, other = (after.uids || []).find(u => u !== by);
   const nm = u => firstName(((after.people || {})[u] || {}).name || "Someone");
   if (!before && after.status === "pending")
-    await notify([other], nm(by) + " wants to be friends on Friendly", "Accept to message each other.", "/#/messages?to=reqCard&who=" + encodeURIComponent(by), { type: "friend", actorId: by });
+    await notify([other], nm(by) + " wants to be friends on Friendly", "Accept to message each other.", "/#/friends?to=reqCard&who=" + encodeURIComponent(by), { type: "friend", actorId: by });
   else if (after.status === "accepted" && (!before || before.status !== "accepted") && after.via !== "group")
     await notify([by], nm(other) + " accepted your friend request", "Say hi! 👋", "/#/m/" + e.params.fid, { type: "friend", actorId: other });
 });

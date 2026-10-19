@@ -271,7 +271,7 @@ const AV = ["#FF6B57", "#FFC145", "#2E9E6B", "#5B8CFF", "#E85D9E", "#8A6BE2", "#
 const colorFor = id => { let h = 0; for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return AV[h % AV.length]; };
 const initials = n => (n || "?").trim().split(/\s+/).slice(0, 2).map(w => w[0].toUpperCase()).join("");
 const first = n => (n || "Someone").split(" ")[0];
-const fmt$ = c => (c < 0 ? "−" : "") + "$" + (Math.abs(c) / 100).toFixed(2);
+const fmt$ = c => (c < 0 ? "−" : "") + "$" + (Math.abs(c) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 // Dot, the mascot (blip.js). Small helpers so call sites stay short; both degrade to nothing/emoji if blip.js failed to load.
 const dot = (mood, size = 72) => window.Blip ? window.Blip.svg({ mood, size }) : "";
@@ -696,7 +696,7 @@ function planBirthday(b) { resetCompose(); compose.date = b.date; compose.groupI
 function birthdayCard() {
   const list = upcomingBirthdays(30); let dismissed = []; try { dismissed = JSON.parse(LS.get("friendlyBdayDismissed") || "[]"); } catch {}
   const b = list.find(x => !dismissed.includes(x.uid + ":" + x.date)); if (!b) return "";
-  return `<div class="card notif-card"><span class="notif-ico dot-ico">${dotHat(52)}</span><div style="flex:1"><b>${esc(first(b.name))}'s birthday is ${b.days === 0 ? "today" : b.days === 1 ? "tomorrow" : "in " + b.days + " days"}</b><div class="muted sm">${esc(fmtDay({ date: b.date }))}. A month out is the sweet spot to plan something.</div></div><span class="btnrow" style="gap:6px"><button class="btn primary small" data-bplan="${b.uid}">Plan something</button><button class="btn ghost small" data-bdismiss="${b.uid}:${b.date}">Later</button></span></div>`;
+  return `<div class="card notif-card"><span class="notif-ico dot-ico">${dotHat(52)}</span><div class="nc-text" style="flex:1"><b>${esc(first(b.name))}'s birthday is ${b.days === 0 ? "today" : b.days === 1 ? "tomorrow" : "in " + b.days + " days"}</b><div class="muted sm">${esc(fmtDay({ date: b.date }))}. A month out is the sweet spot to plan something.</div></div><span class="btnrow nc-btns" style="gap:6px"><button class="btn primary small" data-bplan="${b.uid}">Plan something</button><button class="btn ghost small" data-bdismiss="${b.uid}:${b.date}">Later</button></span></div>`;
 }
 // +12145551234 -> (214) 555-1234 for US numbers; anything else is shown as stored.
 const fmtPhone = p => { const m = String(p || "").match(/^\+1(\d{3})(\d{3})(\d{4})$/); return m ? `(${m[1]}) ${m[2]}-${m[3]}` : String(p || ""); };
@@ -778,6 +778,7 @@ function parseRoute() {
   const [path, qs] = (location.hash || "#/").replace(/^#/, "").split("?");
   const r = routeFromPath(path);
   r.q = {}; try { new URLSearchParams(qs || "").forEach((v, k) => { r.q[k] = v; }); } catch {}
+  if (r.name === "messages" && r.q.to === "reqCard") r.tab = "friends";   // friend requests live on the Friends tab (older notifications point at Messages)
   return r;
 }
 function routeFromPath(h) {
@@ -788,7 +789,7 @@ function routeFromPath(h) {
   if (p[0] === "join") return { name: "join", id: p[1] };
   if (p[0] === "x") return { name: "expense", id: p[1] };
   if (p[0] === "activity") return { name: "activity" };
-  if (p[0] === "messages") return { name: "messages" };
+  if (p[0] === "messages" || p[0] === "friends" || p[0] === "invited") return { name: "messages", tab: p[0] };
   if (p[0] === "drafts") return { name: "drafts" };
   if (p[0] === "m") return { name: "dm", id: p[1] };
   if (p[0] === "photos") return { name: "photos" };
@@ -1494,7 +1495,7 @@ function shell(body) {
   ${isDemo() ? `<div class="demo-bar">${dot("happy", 26)}<span>Demo mode -- this is Riley, a shared public sandbox account. Explore freely; changes are visible to other visitors and reset nightly.</span></div>` : ""}
   <header class="topbar">
     <div class="brand has-dot"><span data-go="#/">${WORDMARK}</span><button type="button" class="brand-dot" id="brandDot" aria-label="A tip from Dot"></button></div>
-    <div class="topbar-right"><button class="bell" data-go="#/search" title="Search">🔍</button><button class="bell ${tab === "photos" ? "on" : ""}" data-go="#/photos" title="Memories" aria-label="Memories">📸</button>${S.msgsReady ? `<button class="bell" data-go="#/messages" title="Messages">💬${msgBadge() ? `<span class="badge">${msgBadge()}</span>` : ""}</button>` : ""}<button class="bell" data-go="#/activity" title="Activity">🔔${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ""}</button>
+    <div class="topbar-right"><button class="bell" data-go="#/search" title="Search">🔍</button><button class="bell ${tab === "photos" ? "on" : ""}" data-go="#/photos" title="Memories" aria-label="Memories">📸</button>${S.msgsReady ? `<button class="bell ${tab === "messages" ? "on" : ""}" data-go="${dmUnread() && !incomingRequests().length ? "#/messages" : "#/friends"}" title="Friends" aria-label="Friends">👥${msgBadge() ? `<span class="badge">${msgBadge()}</span>` : ""}</button>` : ""}<button class="bell" data-go="#/activity" title="Activity">🔔${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ""}</button>
     <button class="me-chip" data-go="#/profile">${avatar(S.user.uid)}<span>${esc(first(p.name))}</span></button></div>
   </header>
   <div class="tabs-sentinel"></div>
@@ -1609,7 +1610,7 @@ function routeBody(r) {
   if (r.name === "expense") return expenseBody(r.id);
   if (r.name === "activity") return activityBody();
   if (r.name === "drafts") return draftsBody();
-  if (r.name === "messages" && S.msgsReady) return messagesBody();
+  if (r.name === "messages" && S.msgsReady) return messagesBody(r.tab);
   if (r.name === "dm" && S.msgsReady) return dmBody(r.id);
   if (r.name === "photos") return photosPageBody();
   if (r.name === "search") return searchBody();
@@ -1812,11 +1813,15 @@ function openGroupLookDialog(g) {
     <div class="gl-label">Icon</div>
     <div class="emoji-pick gl-emojis" id="glEmojis">${GROUP_EMOJIS.map(e => `<button type="button" data-ge="${e}" class="${!L.icon && L.emoji === e ? "on" : ""}">${e}</button>`).join("")}</div>
     <div class="gl-actions"><input id="glAny" maxlength="8" placeholder="Any emoji" aria-label="Any emoji"><button type="button" class="btn small" id="glIconUp">📷 Picture</button><button type="button" class="btn small" id="glIconAi">✨ Dot makes one</button></div>
+    <div class="gl-prompt hidden" id="glIconBox"><label class="field"><span>Tell Dot what to draw</span><textarea id="glIconText" rows="2" maxlength="300" placeholder="A pizza slice wearing sunglasses">A fun icon for ${esc(g.name)}</textarea></label>
+      <div class="gl-actions"><button type="button" class="btn primary small" id="glIconGo">✨ Make it</button><button type="button" class="btn ghost small" id="glIconX">Never mind</button></div></div>
     <div class="gl-label">Color</div>
     <div class="gl-colors" id="glColors">${GROUP_COLORS.map(c => `<button type="button" data-gc="${c}" style="background:${c}" class="${L.color === c ? "on" : ""}" aria-label="Color ${c}"></button>`).join("")}</div>
     <div class="gl-label">Cover</div>
     <div class="gl-actions"><button type="button" class="btn small" id="glCoverUp">📷 Photo</button><button type="button" class="btn small" id="glCoverAi">✨ Dot paints one</button><button type="button" class="btn ghost small" id="glCoverOff">Use the color</button></div>
-    <div class="style-chips" id="glStyles">${COVER_STYLES.map(([k, l]) => `<button type="button" data-gs="${k}" class="${k === L.style ? "on" : ""}">${l}</button>`).join("")}</div>`, "Save", async () => {
+    <div class="gl-prompt hidden" id="glCoverBox"><label class="field"><span>Tell Dot what to paint</span><textarea id="glCoverText" rows="3" maxlength="400" placeholder="Our lake house dock at sunset, kayaks and string lights">A cozy scene that feels like ${esc(g.name)}</textarea></label>
+      <div class="style-chips" id="glStyles">${COVER_STYLES.map(([k, l]) => `<button type="button" data-gs="${k}" class="${k === L.style ? "on" : ""}">${l}</button>`).join("")}</div>
+      <div class="gl-actions"><button type="button" class="btn primary small" id="glCoverGo">🎨 Paint it</button><button type="button" class="btn ghost small" id="glCoverX">Never mind</button></div></div>`, "Save", async () => {
       try { await updateDoc(doc(db, "groups", g.id), { emoji: L.emoji, icon: L.icon, color: L.color, cover: L.cover }); closeDialog(); toast("Looking good ✨", null, null, "happy"); }
       catch (e) { toast(e.message); }
     });
@@ -1829,12 +1834,18 @@ function openGroupLookDialog(g) {
   el("glIconUp").onclick = async () => { const f = await pickFile("image/*", "group icon"); if (!f) return; const b = el("glIconUp"); busy(b, true); try { L.icon = await squareImage(f, 256); redraw(); } catch (e) { toast("Couldn't use that picture"); } busy(b, false); };
   el("glCoverUp").onclick = async () => { const f = await pickFile("image/*", "group cover"); if (!f) return; const b = el("glCoverUp"); busy(b, true); try { L.cover = await compressImage(f, 1200, 0.78, 260000); redraw(); } catch (e) { toast("Couldn't use that picture"); } busy(b, false); };
   el("glCoverOff").onclick = () => { L.cover = ""; redraw(); };
-  el("glIconAi").onclick = async () => { const b = el("glIconAi"); busy(b, true, "✨ Making…");
-    try { const img = await generateCover(`A single playful sticker-style icon that captures a friend group called "${g.name}". One bold, simple object or symbol, centered, flat bright colors, plain solid light background. No people, no faces, no text, no letters, no numbers.`); L.icon = await squareImage(img, 256); redraw(); }
-    catch (e) { toast("Dot couldn't make one just now. Try again?"); } busy(b, false, "✨ Dot makes one"); };
-  el("glCoverAi").onclick = async () => { const b = el("glCoverAi"); busy(b, true, "✨ Painting…");
-    try { L.cover = await generateCover(`A wide, inviting cover image for a friend group called "${g.name}": a place, scene, or still life of things this crew would enjoy together, warm and full of atmosphere. Style: ${coverStylePrompt(L.style)}. No people, no faces, no text, no words, no letters.`); redraw(); }
-    catch (e) { toast("Dot couldn't paint one just now. Try again?"); } busy(b, false, "✨ Dot paints one"); };
+  // Dot's buttons open a box with an idea already written in, which you can change before Dot starts.
+  const openBox = (id, ta) => { el(id).classList.remove("hidden"); const t = el(ta); t.focus(); t.setSelectionRange(t.value.length, t.value.length); };
+  el("glIconAi").onclick = () => openBox("glIconBox", "glIconText");
+  el("glIconX").onclick = () => el("glIconBox").classList.add("hidden");
+  el("glCoverAi").onclick = () => openBox("glCoverBox", "glCoverText");
+  el("glCoverX").onclick = () => el("glCoverBox").classList.add("hidden");
+  el("glIconGo").onclick = async () => { const idea = el("glIconText").value.trim() || `A fun icon for ${g.name}`, b = el("glIconGo"); busy(b, true, "✨ Making…");
+    try { const img = await generateCover(`A single playful sticker-style icon: ${idea}. One bold, simple subject, centered, flat bright colors, plain solid light background. No text, no letters, no numbers.`); L.icon = await squareImage(img, 256); redraw(); el("glIconBox").classList.add("hidden"); }
+    catch (e) { toast("Dot couldn't make one just now. Try again?"); } busy(b, false, "✨ Make it"); };
+  el("glCoverGo").onclick = async () => { const idea = el("glCoverText").value.trim() || `A cozy scene that feels like ${g.name}`, b = el("glCoverGo"); busy(b, true, "🎨 Painting…");
+    try { L.cover = await generateCover(`A wide, inviting cover image: ${idea}. Warm and full of atmosphere. Style: ${coverStylePrompt(L.style)}. No text, no words, no letters.`); redraw(); el("glCoverBox").classList.add("hidden"); }
+    catch (e) { toast("Dot couldn't paint one just now. Try again?"); } busy(b, false, "🎨 Paint it"); };
 }
 function groupRow(g) {
   const n = (g.memberUids || []).length;
@@ -2184,7 +2195,7 @@ function openTextInviteDialog(texted, text, where = "event") {
     <div id="autoBox">${autoHtml()}</div>
     <button type="button" class="btn ${oneAtATime ? "" : "primary"}" id="textAll" style="width:100%;margin:10px 0 12px">💬 Send to all ${n}, one at a time${oneAtATime ? " instead" : ""}</button>
     <div class="stack" id="txtRows">${rowsHtml()}</div>
-    <p class="muted sm" style="margin:10px 0 0">${{ friends: `You can always come back and text stragglers from <b>Invited by text</b> in Messages.`, group: `You can always come back and text stragglers from the <b>Invited</b> list in the group.`, event: `You can always come back and text stragglers from the event's <b>Guest list</b>.` }[where]}</p>`, null, null);
+    <p class="muted sm" style="margin:10px 0 0">${{ friends: `You can always come back and text stragglers from <b>Friends › Invited</b>.`, group: `You can always come back and text stragglers from the group's <b>Invited</b> list or <b>Friends › Invited</b>.`, event: `You can always come back and text stragglers from the event's <b>Guest list</b> or <b>Friends › Invited</b>.` }[where]}</p>`, null, null);
   const currentText = () => el("txtMsg").value;
   const renderRows = () => { const box = el("txtRows"); if (box) box.innerHTML = rowsHtml(); wireRowButtons(); };
   function renderAuto() {
@@ -4953,34 +4964,75 @@ function wireFriendButtons(root = document) {
   root.querySelectorAll("[data-friendaccept]").forEach(b => b.onclick = async () => { const f = S.friends.get(b.dataset.friendaccept); if (f) { b.disabled = true; await acceptFriend(f); } closeDialog(); });
 }
 
-function messagesBody() {
+// The Friends page (the 👥 circle), three tabs: Friends (requests to answer, then everyone you're friends with),
+// Messages (the inbox), and Invited (everyone you've invited anywhere who hasn't joined or answered yet).
+function messagesBody(tab = "messages") {
   const me = myUid(), blocked = new Set(S.profile.blockedUids || []);
   const inc = incomingRequests().filter(f => !blocked.has(otherIn(f)));
-  const out = outgoingRequests();
   const friends = acceptedFriends().filter(f => !blocked.has(otherIn(f)));
   // A deleted conversation stays hidden until something new arrives; pinned ones sit on top as big circles.
   const cleared = S.profile.hiddenDms || {}, pins = S.profile.pinnedDms || [], muted = new Set(S.profile.mutedDms || []);
   const live = t => t && t.lastAt && t.lastAt > (cleared[t.id] || 0);
   const threads = friends.map(f => ({ f, t: S.dms.get(f.id) })).filter(x => live(x.t) && !pins.includes(x.f.id)).sort((a, b) => b.t.lastAt - a.t.lastAt);
   const pinned = pins.map(id => friends.find(f => f.id === id)).filter(Boolean);
-  const quiet = friends.filter(f => !live(S.dms.get(f.id)) && !pins.includes(f.id)).sort((a, b) => personName(otherIn(a)).localeCompare(personName(otherIn(b))));
   const row = (u, mid, right, go, extra = "") => `<div class="member-row ${go ? "dm-row" : ""}" data-find="${esc((personName(u) + " " + extra).toLowerCase())}" ${go ? `data-go="${go}" role="button"` : ""}>${avatar(u, "lg")}<div style="flex:1;min-width:0">${mid}</div>${right}</div>`;
-  return `
-  <div class="section-head msg-head"><h1 style="margin:0">Messages</h1><span class="btnrow" style="gap:8px;margin:0"><button class="btn small" id="addFriendsBtn">＋ Add friends</button><button class="btn primary small" id="newMsgBtn">✏️ New</button></span></div>
-  ${friends.length || inc.length || out.length ? `<input type="search" class="inv-search msg-search" id="msgSearch" placeholder="Search friends and messages…" autocomplete="off" enterkeyhint="search">
-  <p class="muted sm hidden" id="msgNoHits" style="margin:6px 2px">No friends or messages match that.</p>` : ""}
-  ${inc.length ? `<div class="section-head" style="margin-top:18px"><h2>Friend requests</h2></div>
-    <div class="card" id="reqCard">${inc.map(f => { const u = otherIn(f); return row(u, `<b>${esc(personName(u))}</b><div class="muted sm">Wants to be friends</div>`, `<span class="btnrow" style="gap:6px"><button class="btn small primary" data-friendaccept="${f.id}">Accept</button><button class="btn ghost small" data-frienddecline="${f.id}">Decline</button></span>`); }).join("")}</div>` : `<div id="reqCard"></div>`}
+  const inv = invitedRows();
+  const T = (k, label, n, hot) => `<button type="button" class="tab ${tab === k ? "on" : ""}" data-go="#/${k}">${label}${n ? `<span class="fr-n${hot ? " hot" : ""}">${n}</span>` : ""}</button>`;
+  const head = `<div class="section-head msg-head"><h1 style="margin:0">Friends</h1><span class="btnrow" style="gap:8px;margin:0"><button class="btn small" id="addFriendsBtn">＋ Add friends</button>${tab === "messages" ? `<button class="btn primary small" id="newMsgBtn">✏️ New</button>` : ""}</span></div>
+  <div class="tabs fr-tabs">${T("friends", "Friends", inc.length || friends.length, !!inc.length)}${T("messages", "Messages", dmUnread(), true)}${T("invited", "Invited", inv.length)}</div>`;
+  const reqs = inc.length ? `<div class="section-head" style="margin-top:18px"><h2>Friend requests</h2></div>
+<div class="card" id="reqCard">${inc.map(f => { const u = otherIn(f); return row(u, `<b>${esc(personName(u))}</b><div class="muted sm">Wants to be friends</div>`, `<span class="btnrow" style="gap:6px"><button class="btn small primary" data-friendaccept="${f.id}">Accept</button><button class="btn ghost small" data-frienddecline="${f.id}">Decline</button></span>`); }).join("")}</div>` : `<div id="reqCard"></div>`;
+  const search = ph => `<input type="search" class="inv-search msg-search" id="msgSearch" placeholder="${ph}" autocomplete="off" enterkeyhint="search">
+  <p class="muted sm hidden" id="msgNoHits" style="margin:6px 2px">Nothing matches that.</p>`;
+  if (tab === "invited") return head + invitedBody(inv);
+  if (tab === "friends") {
+    const all = friends.map(otherIn).sort((a, b) => personName(a).localeCompare(personName(b)));
+    return head + reqs + (all.length ? `${search("Search your friends…")}
+  <div class="section-head" style="margin-top:18px"><h2>All friends</h2><span class="muted sm">${all.length}</span></div>
+  <div class="card">${all.map(u => row(u, `<b>${esc(personName(u))}</b>`, `<button class="btn small" data-go="#/m/${pairOf(u)}">Message</button>`)).join("")}</div>`
+      : inc.length ? "" : emptyState("👥", "No friends yet", "Add friends to message them one-on-one, even if you're not in a group together.", "happy"));
+  }
+  const reqLink = inc.length ? `<button type="button" class="req-link" data-go="#/friends">👋 ${inc.length === 1 ? "1 friend request" : inc.length + " friend requests"} waiting <span>›</span></button>` : "";
+  return head + reqLink + (threads.length || pinned.length ? `${search("Search messages…")}
   ${pinned.length ? `<div class="dm-pins">${pinned.map(f => { const u = otherIn(f), t = S.dms.get(f.id); return `<button type="button" class="dm-pin" data-go="#/m/${f.id}" data-find="${esc(personName(u).toLowerCase())}">${avatar(u, "xl")}${dmIsUnread(t) ? `<span class="dm-dot"></span>` : ""}<span>${esc(first(personName(u)))}</span></button>`; }).join("")}</div>` : ""}
   ${threads.length ? `<div class="card" style="margin-top:18px">${threads.map(({ f, t }) => { const u = otherIn(f); const unread = dmIsUnread(t);
-      return row(u, `<b>${esc(personName(u))}</b>${muted.has(f.id) ? ` <span title="Alerts hidden">🔕</span>` : ""}<div class="muted sm dm-last ${unread ? "unread" : ""}">${t.lastBy === me ? "You: " : ""}${esc(t.lastText || "")}</div>`, `<span class="muted sm">${ago(t.lastAt)}</span>${unread ? `<span class="dm-dot" aria-label="Unread"></span>` : ""}`, "#/m/" + f.id, t.lastText || ""); }).join("")}</div>` : ""}
-  ${quiet.length ? `<div class="section-head" style="margin-top:18px"><h2>Friends</h2></div>
-    <div class="card">${quiet.map(f => { const u = otherIn(f); return row(u, `<b>${esc(personName(u))}</b>`, `<button class="btn small" data-go="#/m/${f.id}">Message</button>`); }).join("")}</div>` : ""}
-  ${out.length ? `<div class="section-head" style="margin-top:18px"><h2>Waiting on</h2></div>
-    <div class="card">${out.map(f => { const u = otherIn(f); return row(u, `<b>${esc(personName(u))}</b><div class="muted sm">Friend request sent</div>`, `<button class="btn ghost small" data-friendcancel="${f.id}">Cancel</button>`); }).join("")}</div>` : ""}
-  ${invitedByText().length ? `<div class="section-head" style="margin-top:18px"><h2>Invited by text</h2><span class="muted sm">not on Friendly yet</span></div>
-    <div class="card" id="textedCard">${invitedByText().map(r => `<div class="member-row" data-find="${esc(((r.name || "") + " " + r.phone).toLowerCase())}"><span class="avatar lg" style="background:#CBB;opacity:.6">💬</span><div style="flex:1;min-width:0"><b>${esc(r.name || fmtPhone(r.phone))}</b><div class="muted sm">${r.name ? esc(fmtPhone(r.phone)) + " · " : ""}texted ${ago(r.createdAt)}. Your request is waiting for them.</div></div><span class="btnrow" style="gap:6px"><button class="btn small" data-textagain="${r.id}">Text again</button><button class="btn ghost small" data-untext="${r.id}" aria-label="Remove">✕</button></span></div>`).join("")}</div>` : ""}
-  ${!friends.length && !inc.length && !out.length && !invitedByText().length ? emptyState("💬", "No friends yet", "Add friends to message them one-on-one, even if you're not in a group together.", "happy") : ""}`;
+      return row(u, `<b>${esc(personName(u))}</b>${muted.has(f.id) ? ` <span title="Alerts hidden">🔕</span>` : ""}<div class="muted sm dm-last ${unread ? "unread" : ""}">${t.lastBy === me ? "You: " : ""}${esc(t.lastText || "")}</div>`, `<span class="muted sm">${ago(t.lastAt)}</span>${unread ? `<span class="dm-dot" aria-label="Unread"></span>` : ""}`, "#/m/" + f.id, t.lastText || ""); }).join("")}</div>` : ""}` : emptyState("💬", "No conversations yet", friends.length ? "Tap ✏️ New to message a friend." : "Add friends to message them one-on-one, even if you're not in a group together.", "happy"));
+}
+// Everyone you've invited anywhere and are still waiting on: friend requests you sent, friends you texted to join,
+// people invited to groups you host who haven't joined, and people who haven't answered your upcoming events.
+function invitedRows() {
+  const me = myUid(), t = todayStr(), out = [];
+  for (const f of outgoingRequests()) out.push({ kind: "request", uid: otherIn(f), id: f.id });
+  for (const r of invitedByText()) out.push({ kind: "text", phone: r.phone, name: r.name || "", id: r.id, at: r.createdAt });
+  for (const g of S.groups.values()) {
+    if (g.ownerId !== me && !(g.hostUids || []).includes(me)) continue;
+    for (const p of g.invitedPhones || []) out.push({ kind: "group", phone: p, name: (g.invitedPhoneNames || {})[p] || "", g });
+    for (const e of g.invitedEmails || []) out.push({ kind: "group", email: e, g });
+  }
+  for (const ev of myEvents()) {
+    if (!canManage(ev) || (ev.date || "") < t) continue;
+    for (const p of unansweredPhones(ev)) out.push({ kind: "event", phone: p, name: (ev.invitedPhoneNames || {})[p] || "", ev });
+    for (const u of ev.invitedUids || []) if (u !== me && !(ev.rsvps || {})[u]) out.push({ kind: "event", uid: u, ev });
+  }
+  return out;
+}
+function invitedBody(inv) {
+  if (!inv.length) return emptyState("✉️", "No open invites", "When you invite people to Friendly, a group, or an event, anyone who hasn't joined or answered yet shows up here.", "happy");
+  const ghost = ico => `<span class="avatar lg" style="background:#CBB;opacity:.6">${ico}</span>`;
+  const r = (lead, title, sub, right, find) => `<div class="member-row" data-find="${esc(String(find || title).toLowerCase())}">${lead}<div style="flex:1;min-width:0"><b>${title}</b><div class="muted sm">${sub}</div></div>${right}</div>`;
+  const who = x => esc(x.name || (x.phone ? fmtPhone(x.phone) : x.email || ""));
+  const textBtn = (attr, val) => `<button class="btn small" ${attr}="${esc(val)}">Text again</button>`;
+  const reqs = inv.filter(x => x.kind === "request"), texts = inv.filter(x => x.kind === "text");
+  const groups = [...new Set(inv.filter(x => x.kind === "group").map(x => x.g))], events = [...new Set(inv.filter(x => x.kind === "event").map(x => x.ev))].sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const sec = (title, sub, rows, go) => `<div class="section-head inv-sec" style="margin-top:18px"><div style="min-width:0"><h2>${title}</h2>${sub ? `<div class="muted sm">${sub}</div>` : ""}</div>${go ? `<a class="btn small ghost" data-go="${go}">Open ›</a>` : ""}</div><div class="card">${rows}</div>`;
+  return `<input type="search" class="inv-search msg-search" id="msgSearch" placeholder="Search everyone you've invited…" autocomplete="off" enterkeyhint="search">
+  <p class="muted sm hidden" id="msgNoHits" style="margin:6px 2px">Nothing matches that.</p>
+  ${reqs.length ? sec("Friend requests", "waiting on them", reqs.map(x => r(avatar(x.uid, "lg"), esc(personName(x.uid)), "Friend request sent", `<button class="btn ghost small" data-friendcancel="${x.id}">Cancel</button>`, personName(x.uid))).join("")) : ""}
+  ${texts.length ? sec("Texted to join Friendly", "not on Friendly yet", texts.map(x => r(ghost("💬"), who(x), `${x.name ? esc(fmtPhone(x.phone)) + " · " : ""}texted ${ago(x.at)}. Your friend request is waiting for them.`, `<span class="btnrow" style="gap:6px">${textBtn("data-textagain", x.id)}<button class="btn ghost small" data-untext="${x.id}" aria-label="Remove">✕</button></span>`, (x.name || "") + " " + x.phone)).join("")) : ""}
+  ${groups.map(g => sec(`${groupMini(g)} ${esc(g.name)}`, "Group invites", inv.filter(x => x.kind === "group" && x.g === g).map(x => r(ghost(x.email ? "✉︎" : "💬"), who(x), `${x.name && x.phone ? esc(fmtPhone(x.phone)) + " · " : ""}Invited to the group · hasn't joined yet`, x.phone ? textBtn("data-gtext", g.id + "|" + x.phone) : "", (x.name || "") + " " + (x.phone || x.email || "") + " " + g.name)).join(""), "#/g/" + g.id)).join("")}
+  ${events.map(ev => sec(`${esc(ev.emoji || "🎉")} ${esc(ev.title)}`, esc(fmtWhen(ev)), inv.filter(x => x.kind === "event" && x.ev === ev).map(x => x.uid
+      ? r(avatar(x.uid, "lg"), esc(personName(x.uid)), "Hasn't answered yet", "", personName(x.uid) + " " + ev.title)
+      : r(ghost("💬"), who(x), `${x.name ? esc(fmtPhone(x.phone)) + " · " : ""}Not on Friendly yet · hasn't answered`, textBtn("data-etext", ev.id + "|" + x.phone), (x.name || "") + " " + x.phone + " " + ev.title)).join(""), "#/e/" + ev.id)).join("")}`;
 }
 // Filter the inbox in place (no re-render), so typing never loses focus; re-applied after live refreshes.
 function filterMessages() {
@@ -5017,12 +5069,14 @@ function openNewMessageDialog() {
 }
 function wireMessages() {
   document.querySelectorAll("#addFriendsBtn").forEach(b => b.onclick = openAddFriendsDialog);
-  el("newMsgBtn").onclick = openNewMessageDialog;
+  if (el("newMsgBtn")) el("newMsgBtn").onclick = openNewMessageDialog;
   if (el("msgSearch")) { el("msgSearch").oninput = filterMessages; filterMessages(); }
   wireFriendButtons();
   document.querySelectorAll("[data-frienddecline]").forEach(b => b.onclick = () => { const f = S.friends.get(b.dataset.frienddecline); if (f) dropFriendship(f, "Request declined"); });
   document.querySelectorAll("[data-friendcancel]").forEach(b => b.onclick = () => { const f = S.friends.get(b.dataset.friendcancel); if (f) dropFriendship(f, "Request canceled"); });
   document.querySelectorAll("[data-textagain]").forEach(b => b.onclick = () => { const r = (S.textInvites || []).find(x => x.id === b.dataset.textagain); if (r) location.href = smsLink([r.phone], FRIEND_TEXT); });
+  document.querySelectorAll("[data-gtext]").forEach(b => b.onclick = () => { const [gid, ph] = b.dataset.gtext.split("|"), g = S.groups.get(gid); if (g) location.href = smsLink([ph], groupInviteText(g)); });
+  document.querySelectorAll("[data-etext]").forEach(b => b.onclick = () => { const [eid, ph] = b.dataset.etext.split("|"), ev = S.events.get(eid); if (ev) location.href = smsLink([ph], eventInviteText(ev)); });
   // Removing drops every waiting invite to that number, so nothing turns into a request later.
   document.querySelectorAll("[data-untext]").forEach(b => b.onclick = async () => { const r = (S.textInvites || []).find(x => x.id === b.dataset.untext); if (!r) return;
     b.disabled = true; await Promise.all((S.textInvites || []).filter(x => x.phone === r.phone && x.status === "notOnFriendly").map(x => deleteDoc(doc(db, "friendRequests", x.id)).catch(() => {}))); toast("Invite removed"); });

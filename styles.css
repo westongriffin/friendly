@@ -1109,3 +1109,17 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 .gl-colors button{width:32px;height:32px;border-radius:50%;border:2px solid var(--surface);box-shadow:0 0 0 1px var(--line)}
 .gl-colors button.on{box-shadow:0 0 0 2px var(--accent)}
 #glStyles{margin-top:8px}
+.gl-prompt{margin-top:10px;padding:12px;border-radius:14px;background:var(--surface2);border:1px solid var(--line)}
+.gl-prompt .field{margin:0}
+.gl-prompt textarea{min-height:56px}
+/* Friends page tabs (Friends · Messages · Invited) */
+.fr-tabs{position:static;width:100%;margin:12px 0 4px}
+.fr-tabs .tab{display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.fr-n{font-size:11px;font-weight:700;line-height:18px;min-width:18px;padding:0 6px;border-radius:999px;background:var(--line);color:var(--muted)}
+.fr-n.hot{background:var(--accent);color:var(--on-accent)}
+.inv-sec{align-items:flex-end;gap:12px}.inv-sec h2{font-size:19px;line-height:1.2}
+.req-link{display:flex;align-items:center;gap:8px;width:100%;margin:6px 0 2px;padding:12px 14px;border-radius:14px;border:1px solid var(--line);background:var(--surface2);color:var(--ink);font:inherit;font-weight:600;text-align:left;cursor:pointer}
+.req-link span{margin-left:auto;color:var(--muted)}
+/* birthday card: on a phone the buttons drop under the text instead of squeezing it into a sliver */
+.notif-card .nc-text{min-width:min(220px,100%)}
+.notif-card .nc-btns{margin-left:auto}
