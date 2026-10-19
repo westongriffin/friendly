@@ -1386,6 +1386,22 @@ exports.onExpenseAdded = onDocumentCreated({ document: "expenses/{xid}", ...PUSH
     await notify([u], `${adderName} added ${desc}`, body, url + "?who=" + encodeURIComponent(u), { type: "money", actorId: adder });
   }
 });
+// Pick your items: tell people when they're added to a shared receipt, and tell the creator once everyone else
+// has tapped I'm done. Picks themselves don't notify (they'd buzz on every tap).
+exports.onReceiptSplit = onDocumentWritten({ document: "receiptSplits/{sid}", ...PUSH }, async e => {
+  const after = e.data && e.data.after && e.data.after.exists ? e.data.after.data() : null; if (!after || after.status !== "open") return;
+  const before = e.data.before && e.data.before.exists ? e.data.before.data() : null;
+  const creator = after.createdBy, url = "/#/pick/" + e.params.sid, desc = after.desc || after.merchant || "a receipt";
+  const total = (after.items || []).reduce((n, it) => n + (it.cents || 0), 0) + (after.tax || 0) + (after.fees || 0) + (after.tip || 0);
+  const had = new Set((before && before.uids) || []), added = (after.uids || []).filter(u => u !== creator && !had.has(u));
+  const others = (after.uids || []).filter(u => u !== creator);
+  const allDone = d => others.length > 0 && others.every(u => !!((d && d.done) || {})[u]);
+  const finishedNow = allDone(after) && !allDone(before);
+  if (!added.length && !finishedNow) return;
+  const name = firstName((await db.doc("users/" + creator).get()).get("name"));
+  if (added.length) await notify(added, `${name} wants you to pick your items`, `${desc} · ${dollars(total)}. Tap what you had; everyone's picks show up live.`, url, { type: "money", actorId: creator });
+  if (finishedNow) await notify([creator], "Everyone picked their items", `${desc}: hand out anything left, then tap Finish.`, url, { type: "money" });
+});
 exports.onExpenseComment = onDocumentCreated({ document: "expenses/{xid}/comments/{cid}", ...PUSH }, async e => {
   const c = e.data && e.data.data(); if (!c) return;
   const x = (await db.doc("expenses/" + e.params.xid).get()).data(); if (!x) return;
