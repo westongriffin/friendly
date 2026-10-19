@@ -4330,15 +4330,15 @@ function textGuest(id, cents, dir) {
 // iCloud link (opens straight in Shortcuts with Add Shortcut); shared from Wes's iPhone Oct 18. The signed file in
 // shortcuts/ (built by shortcuts/build-pay.py) is the same shortcut.
 const PAY_SHORTCUT_URL = "https://www.icloud.com/shortcuts/b46dc76288a14df78c1c08dccb5ac36a";   // Friendly Pay v5 (verified via the iCloud records API Oct 18 2026). amt is sent as text: a JSON number crashes Send Payment (see shortcuts/build-pay.py)
-const payShortcutOn = () => NATIVE && IOS && isAdmin();
+const payShortcutOn = () => NATIVE && IOS;   // live for everyone since v246 (Oct 18 2026)
 function payViaShortcut(uid, cents, expenseId) {
   const to = toE164(payInfoOf(uid).phone || ""), x = expenseId && S.expenses.get(expenseId);
-  // The vCard lets Apple's sheet show the person's name (not just the number); the amount goes as a number.
-  const vname = String(nameOf(uid) || "").replace(/[\r\n;,]/g, " ").trim(), vcf = `BEGIN:VCARD\nVERSION:3.0\nFN:${vname}\nN:${vname};;;;\nTEL;TYPE=CELL:${to}\nEND:VCARD`;
-  const run = () => { location.href = "shortcuts://run-shortcut?name=" + encodeURIComponent("Friendly Pay") + "&input=text&text=" + encodeURIComponent(JSON.stringify({ to, amt: (Math.round(cents) / 100).toFixed(2), note: ((x && x.desc) || "Friendly") + " · Friendly", vcf })); askIfSent(uid, cents, "Apple Cash", expenseId, () => LS.remove("friendlyPayShortcut")); };   // "Not yet" brings the setup back next time
+  // Apple's sheet shows the person as their number no matter what is sent (it rebuilds the payee from Siri matches
+  // only); the amount must be text, a JSON number crashes the Send Payment step. See shortcuts/build-pay.py.
+  const run = () => { location.href = "shortcuts://run-shortcut?name=" + encodeURIComponent("Friendly Pay") + "&input=text&text=" + encodeURIComponent(JSON.stringify({ to, amt: (Math.round(cents) / 100).toFixed(2), note: ((x && x.desc) || "Friendly") + " · Friendly" })); askIfSent(uid, cents, "Apple Cash", expenseId, () => LS.remove("friendlyPayShortcut")); };   // "Not yet" brings the setup back next time
   if (LS.get("friendlyPayShortcut") === "1") return run();
-  dialog(`<h3>Apple Cash in one tap <span class="muted sm">(preview, only you see this)</span></h3>
-    <p>Add the free <b>Friendly Pay</b> shortcut once. After that, Cash opens Apple Pay with ${esc(first(nameOf(uid)))} and <b>${fmt$(cents)}</b> already filled in. You confirm with Face ID.</p>
+  dialog(`<h3>Apple Cash in one tap</h3>
+    <p>Add the free <b>Friendly Pay</b> shortcut once. After that, Cash opens Apple Pay with <b>${fmt$(cents)}</b> to ${esc(first(nameOf(uid)))} already filled in. You confirm with Face ID.</p>
     <div class="stack"><button type="button" class="btn" id="fpAdd">1. Add the shortcut</button><button type="button" class="btn primary" id="fpRun">2. Pay ${fmt$(cents)} now</button><button type="button" class="btn ghost" id="fpSms">Use Messages instead</button></div>`, null, null);
   // Apple's Add Shortcut screen can't send anyone back, so when they return (the "◀ Friendly" corner link, or
   // switching apps) this box is already on the next step: one button to pay.
