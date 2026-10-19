@@ -1,5 +1,6 @@
 # Builds "Friendly Pay" and two one-tap test copies.
-#   python3 build-pay.py OUT main      -> "Friendly Pay": input is JSON from Friendly
+#   python3 build-pay.py OUT main      -> "Friendly Pay": input is JSON from Friendly (pays the number)
+#   python3 build-pay.py OUT main-name -> "Friendly Pay" paying a contact made from the vCard, so Apple shows the Friendly name
 #                                         {"to": "+12145551234", "amt": "9.65", "note": "White Box Roastery Co. · Friendly", "vcf": "BEGIN:VCARD ..."}
 #   python3 build-pay.py OUT number    -> test copy with Sarah's $1 built in, paying her number
 #   python3 build-pay.py OUT name      -> test copy with Sarah's $1 built in, paying a contact made from the vCard,
@@ -28,7 +29,8 @@ A = lambda ident, **p: {"WFWorkflowActionIdentifier": ident, "WFWorkflowActionPa
 TEST = {"to": "+12147334408", "amt": "1.00", "note": "Friendly test",
         "vcf": "BEGIN:VCARD\nVERSION:3.0\nFN:Sarah Ellerd\nN:Sarah Ellerd;;;;\nTEL;TYPE=CELL:+12147334408\nEND:VCARD"}
 acts = []
-if MODE == "main":
+MAIN = MODE.startswith("main")
+if MAIN:
   src = {"Value": {"Type": "ExtensionInput"}, "WFSerializationType": "WFTextTokenAttachment"}
 else:
   acts.append(A("is.workflow.actions.gettext", UUID=u_src, WFTextActionText=json.dumps(TEST)))
@@ -41,7 +43,7 @@ acts += [
   A("is.workflow.actions.getvalueforkey", UUID=u_note, CustomOutputName="Note", WFDictionaryKey="note", WFInput=D),
   A("is.workflow.actions.gettext", UUID=u_amtx, CustomOutputName="Amount Text", WFTextActionText=tok([ref(u_amt, "Amount")])),
 ]
-if MODE == "name":
+if MODE in ("name", "main-name"):
   acts += [
     A("is.workflow.actions.getvalueforkey", UUID=u_vcf, CustomOutputName="Card", WFDictionaryKey="vcf", WFInput=D),
     A("is.workflow.actions.setitemname", UUID=u_file, WFInput=att(ref(u_vcf, "Card")), WFName="Friendly.vcf"),
@@ -53,13 +55,13 @@ else:
 acts.append(A("is.workflow.actions.venmo.pay", UUID=U(), ShowWhenRun=True, WFVenmoActionRecipients=recipients,
   WFVenmoActionAmount={"Value": {"Unit": "USD", "Magnitude": ref(u_amtx, "Amount Text")}, "WFSerializationType": "WFQuantityFieldValue"},
   WFVenmoActionNote=tok([ref(u_note, "Note")])))
-if MODE == "main":
+if MAIN:
   acts.append(A("is.workflow.actions.openapp", WFAppIdentifier="com.officialfriendly.app",
     WFSelectedApp={"BundleIdentifier": "com.officialfriendly.app", "Name": "Friendly", "TeamIdentifier": "L7H9872BR2"}))
 wf = {"WFWorkflowClientVersion": "2607.0.2", "WFWorkflowMinimumClientVersion": 900, "WFWorkflowMinimumClientVersionString": "900",
   "WFWorkflowIcon": {"WFWorkflowIconStartColor": 4292093695, "WFWorkflowIconGlyphNumber": 59446},
   "WFWorkflowImportQuestions": [], "WFWorkflowTypes": [], "WFQuickActionSurfaces": [],
-  "WFWorkflowInputContentItemClasses": ["WFStringContentItem"], "WFWorkflowHasShortcutInputVariables": MODE == "main",
+  "WFWorkflowInputContentItemClasses": ["WFStringContentItem"], "WFWorkflowHasShortcutInputVariables": MAIN,
   "WFWorkflowOutputContentItemClasses": [], "WFWorkflowHasOutputFallback": False, "WFWorkflowActions": acts}
 plistlib.dump(wf, open(OUT, "wb"), fmt=plistlib.FMT_BINARY)
 print("wrote", OUT, MODE, len(acts), "actions")
