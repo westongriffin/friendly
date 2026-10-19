@@ -4329,13 +4329,13 @@ function textGuest(id, cents, dir) {
 // Payment action with Apple Pay, the person and amount filled in, then reopens Friendly (Apple still asks for Face ID).
 // iCloud link (opens straight in Shortcuts with Add Shortcut); shared from Wes's iPhone Oct 18. The signed file in
 // shortcuts/ (built by shortcuts/build-pay.py) is the same shortcut.
-const PAY_SHORTCUT_URL = "https://raw.githubusercontent.com/westongriffin/friendly/main/shortcuts/Friendly%20Pay.shortcut?v=4";   // v4 under test (on Wes's phone via iCloud sync); back to an iCloud link once it works
+const PAY_SHORTCUT_URL = "https://raw.githubusercontent.com/westongriffin/friendly/main/shortcuts/Friendly%20Pay.shortcut?v=5";   // v5 under test (on Wes's phone via iCloud sync); back to an iCloud link once it works. amt is sent as text: a JSON number crashes Send Payment (see shortcuts/build-pay.py)
 const payShortcutOn = () => NATIVE && IOS && isAdmin();
 function payViaShortcut(uid, cents, expenseId) {
   const to = toE164(payInfoOf(uid).phone || ""), x = expenseId && S.expenses.get(expenseId);
   // The vCard lets Apple's sheet show the person's name (not just the number); the amount goes as a number.
   const vname = String(nameOf(uid) || "").replace(/[\r\n;,]/g, " ").trim(), vcf = `BEGIN:VCARD\nVERSION:3.0\nFN:${vname}\nN:${vname};;;;\nTEL;TYPE=CELL:${to}\nEND:VCARD`;
-  const run = () => { location.href = "shortcuts://run-shortcut?name=" + encodeURIComponent("Friendly Pay") + "&input=text&text=" + encodeURIComponent(JSON.stringify({ to, amt: Math.round(cents) / 100, note: ((x && x.desc) || "Friendly") + " · Friendly", vcf })); askIfSent(uid, cents, "Apple Cash", expenseId, () => LS.remove("friendlyPayShortcut")); };   // "Not yet" brings the setup back next time
+  const run = () => { location.href = "shortcuts://run-shortcut?name=" + encodeURIComponent("Friendly Pay") + "&input=text&text=" + encodeURIComponent(JSON.stringify({ to, amt: (Math.round(cents) / 100).toFixed(2), note: ((x && x.desc) || "Friendly") + " · Friendly", vcf })); askIfSent(uid, cents, "Apple Cash", expenseId, () => LS.remove("friendlyPayShortcut")); };   // "Not yet" brings the setup back next time
   if (LS.get("friendlyPayShortcut") === "1") return run();
   dialog(`<h3>Apple Cash in one tap <span class="muted sm">(preview, only you see this)</span></h3>
     <p>Add the free <b>Friendly Pay</b> shortcut once. After that, Cash opens Apple Pay with ${esc(first(nameOf(uid)))} and <b>${fmt$(cents)}</b> already filled in. You confirm with Face ID.</p>
