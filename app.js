@@ -232,6 +232,10 @@ async function registerPush(uid) {
 // ---------- web push (installed PWA / browsers) ----------
 // iPhone only delivers web push to apps added to the Home Screen.
 const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+// Which phone this app runs on, recorded on the profile and each group's members entry (and copied onto expenses by
+// onUserPhone) so the app knows who can use Apple Cash. The website leaves it alone: it can't tell which phone you carry.
+const MY_OS = NATIVE ? (IOS ? "ios" : IS_ANDROID ? "android" : "") : "";
+const myOs = () => MY_OS || (S.profile && S.profile.os) || "";
 const STANDALONE = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true;
 const WEBPUSH_OK = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 function b64ToU8(s) { const pad = "=".repeat((4 - s.length % 4) % 4); const b = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from([...b].map(c => c.charCodeAt(0))); }
@@ -876,7 +880,7 @@ function subscribeAll(u) {
   S.pendingInvitesPhone = new Map();
   let invitesPhoneUnsub = null, invitesPhoneKey = null, phoneEventsUnsub = null; S.phoneEvents = new Map();
   add(on("profile", doc(db, "users", u.uid), d => {
-    S.profile = d.data(); rebuildContacts(); S.ready = true;
+    S.profile = d.data(); rebuildContacts(); S.ready = true; syncMyOs();
     // Backfill a missing phoneE164 from the sign-in identifier (once), so phone
     // invites and joins match for accounts whose profile phone was left blank.
     if (S.profile && !S.profile.phoneE164 && myPhoneE164() && !S._phoneHealed) { S._phoneHealed = true; updateDoc(doc(db, "users", u.uid), { phoneE164: myPhoneE164() }).catch(() => {}); }
@@ -900,7 +904,7 @@ function subscribeAll(u) {
 
   add(on("groups", query(collection(db, "groups"), where("memberUids", "array-contains", u.uid)), snap => {
     S.groups = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }]));
-    rebuildContacts(); resubscribeEvents(u); renderSoon();
+    rebuildContacts(); resubscribeEvents(u); renderSoon(); syncMyOs();
   }));
 
   add(on("invites", query(collection(db, "groups"), where("invitedEmails", "array-contains", (u.email || "").toLowerCase())), snap => {
@@ -1008,9 +1012,18 @@ function resubscribeEvents(u) {
   if (!S._groupEventsHooked) { S._groupEventsHooked = true; S.subs.push(() => { (S._groupEventsUnsubs || []).forEach(fn => fn()); S._groupEventsUnsubs = []; S.eventSubKey = null; S._groupEventsHooked = false; }); }
 }
 
+// Write this phone's type (MY_OS) to the profile and to my entry in each group, once per session per place, so
+// friends' apps can tell whether Apple Cash works for me. Existing members pick it up the next time they open the app.
+const osSynced = new Set();
+function syncMyOs() {
+  if (!MY_OS || !S.user || !S.profile) return; const me = S.user.uid;
+  if (S.profile.os !== MY_OS && !osSynced.has("me")) { osSynced.add("me"); updateDoc(doc(db, "users", me), { os: MY_OS }).catch(() => {}); }
+  for (const g of S.groups.values()) { const m = (g.members || {})[me];
+    if (m && m.os !== MY_OS && (g.memberUids || []).includes(me) && !osSynced.has(g.id)) { osSynced.add(g.id); updateDoc(doc(db, "groups", g.id), { [`members.${me}.os`]: MY_OS }).catch(() => {}); } }
+}
 function rebuildContacts() {
   const m = new Map();
-  if (S.user && S.profile) m.set(S.user.uid, { name: S.profile.name, venmo: S.profile.venmo, phone: S.profile.phone, zelle: S.profile.zelle || "", cashapp: S.profile.cashapp || "", payPref: S.profile.payPref || "", photo: S.profile.photo || "" });
+  if (S.user && S.profile) m.set(S.user.uid, { name: S.profile.name, venmo: S.profile.venmo, phone: S.profile.phone, zelle: S.profile.zelle || "", cashapp: S.profile.cashapp || "", payPref: S.profile.payPref || "", photo: S.profile.photo || "", os: myOs() });
   for (const g of S.groups.values())
     for (const [uid, info] of Object.entries(g.members || {})) if (!m.has(uid)) m.set(uid, info);
   // Friends you don't share a group with are known by the name and photo their friendship carries.
@@ -1029,7 +1042,7 @@ function payInfoOf(uid) {
   const base = S.contacts.get(uid) || {}; let best = null, when = -1;
   for (const x of S.expenses.values()) { const p = x.pay && x.pay[uid]; if (p && (x.createdAt || 0) > when) { best = p; when = x.createdAt || 0; } }
   if (!best) return base;
-  const o = { ...base }; for (const k of ["venmo", "zelle", "cashapp", "payPref", "phone"]) if (best[k]) o[k] = best[k]; else if (!o[k]) o[k] = "";
+  const o = { ...base }; for (const k of ["venmo", "zelle", "cashapp", "payPref", "phone", "os"]) if (best[k]) o[k] = best[k]; else if (!o[k]) o[k] = "";
   return o;
 }
 // Names come from shared groups (contacts); guests who joined an event by link
@@ -1251,8 +1264,8 @@ function onboardingBody() {
           <input id="obEmail" type="email" placeholder="sam@example.com" autocomplete="email"></label>
         <label class="field"><span>Venmo</span>
           <input id="obVenmo" placeholder="@sam-rivera" autocomplete="off"></label>
-        <label class="field"><span>Apple Cash number</span>
-          <input id="obApple" type="tel" placeholder="+1 555 123 4567" value="${esc(p.phone || "")}" autocomplete="tel"></label>
+        ${IS_ANDROID ? "" : `<label class="field"><span>Apple Cash number</span>
+          <input id="obApple" type="tel" placeholder="+1 555 123 4567" value="${IOS ? esc(p.phone || "") : ""}" autocomplete="tel"></label>`}
         <div class="two"><label class="field"><span>Zelle <span class="muted">(phone or email)</span></span>
           <input id="obZelle" placeholder="+1 555 123 4567" autocomplete="off"></label>
         <label class="field"><span>Cash App</span>
@@ -1270,7 +1283,7 @@ function onboardingBody() {
 function wireOnboarding() {
   startParticles(el("authbg"), "confetti");
   const finish = async () => {
-    const email = el("obEmail").value.trim(), venmo = el("obVenmo").value.trim(), apple = el("obApple").value.trim(), birthday = el("obBday") ? el("obBday").value : "";
+    const email = el("obEmail").value.trim(), venmo = el("obVenmo").value.trim(), apple = el("obApple") ? el("obApple").value.trim() : (S.profile.phone || ""), birthday = el("obBday") ? el("obBday").value : "";
     const zelle = ((el("obZelle") || {}).value || "").trim(), cashapp = ((el("obCashapp") || {}).value || "").trim();
     let payPref = (el("obPayPref") || {}).value || ""; if (payPref && !{ venmo, apple, zelle, cashapp }[payPref]) payPref = "";
     try {
@@ -1554,7 +1567,7 @@ function joinBody(gid) {
 async function joinGroupByLink(gid, btn, quiet) {
   if (btn) { btn.disabled = true; btn.textContent = "Joining…"; }
   try {
-    await updateDoc(doc(db, "groups", gid), { memberUids: arrayUnion(myUid()), invitedPhones: arrayRemove(S.profile.phoneE164 || "-"), invitedEmails: arrayRemove((S.user.email || "").toLowerCase()), [`members.${myUid()}`]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "", photo: myPhotoSm(), birthday: S.profile.birthday || "" } });
+    await updateDoc(doc(db, "groups", gid), { memberUids: arrayUnion(myUid()), invitedPhones: arrayRemove(S.profile.phoneE164 || "-"), invitedEmails: arrayRemove((S.user.email || "").toLowerCase()), [`members.${myUid()}`]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "", os: myOs(), photo: myPhotoSm(), birthday: S.profile.birthday || "" } });
     toast("You're in! 🎉"); go("#/g/" + gid);
   } catch (e) {
     if (btn) { btn.disabled = false; btn.textContent = "Join the group"; }
@@ -1848,7 +1861,7 @@ function openGroupDialog() {
       const id = newId();
       await setDoc(doc(db, "groups", id), {
         name, emoji, color: "#FFE0B2", ownerId: myUid(), memberUids,
-        members: { [myUid()]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "", zelle: S.profile.zelle || "", cashapp: S.profile.cashapp || "", payPref: S.profile.payPref || "", birthday: S.profile.birthday || "" } },
+        members: { [myUid()]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "", os: myOs(), zelle: S.profile.zelle || "", cashapp: S.profile.cashapp || "", payPref: S.profile.payPref || "", birthday: S.profile.birthday || "" } },
         createdAt: Date.now()
       });
       closeDialog(); go("#/g/" + id); toast("Group created");
@@ -2029,7 +2042,7 @@ function openInviteDialog(g) {
     pendingPhones: new Map((g.invitedPhones || []).map(p => [p, (g.invitedPhoneNames || {})[p] || ""])),
     onSubmit: async (direct, texted) => {
       const updates = {};
-      if (direct.length) { updates.memberUids = [...new Set([...(g.memberUids || []), ...direct.map(p => p.uid)])]; for (const p of direct) { const info = S.contacts.get(p.uid) || {}; updates[`members.${p.uid}`] = { name: info.name || p.name || "Friend", venmo: info.venmo || "", phone: info.phone || "", photo: info.photo || "", birthday: info.birthday || "" }; } }
+      if (direct.length) { updates.memberUids = [...new Set([...(g.memberUids || []), ...direct.map(p => p.uid)])]; for (const p of direct) { const info = S.contacts.get(p.uid) || {}; updates[`members.${p.uid}`] = { name: info.name || p.name || "Friend", venmo: info.venmo || "", phone: info.phone || "", os: info.os || "", photo: info.photo || "", birthday: info.birthday || "" }; } }
       const addP = texted.map(p => p.e164).filter(n => !(g.invitedPhones || []).includes(n)); if (addP.length) updates.invitedPhones = [...(g.invitedPhones || []), ...addP];
       for (const p of texted) if (p.e164) updates[`invitedPhoneNames.${p.e164}`] = p.name || "";
       try {
@@ -2127,7 +2140,7 @@ async function acceptInvite(gid, btn) {
       invitedEmails: (g.invitedEmails || []).filter(e => e !== (S.user.email || "").toLowerCase()),
       invitedPhones: (g.invitedPhones || []).filter(p => p !== (S.profile.phoneE164 || "-")),
       [`invitedPhoneNames.${S.profile.phoneE164 || "-"}`]: deleteField(),
-      [`members.${myUid()}`]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "", zelle: S.profile.zelle || "", cashapp: S.profile.cashapp || "", payPref: S.profile.payPref || "", photo: myPhotoSm(), birthday: S.profile.birthday || "" }
+      [`members.${myUid()}`]: { name: S.profile.name, venmo: S.profile.venmo || "", phone: S.profile.phone || "", os: myOs(), zelle: S.profile.zelle || "", cashapp: S.profile.cashapp || "", payPref: S.profile.payPref || "", photo: myPhotoSm(), birthday: S.profile.birthday || "" }
     });
     toast("You're in! Welcome to " + g.name);
     go("#/groups");
@@ -2972,10 +2985,10 @@ function openProfileDialog(uid) {
     ${info.birthday ? `<p class="muted sm" style="margin:0">🎂 ${esc(fmtDay({ date: info.birthday }))}</p>` : ""}
     ${friendActions(uid) ? `<div class="btnrow" style="justify-content:center;margin-top:12px">${friendActions(uid)}</div>` : ""}
   </div>
-  ${info.venmo || info.phone ? `<div class="form-card card" style="margin-top:14px">
+  ${info.venmo || (info.phone && appleCashFor(uid)) ? `<div class="form-card card" style="margin-top:14px">
     ${info.venmo ? `<div class="member-row"><span class="li">💸</span><div style="flex:1;min-width:0"><b>Venmo</b><div class="muted sm mono">${esc(info.venmo)}</div></div></div>` : ""}
-    ${info.phone ? `<div class="member-row"><span class="li">📱</span><div style="flex:1;min-width:0"><b>Apple Cash</b><div class="muted sm mono">${esc(info.phone)}</div></div></div>` : ""}
-  </div>` : S.contacts.has(uid) ? `<p class="muted sm" style="text-align:center;margin-top:10px">No Venmo or Apple Cash on file yet.</p>` : ""}`,
+    ${info.phone && appleCashFor(uid) ? `<div class="member-row"><span class="li">📱</span><div style="flex:1;min-width:0"><b>Apple Cash</b><div class="muted sm mono">${esc(info.phone)}</div></div></div>` : ""}
+  </div>` : S.contacts.has(uid) ? `<p class="muted sm" style="text-align:center;margin-top:10px">${IS_ANDROID ? "No Venmo on file yet." : "No Venmo or Apple Cash on file yet."}</p>` : ""}`,
     null, null);
   wireFriendButtons(el("appDialog") || document);
   document.querySelectorAll("#appDialog [data-go]").forEach(b => b.onclick = () => { closeDialog(); go(b.dataset.go); });
@@ -4208,6 +4221,9 @@ function expenseBody(id) {
 }
 // The ways to pay someone, their preferred one first and ringed: the same buttons on the Money tab and inside an
 // expense. `pre` names the click attributes ("" on the Money tab, "x" on an expense page).
+// Apple Cash needs an iPhone at both ends: never offered on Android, and never for someone whose app reported Android.
+// People whose phone type isn't known yet (they haven't opened the app since this shipped) still get it.
+const appleCashFor = uid => { const o = payInfoOf(uid); return !!o.phone && !IS_ANDROID && o.os !== "android"; };
 const appleCashLabel = () => /iPhone|iPad|Mac/.test(navigator.userAgent) ? `<span class="apple-glyph" aria-hidden="true">\uF8FF</span>Cash` : "Apple Cash";
 function payBtns(to, cents, pre = "") {
   const o = payInfoOf(to), amt = `data-amt="${cents}"`;
@@ -4215,7 +4231,7 @@ function payBtns(to, cents, pre = "") {
     venmo: o.venmo ? `<button class="btn small venmo" data-${pre}venmo="${esc(to)}" ${amt}>Venmo</button>` : "",
     cashapp: o.cashapp ? `<button class="btn small cashapp" data-${pre}cashapp="${esc(to)}" ${amt}>Cash App</button>` : "",
     zelle: o.zelle ? `<button class="btn small zelle" data-${pre}zelle="${esc(to)}" ${amt} title="Zelle has no payment links: this copies their Zelle handle for your bank app">Zelle</button>` : "",
-    apple: o.phone ? `<button class="btn small apple" data-${pre}apple="${esc(to)}" ${amt} aria-label="Apple Cash">${appleCashLabel()}</button>` : ""
+    apple: appleCashFor(to) ? `<button class="btn small apple" data-${pre}apple="${esc(to)}" ${amt} aria-label="Apple Cash">${appleCashLabel()}</button>` : ""
   };
   if (isGuest(to)) btns.text = `<button class="btn small" data-${pre}text="${esc(to)}|${cents}|owe">💬 Text</button>`;
   const order = [o.payPref, "venmo", "cashapp", "zelle", "apple", "text"].filter((k, i, arr) => k && btns[k] && arr.indexOf(k) === i);
@@ -4325,7 +4341,7 @@ function textGuest(id, cents, dir) {
   const sep = /iPhone|iPad|Mac/.test(navigator.userAgent) ? "&" : "?";
   location.href = "sms:" + id.slice(3) + sep + "body=" + encodeURIComponent(body);
 }
-// One-tap Apple Cash (PREVIEW, admins only until Wes signs off): the "Friendly Pay" Shortcut runs iPhone's Send
+// One-tap Apple Cash (live for every iPhone user since v246): the "Friendly Pay" Shortcut runs iPhone's Send
 // Payment action with Apple Pay, the person and amount filled in, then reopens Friendly (Apple still asks for Face ID).
 // iCloud link (opens straight in Shortcuts with Add Shortcut); shared from Wes's iPhone Oct 18. The signed file in
 // shortcuts/ (built by shortcuts/build-pay.py) is the same shortcut.
@@ -4362,7 +4378,7 @@ function payZelle(uid, cents, expenseId) {
   if (navigator.clipboard) navigator.clipboard.writeText(z).then(done, done); else done();
 }
 const PAY_METHODS = { venmo: "Venmo", apple: "Apple Cash", zelle: "Zelle", cashapp: "Cash App" };
-const payPrefOptions = sel => `<option value="" ${!sel ? "selected" : ""}>No preference</option>` + Object.entries(PAY_METHODS).map(([k, v]) => `<option value="${k}" ${sel === k ? "selected" : ""}>${v}</option>`).join("");
+const payPrefOptions = sel => `<option value="" ${!sel ? "selected" : ""}>No preference</option>` + Object.entries(PAY_METHODS).filter(([k]) => !(IS_ANDROID && k === "apple")).map(([k, v]) => `<option value="${k}" ${sel === k ? "selected" : ""}>${v}</option>`).join("");
 const payerOptions = (people, sel) => { const opt = ([u, i]) => `<option value="${u}" ${u === (sel || myUid()) ? "selected" : ""}>${esc(first(i.name))}</option>`; const main = Array.isArray(people) ? people : people.main, others = Array.isArray(people) ? [] : people.others; return main.map(opt).join("") + (others.length ? `<optgroup label="More people">${others.map(opt).join("")}</optgroup>` : ""); };
 // Who an expense can be between. From an event: that event's guests, whether or not you share a group with them
 // (their names travel with the event), Going first and pre-checked; from a group: its members; from Money:
@@ -4637,8 +4653,8 @@ function profileBody() {
   <div class="form-card card" data-keep>
     <label class="field"><span>Name</span><input id="pName" value="${esc(p.name)}" maxlength="40"></label>
     <label class="field"><span>Email <span class="muted">(calendar invites, password reset)</span></span><input id="pEmail" type="email" value="${esc(p.email || "")}" placeholder="you@example.com" autocomplete="email"></label>
-    <div class="two"><label class="field"><span>Venmo</span><input id="pVenmo" value="${esc(p.venmo || "")}" placeholder="@sam-rivera"></label>
-    <label class="field"><span>Phone (Apple Cash)</span><input id="pPhone" value="${esc(p.phone || "")}" placeholder="+1 555 123 4567"></label></div>
+    ${IS_ANDROID ? `<label class="field"><span>Venmo</span><input id="pVenmo" value="${esc(p.venmo || "")}" placeholder="@sam-rivera"></label>` : `<div class="two"><label class="field"><span>Venmo</span><input id="pVenmo" value="${esc(p.venmo || "")}" placeholder="@sam-rivera"></label>
+    <label class="field"><span>Phone (Apple Cash)</span><input id="pPhone" value="${esc(p.phone || "")}" placeholder="+1 555 123 4567"></label></div>`}
     <div class="two"><label class="field"><span>Zelle <span class="muted">(phone or email)</span></span><input id="pZelle" value="${esc(p.zelle || "")}" placeholder="+1 555 123 4567"></label>
     <label class="field"><span>Cash App</span><input id="pCashapp" value="${esc(p.cashapp || "")}" placeholder="$samrivera"></label></div>
     <label class="field"><span>Preferred way to get paid back</span><select id="pPayPref">${payPrefOptions(p.payPref || "")}</select></label>
@@ -4696,7 +4712,7 @@ function wireProfile() {
   attachPlaces(el("pCity"), { cities: true });
   if (el("saveProfile")) el("saveProfile").onclick = async () => {
     const name = el("pName").value.trim(); if (!name) return toast("Name can't be empty.");
-    const venmo = el("pVenmo").value.trim(), phone = el("pPhone").value.trim(), zelle = ((el("pZelle") || {}).value || "").trim(), cashapp = ((el("pCashapp") || {}).value || "").trim(), payPref = (el("pPayPref") || {}).value || "";
+    const venmo = el("pVenmo").value.trim(), phone = el("pPhone") ? el("pPhone").value.trim() : (S.profile.phone || ""), zelle = ((el("pZelle") || {}).value || "").trim(), cashapp = ((el("pCashapp") || {}).value || "").trim(), payPref = (el("pPayPref") || {}).value || "";
     const handleFor = { venmo, apple: phone, zelle, cashapp };
     if (payPref && !handleFor[payPref]) return toast("Add your " + PAY_METHODS[payPref] + " above, or pick another preferred method.");
     try {
@@ -4706,7 +4722,7 @@ function wireProfile() {
       await updateDoc(doc(db, "users", myUid()), { name, venmo, phone, zelle, cashapp, payPref, city, phoneE164: toE164(phone) || myPhoneE164(), birthday, email: email.trim().toLowerCase() });
       if (city) registerCity(city);
       // propagate name/contact into each group's denormalized members map
-      for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}`]: { name, venmo, phone, zelle, cashapp, payPref, photo: myPhotoSm(), birthday } }).catch(() => {});
+      for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}`]: { name, venmo, phone, os: myOs(), zelle, cashapp, payPref, photo: myPhotoSm(), birthday } }).catch(() => {});
       for (const f of S.friends.values()) await updateDoc(doc(db, "friendships", f.id), { [`people.${myUid()}.name`]: name }).catch(() => {});
       toast("Profile saved");
     } catch (e) { toast(e.message); }

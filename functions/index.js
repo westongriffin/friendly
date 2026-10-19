@@ -1438,7 +1438,7 @@ async function claimPhoneInvites(uid, phone, name) {
 // Pay handles ride on each expense (`pay.{uid}`), so the people on it can settle up even when they share no
 // group with the person they owe (an event guest who paid, say). Groups carry a copy too, but that one is
 // written once at join time; this one is refreshed from the profile whenever it changes.
-const PAY_KEYS = ["venmo", "zelle", "cashapp", "payPref", "phone"];
+const PAY_KEYS = ["venmo", "zelle", "cashapp", "payPref", "phone", "os"];   // os ("ios"/"android", set by the app) decides who gets an Apple Cash button
 const payOf = u => { const o = {}; for (const k of PAY_KEYS) o[k] = String((u && u[k]) || ""); return o; };
 const samePay = (x, y) => PAY_KEYS.every(k => String((x && x[k]) || "") === String((y && y[k]) || ""));
 exports.onExpensePay = onDocumentWritten({ document: "expenses/{id}" }, async e => {

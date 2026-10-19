@@ -126,7 +126,7 @@ service cloud.firestore {
       allow create: if signedIn() && userId == uid() && !isDemoUser();
       allow update: if signedIn() && userId == uid()
         && (!isDemoUser() || request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['name', 'venmo', 'zelle', 'cashapp', 'payPref', 'city', 'photo', 'birthday', 'curateMiles', 'notifPrefs', 'activitySeenAt', 'hiddenIds', 'blockedUids', 'onboarded', 'peeked', 'badgeOk', 'pinnedDms', 'mutedDms', 'hiddenDms', 'icsToken']));
+              .hasOnly(['name', 'venmo', 'zelle', 'cashapp', 'payPref', 'city', 'photo', 'birthday', 'curateMiles', 'notifPrefs', 'activitySeenAt', 'hiddenIds', 'blockedUids', 'onboarded', 'peeked', 'badgeOk', 'pinnedDms', 'mutedDms', 'hiddenDms', 'icsToken', 'os']));
       allow delete: if signedIn() && userId == uid() && !isDemoUser();
       // Event drafts saved on purpose ("Save as draft"); private to their owner.
       match /drafts/{draftId} {
