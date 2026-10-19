@@ -155,6 +155,8 @@ img{max-width:100%}
 /* chips / filters */
 .chiprow{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px;margin-bottom:6px;scrollbar-width:none}
 .chiprow::-webkit-scrollbar{display:none}
+/* chips in a scrolling row never shrink: with img{max-width:100%}, a group picture icon let its chip shrink and the name ran past the edge */
+.chiprow > *{flex:none}
 .fchip{white-space:nowrap;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:6px 14px;font-weight:600;font-size:13px;color:var(--muted)}
 .fchip.on{background:var(--ink);color:var(--bg);border-color:transparent}
 
@@ -1076,7 +1078,7 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 /* ---------- group look: icon badge over a cover (photo, Dot's painting, or the group's color with its emoji) ---------- */
 .ge.has-img{overflow:hidden;padding:0}
 .ge.has-img img{width:100%;height:100%;object-fit:cover;display:block}
-.ge-mini{width:18px;height:18px;border-radius:5px;object-fit:cover;vertical-align:-4px}
+.ge-mini{width:18px;height:18px;max-width:none;flex:none;border-radius:5px;object-fit:cover;vertical-align:-4px}
 .gt-cover,.group-cover,.gl-cover{position:relative;overflow:hidden;background-size:cover;background-position:center}
 .gt-cover.is-color,.group-cover.is-color,.gl-cover.is-color{background:var(--gc);background-image:linear-gradient(135deg,var(--gc),color-mix(in oklab,var(--gc) 72%,#FF6B57))}
 .gpat{position:absolute;font-size:26px;line-height:1;opacity:.32;transform:translate(-50%,-50%) rotate(var(--r));pointer-events:none;filter:saturate(.9)}
