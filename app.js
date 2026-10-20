@@ -447,7 +447,7 @@ function dotWatch() {
 // Shown once to accounts under two weeks old on their first home view; "Take the tour" on the profile replays it.
 const TOUR = [
   { target: null, title: "Hi, I'm Dot!", text: "I'm the little helper in Friendly. Want a 30-second tour?", ok: "Show me", skip: "Maybe later" },
-  { target: '[data-go="#/new"]', title: "Make a plan", text: "Tap here to plan something. Pick a date, invite people, and the invites go out for you.", tab: "#/" },
+  { target: '[data-go="#/new"]', title: "Make a plan", text: "Tap here to plan something. Pick a date, invite people, and the invites go out for you.", tab: "#/plans" },
   { target: "#edgeDot", title: "I'm always right here", text: "Tap me on any page and just tell me the plan, like “tacos Friday at 7 with the crew.” I'll fill it all in.", tab: "#/" },
   { target: '.tabs [data-go="#/curate"]', title: "Need an idea?", text: "Curate finds real things to do near you, paired with a place to eat.", tab: "#/" },
   { target: '.tabs [data-go="#/groups"]', title: "Your crews", text: "Groups keep your regulars together, with chat, polls, and photos.", tab: "#/" },
@@ -788,6 +788,7 @@ function parseRoute() {
 function routeFromPath(h) {
   const p = h.split("/").filter(Boolean);
   if (!p.length) return { name: "home" };
+  if (p[0] === "plans") return { name: "plans" };
   if (p[0] === "e") return { name: "event", id: p[1] };
   if (p[0] === "g") return { name: "group", id: p[1] };
   if (p[0] === "join") return { name: "join", id: p[1] };
@@ -1539,7 +1540,8 @@ function shell(body) {
   </header>
   <div class="tabs-sentinel"></div>
   <nav class="tabs">
-    ${T("home", "Events", "#/")}
+    ${T("home", "Home", "#/")}
+    ${T("plans", "Plans", "#/plans")}
     ${T("groups", "Groups", "#/groups")}
     ${T("money", "Money", "#/money")}
     ${curateTab(tab === "curate")}
@@ -1601,7 +1603,8 @@ function wireShell() {
   wireEdgeDot();
   wireUpdateBanner();
   document.querySelectorAll("[data-accept]").forEach(b => b.onclick = () => acceptInvite(b.dataset.accept, b));
-  if (S.route.name === "home") { wireHome(); dotIntro(); }
+  if (S.route.name === "home") { wireHomeDash(); dotIntro(); }
+  if (S.route.name === "plans") wirePlans();
   dotWatch();
   if (S.route.name === "new") wireCompose();
   if (S.route.name === "groups") wireGroups();
@@ -1642,6 +1645,7 @@ async function joinGroupByLink(gid, btn, quiet) {
 }
 function routeBody(r) {
   if (r.name === "home") return homeBody();
+  if (r.name === "plans") return plansBody();
   if (r.name === "new") return composeBody();
   if (r.name === "groups") return groupsBody();
   if (r.name === "group") return `<div class="group-page">${groupPageBody(r.id)}</div>`;
@@ -1745,7 +1749,88 @@ function calendarBody(evs) {
 }
 // Upcoming events I was texted an invite to but haven't joined (see the phoneEvents listener).
 const unjoinedEvents = () => [...((S.phoneEvents || new Map()).values())].filter(e => e.date >= todayStr() && !S.events.has(e.id) && !(e.invitedUids || []).includes(myUid()));
+
+// ---------- HOME (the dashboard) ----------
+// What's next, what needs you, money at a glance, Dot's picks, the week, memories, the latest, and your crews.
+const inDaysWord = ev => { const d = daysUntil(ev); return d <= 0 ? "today" : d === 1 ? "tomorrow" : `in ${d} days`; };
+const hdFaces = ev => { const g = (ev.invitedUids || []).filter(u => (ev.rsvps || {})[u] === "going"); if (!canSeeGuests(ev) || !g.length) return ""; return `<span class="hd-faces">${g.slice(0, 3).map(u => avatar(u, "xs")).join("")}${g.length > 3 ? `<span class="more">+${g.length - 3}</span>` : ""}</span>`; };
 function homeBody() {
+  const me = myUid(), t = todayStr();
+  const evs = [...myEvents(), ...unjoinedEvents()];
+  const upcoming = evs.filter(e => e.date >= t).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
+  let hiddenToday = []; try { hiddenToday = JSON.parse(LS.get("friendlyTodayHidden") || "[]"); } catch {}
+  const todayEvs = upcoming.filter(e => e.date === t && !hiddenToday.includes(e.id + "|" + e.date)).slice(0, 2);
+  const todayCards = todayEvs.map(e => `<div class="card notif-card today-card" data-ev="${e.id}" role="button"><button type="button" class="today-x" data-hide-today="${e.id}|${e.date}" aria-label="Hide this">✕</button>${dotHat(56)}<div style="flex:1;min-width:0"><div class="eyebrow-sm">Today</div><b>${esc(e.title)}${e.time ? " · " + fmtTime(e.time) : ""}</b><div class="muted sm">${e.kind === "meeting" ? (e.invitedUids || []).filter(u => (e.rsvps || {})[u] === "going").length + " accepted" : goingCount(e) + " going"}${evStops(e).length ? " · " + evStops(e).length + " stops" : e.location ? " · " + esc(placeName(e.location)) : ""}</div></div><span class="chev">›</span></div>`).join("");
+  if ((S.profile.city || "").trim()) ensureCurated();
+  const mine = upcoming.filter(e => !e._unjoined);
+  const hero = mine.find(e => !todayEvs.includes(e)) || null;
+  const week = mine.filter(e => e !== hero && !todayEvs.includes(e)).slice(0, 3);
+  const weekCount = mine.filter(e => e.date <= addDays(t, 6)).length;
+  const hour = new Date().getHours(), greet = hour < 4 ? "Up late" : hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  const dateLine = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+  return `
+  <header class="hd-greet"><div><h1>${greet}, ${esc(first(S.profile.name))}</h1><p class="muted sm">${dateLine} · ${weekCount ? `${weekCount} plan${weekCount === 1 ? "" : "s"} this week` : "nothing on the calendar this week"}</p></div>${dot("happy", 54)}</header>
+  ${notifCard()}${todayCards}${birthdayCard()}
+  ${hero ? heroCard(hero) : mine.length || todayEvs.length ? "" : `<div class="card empty">${dot("sleepy", 84)}<b>No plans yet</b><p class="muted">Tell Dot what you're thinking, or start one from scratch.</p><div class="btnrow" style="justify-content:center"><button class="btn primary" id="homeTell">Tell Dot</button><button class="btn" data-go="#/new">New event</button></div></div>`}
+  ${needsYou()}
+  ${moneyGlance()}
+  ${curateTray(upcoming, false)}
+  ${week.length ? `<div class="hd-h"><h3>This week</h3><a class="hd-link" data-go="#/plans">All plans ›</a></div><div class="card hd-list">${week.map(ev => `<a class="hd-ev" data-ev="${ev.id}"><span class="hd-date"><b>${ev.date === t ? "Today" : evDate(ev).toLocaleDateString("en-US", { weekday: "short" })}</b><span>${evDate(ev).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span></span><span class="hd-evt"><b>${esc(ev.emoji || "")} ${esc(ev.title)}</b><span class="muted sm">${esc(fmtTime(ev.time))}${placeName(ev.location) ? " · " + esc(placeName(ev.location)) : ""}</span></span>${hdFaces(ev)}</a>`).join("")}</div>` : ""}
+  ${memoriesStrip()}
+  ${latestList()}
+  ${crewsRow()}`;
+}
+function heroCard(ev) {
+  const th = themeOf(ev.theme, ev.customTheme), myR = (ev.rsvps || {})[myUid()], tf = tileFaces(ev);
+  const pill = myR ? `<span class="you-pill ${myR}">${{ going: "You're going", maybe: "Maybe", no: "Can't go", waitlist: "Waitlisted", pending: "Pending" }[myR] || ""}</span>` : (ev.invitedUids || []).includes(myUid()) && ev.hostId !== myUid() ? `<span class="you-pill rsvp">RSVP</span>` : "";
+  return `<a class="hd-hero t-${esc(th.id)} ${ev.cover ? "has-cover" : ""}" data-ev="${ev.id}" style="--th-accent:${esc(th.accent)};--th-ink:${esc(th.ink)};--th-on-accent:${esc(th.onAccent)}">
+    ${ev.cover ? `<img class="cover-img" src="${esc(ev.cover)}" alt="">` : `<div class="ev-card-bg"></div>`}
+    <div class="hd-hero-top"><span class="hd-chip">Up next · ${inDaysWord(ev)}</span>${pill}</div>
+    <div class="hd-hero-body"><div class="hd-emoji">${esc(ev.emoji || "📍")}</div><h2>${esc(ev.title)}</h2><div class="hd-sub">${esc(fmtWhen(ev))}${placeName(ev.location) ? " · " + esc(placeName(ev.location)) : ""}</div>
+      <div class="hd-row"><span class="hd-faces">${tf.faces}</span><span class="hd-going">${esc(tf.label)}</span><span class="btn primary small">Open</span></div></div></a>`;
+}
+function needsYou() {
+  const me = myUid(), t = todayStr(), items = [];
+  [...S.events.values()].filter(e => e.date >= t && (e.invitedUids || []).includes(me) && e.hostId !== me && !(e.rsvps || {})[me]).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 3)
+    .forEach(e => items.push({ ic: e.emoji || "📅", t: `RSVP to ${e.title}`, s: `${(e.invitedUids || []).length} invited · ${evDate(e).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`, cta: "Reply", go: `#/e/${e.id}?to=rsvpCard` }));
+  [...(S.splits || new Map()).values()].filter(x => x.status === "open" && (x.uids || []).includes(me) && !(x.done || {})[me]).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 2)
+    .forEach(x => { const total = (x.items || []).reduce((n, i) => n + (i.cents || 0), 0) + (x.tax || 0) + (x.fees || 0) + (x.tip || 0);
+      items.push({ ic: "🧾", t: `Pick your items from ${x.desc || x.merchant || "the receipt"}`, s: `${first(nameOf(x.paidBy))} paid ${fmt$(total)} · ${Object.keys(x.done || {}).length} of ${(x.people || []).length} done`, cta: "Pick", go: "#/pick/" + x.id }); });
+  const reqs = incomingRequests();
+  if (reqs.length) items.push({ ic: "👋", t: reqs.length === 1 ? `${first(nameOf(reqs[0].requestedBy))} wants to be friends` : `${reqs.length} friend requests`, s: "Accept to message each other", cta: "See", go: "#/friends?to=reqCard" });
+  if (!items.length) return "";
+  return `<div class="hd-h"><h3>Needs you</h3><span class="hd-count">${items.length}</span></div><div class="hd-scroll">${items.map(n => `<a class="hd-need" data-go="${esc(n.go)}"><span class="li">${esc(n.ic)}</span><b>${esc(n.t)}</b><span class="muted sm">${esc(n.s)}</span><span class="btn primary small">${n.cta}</span></a>`).join("")}</div>`;
+}
+function moneyGlance() {
+  const me = myUid(), pairs = pairwise();
+  const owe = pairs.filter(p => p.from === me), owed = pairs.filter(p => p.to === me);
+  const iOwe = owe.reduce((n, p) => n + p.amount, 0), toMe = owed.reduce((n, p) => n + p.amount, 0);
+  if (!iOwe && !toMe) return "";
+  const who = (ps, prep) => ps.length === 1 ? `${prep} ${first(nameOf(ps[0].from === me ? ps[0].to : ps[0].from))}` : `${prep} ${ps.length} friends`;
+  return `<a class="card hd-money" data-go="#/money?to=settleCard"><div><span class="muted sm">You owe</span><b class="hd-amt owe">${fmt$(iOwe)}</b><span class="muted sm">${iOwe ? who(owe, "to") : "nobody"}</span></div><div><span class="muted sm">Owed to you</span><b class="hd-amt owed">${fmt$(toMe)}</b><span class="muted sm">${toMe ? who(owed, "from") : "all settled"}</span></div><span class="btn primary small">Settle up</span></a>`;
+}
+function memoriesStrip() {
+  const pics = [...S.memories.entries()].flatMap(([eid, ps]) => ps.map(p => ({ eid, p }))).filter(x => x.p.img).sort((a, b) => (b.p.createdAt || 0) - (a.p.createdAt || 0)).slice(0, 8);
+  if (!pics.length) return "";
+  return `<div class="hd-h"><h3>Memories</h3><a class="hd-link" data-go="#/photos">See all ›</a></div><div class="hd-scroll hd-mems">${pics.map(x => `<img src="${esc(x.p.img)}" data-hdmem="${esc(x.eid)}|${esc(x.p.id)}" alt="" loading="lazy">`).join("")}</div>`;
+}
+function latestList() {
+  const acts = (S.activity || []).slice(0, 4); if (!acts.length) return "";
+  return `<div class="hd-h"><h3>Latest from your crew</h3><a class="hd-link" data-go="#/activity">Activity ›</a></div><div class="card hd-list">${acts.map(a => `<a class="hd-act" data-act="${esc(a.url || "#/")}"><span class="li">${actIcon(a)}</span><span class="hd-evt"><b>${esc(a.title)}</b><span class="muted sm">${esc(a.body || "")}</span></span><span class="muted sm">${ago(a.createdAt)}</span></a>`).join("")}</div>`;
+}
+function crewsRow() {
+  const groups = [...S.groups.values()].slice(0, 8); if (!groups.length) return "";
+  return `<div class="hd-h"><h3>Your crews</h3><a class="hd-link" data-go="#/groups">Groups ›</a></div><div class="hd-scroll hd-crews">${groups.map((g, i) => `<a class="hd-crew" data-go="#/g/${g.id}"><span class="hd-crew-ic" style="background:${esc(g.color || GROUP_COLORS[i % GROUP_COLORS.length])}">${groupMini(g)}</span><span>${esc(g.name)}</span></a>`).join("")}</div>`;
+}
+function wireHomeDash() {
+  wireBanners();
+  document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
+  document.querySelectorAll("[data-act]").forEach(a => a.onclick = e => { e.preventDefault(); location.hash = routeTail(a.dataset.act); });
+  document.querySelectorAll("[data-hdmem]").forEach(im => im.onclick = () => { const [eid, pid] = im.dataset.hdmem.split("|"), ev = S.events.get(eid), p = (S.memories.get(eid) || []).find(x => x.id === pid); if (ev && p) openPhoto(ev, p); });
+  // Photos load once for the strip; the Memories page keeps them fresh after that.
+  if (!S._hdMemTried && S.events.size && ![...S.memories.values()].flat().length) { S._hdMemTried = true; loadMemories(false).then(() => { if (S.route.name === "home") render(); }).catch(() => {}); }
+}
+function plansBody() {
   const evs = [...myEvents(), ...unjoinedEvents()];
   const t = todayStr();
   let upcoming = evs.filter(e => e.date >= t).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
@@ -1760,15 +1845,7 @@ function homeBody() {
     <button class="fchip ${homeFilter === "none" ? "on" : ""}" data-filter="none">Just friends</button>
   </div>` : "";
 
-  let hiddenToday = []; try { hiddenToday = JSON.parse(LS.get("friendlyTodayHidden") || "[]"); } catch {}
-  const todayEvs = upcoming.filter(e => e.date === todayStr() && !hiddenToday.includes(e.id + "|" + e.date)).slice(0, 2);
-  const todayCards = todayEvs.map(e => `<div class="card notif-card today-card" data-ev="${e.id}" role="button"><button type="button" class="today-x" data-hide-today="${e.id}|${e.date}" aria-label="Hide this">✕</button>${dotHat(56)}<div style="flex:1;min-width:0"><div class="eyebrow-sm">Today</div><b>${esc(e.title)}${e.time ? " · " + fmtTime(e.time) : ""}</b><div class="muted sm">${e.kind === "meeting" ? (e.invitedUids || []).filter(u => (e.rsvps || {})[u] === "going").length + " accepted" : goingCount(e) + " going"}${evStops(e).length ? " · " + evStops(e).length + " stops" : e.location ? " · " + esc(placeName(e.location)) : ""}</div></div><span class="chev">›</span></div>`).join("");
-  if ((S.profile.city || "").trim()) ensureCurated();
   return `
-  ${notifCard()}
-  ${todayCards}
-  ${curateTray(upcoming, !todayCards && !notifCard())}
-  ${birthdayCard()}
   <div class="section-head"><h2>${homeView === "calendar" ? "Calendar" : "Upcoming"}</h2><span class="btnrow head-tools"><button class="icon-btn" id="viewToggle" title="${homeView === "calendar" ? "Show as cards" : "Show as a calendar"}" aria-label="${homeView === "calendar" ? "Show as cards" : "Show as a calendar"}">${homeView === "calendar" ? "🗂" : "📅"}</button><button class="icon-btn" data-go="#/drafts" title="Drafts" aria-label="Drafts${(S.drafts || []).length ? ", " + S.drafts.length + " saved" : ""}">📝${(S.drafts || []).length ? `<span class="badge">${S.drafts.length}</span>` : ""}</button><button class="btn primary small" data-go="#/new">＋ New event</button></span></div>
   ${filterBar}
   ${homeView === "calendar" ? calendarBody([...upcoming, ...past]) : `<div class="ev-grid">${upcoming.length ? upcoming.map(eventCard).join("") : emptyState("🗓️", "No plans yet", "Create your first event: pick a theme and invite the crew.", "sleepy") + (window.Blip && !isDemo() ? `<div style="text-align:center;margin:-6px 0 14px"><button type="button" class="btn tell-dot inline" id="homeTell">${dot("happy", 26)} Or just tell Dot the plan</button></div>` : "")}</div>
@@ -1803,16 +1880,21 @@ function eventCard(ev) {
     ${ev._unjoined ? `<div class="unjoined-veil"><span class="uj-tag">✉️ You're invited</span><span class="uj-cta">Tap to join</span></div>` : ""}
   </a>`;
 }
-function wireHome() {
-  document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
+function wireBanners() {
   if (el("homeTell")) el("homeTell").onclick = () => openPlanDialog("event", {});
-  document.querySelectorAll("[data-filter]").forEach(b => b.onclick = () => { homeFilter = b.dataset.filter; calDay = null; render(); });
   document.querySelectorAll("[data-bplan]").forEach(b => b.onclick = () => { const x = upcomingBirthdays(400).find(y => y.uid === b.dataset.bplan); if (x) planBirthday(x); });
   document.querySelectorAll("[data-bdismiss]").forEach(b => b.onclick = () => { try { const d = JSON.parse(LS.get("friendlyBdayDismissed") || "[]"); d.push(b.dataset.bdismiss); LS.set("friendlyBdayDismissed", JSON.stringify(d.slice(-40))); } catch {} render(); });
   document.querySelectorAll("[data-hide-tray]").forEach(b => b.onclick = e => { e.stopPropagation(); LS.set("friendlyTrayHidden2", todayStr()); const c = b.closest(".cur-tray"); if (c) { c.classList.add("fade-away"); setTimeout(render, 350); } else render(); });
   { const tray = document.querySelector(".cur-tray.first"), tabc = document.querySelector(".tabs .tab-curate");   // the tray's pointer aims at the Curate tab
     if (tray && tabc) { const r = tabc.getBoundingClientRect(), tr = tray.getBoundingClientRect(); tray.style.setProperty("--ptr", Math.max(16, Math.round(tr.right - (r.left + r.width / 2) - 6)) + "px"); } }
   document.querySelectorAll("[data-hide-today]").forEach(b => b.onclick = e => { e.stopPropagation(); let h = []; try { h = JSON.parse(LS.get("friendlyTodayHidden") || "[]"); } catch {} h = [...h, b.dataset.hideToday].slice(-30); try { LS.set("friendlyTodayHidden", JSON.stringify(h)); } catch {} render(); });
+  if (el("pushOn")) el("pushOn").onclick = enableWebPush;
+  if (el("pushLater")) el("pushLater").onclick = () => { try { LS.set("friendlyPushDismissed", "1"); } catch {} render(); };
+}
+function wirePlans() {
+  wireBanners();
+  document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
+  document.querySelectorAll("[data-filter]").forEach(b => b.onclick = () => { homeFilter = b.dataset.filter; calDay = null; render(); });
   if (el("pastToggle")) el("pastToggle").onclick = () => { S.pastOpen = !S.pastOpen; if (S.pastOpen) startPast(); render(); };
   if (homeView === "calendar") startPast();
   if (el("viewToggle")) el("viewToggle").onclick = () => { homeView = homeView === "calendar" ? "cards" : "calendar"; try { LS.set("friendlyHomeView", homeView); } catch {} render(); };
@@ -1820,8 +1902,6 @@ function wireHome() {
   if (el("calNext")) el("calNext").onclick = () => { calYM = { y: calYM.m === 11 ? calYM.y + 1 : calYM.y, m: (calYM.m + 1) % 12 }; calDay = null; render(); };
   if (el("calClear")) el("calClear").onclick = () => { calDay = null; render(); };
   document.querySelectorAll("[data-calday]").forEach(c => c.onclick = () => { calDay = calDay === c.dataset.calday ? null : c.dataset.calday; render(); });
-  if (el("pushOn")) el("pushOn").onclick = enableWebPush;
-  if (el("pushLater")) el("pushLater").onclick = () => { try { LS.set("friendlyPushDismissed", "1"); } catch {} render(); };
 }
 
 // ---------- GROUPS ----------
