@@ -833,6 +833,25 @@ exports.slimEventPhoto = onDocumentWritten({ document: "events/{eid}/photos/{pid
     await e.data.after.ref.update({ img: thumb, full: true });
   } catch (err) { logger.error("slimEventPhoto " + eid + "/" + pid + ": " + err.message); }
 });
+// New photos on a wall: one alert per burst ("Jordan added 4 photos to Taco Tuesday"), not one per photo, to the
+// host and everyone who's going. The first photo of a burst claims photoBursts/{event}_{uploader}, waits a minute
+// for the rest to land, then counts them (by the uploader's own clock, so phone clock drift doesn't matter).
+exports.onEventPhotoAdded = onDocumentCreated({ document: "events/{eid}/photos/{pid}", ...PUSH, timeoutSeconds: 120 }, async e => {
+  const p = e.data && e.data.data(); if (!p || !isRealUid(p.addedBy)) return;
+  const { eid } = e.params, uid = p.addedBy, ref = db.doc(`photoBursts/${eid}_${uid}`), now = Date.now();
+  const claimed = await db.runTransaction(async t => { const b = await t.get(ref); if (b.exists && (b.get("until") || 0) > now) return false; t.set(ref, { eid, uid, until: now + 90000 }); return true; });
+  if (!claimed) return;
+  await new Promise(r => setTimeout(r, 60000));
+  const since = (Number(p.createdAt) || now) - 2000;
+  const [ev, snap, u] = await Promise.all([db.doc("events/" + eid).get(), db.collection(`events/${eid}/photos`).where("createdAt", ">=", since).get(), db.doc("users/" + uid).get()]);
+  await ref.set({ until: 0 }, { merge: true }).catch(() => {});   // later photos start a new burst
+  if (!ev.exists) return;
+  const x = ev.data(), count = snap.docs.filter(d => d.get("addedBy") === uid).length || 1;
+  const going = (x.invitedUids || []).filter(v => (x.rsvps || {})[v] === "going");
+  const to = [...new Set([x.hostId, ...going])].filter(v => isRealUid(v) && v !== uid);
+  await notify(to, `${firstName(u.exists && u.get("name"))} added ${count === 1 ? "a photo" : count + " photos"} to ${x.title || "your event"}`, "Tap to see them on the photo wall.",
+    `/#/e/${eid}?to=photosCard`, { type: "photo", actorId: uid });
+});
 // A comment on a photo: keep the count on the photo and tell whoever posted it.
 exports.onPhotoComment = onDocumentCreated({ document: "events/{eid}/photos/{pid}/comments/{cid}", ...PUSH }, async e => {
   const c = e.data && e.data.data(); if (!c) return;
@@ -1102,7 +1121,7 @@ const mentionNotify = (c, url, where) => (c.mentions && c.mentions.length) ? not
 // Which notifCategory toggle (profile > Notifications) a push type falls under.
 // Types with no entry here (money reminders, admin content reports) always send --
 // only the four categories the person can actually see and turn off are gated.
-const NOTIF_CATEGORY = { event: "invites", meeting: "invites", rsvp: "invites", nudge: "reminders", reminder: "reminders", mention: "chat", comment: "chat", dm: "chat", friend: "invites", birthday: "birthdays", money: "money" };
+const NOTIF_CATEGORY = { event: "invites", meeting: "invites", rsvp: "invites", nudge: "reminders", reminder: "reminders", mention: "chat", comment: "chat", dm: "chat", friend: "invites", birthday: "birthdays", money: "money", photo: "photos" };
 // Every device for a set of users (native FCM tokens + web push subscriptions):
 // send, prune anything dead, and log the item to the Activity feed so it shows
 // in-app even for people who keep notifications (or this category) off.
@@ -1110,7 +1129,7 @@ async function notify(uids, title, body, url = "/", extra = {}) {
   const ids = [...new Set(uids)].filter(Boolean);
   if (!ids.length) return;
   // Private messages live in their own Messages inbox, so they skip the Activity feed.
-  if (!extra.skipActivity) await db.collection("activity").add({ uids: ids, title, body, url, type: extra.type || "", actorId: extra.actorId || "", createdAt: Date.now() })
+  if (!extra.skipActivity) await db.collection("activity").add({ uids: ids, title, body, url, type: extra.type || "", actorId: extra.actorId || "", ...(extra.sid ? { sid: extra.sid } : {}), createdAt: Date.now() })
     .catch(err => logger.warn("activity: " + err.message));
   const category = NOTIF_CATEGORY[extra.type];
   const snaps = await db.getAll(...ids.map(id => db.doc("users/" + id)));
@@ -1537,9 +1556,11 @@ exports.onExpensePay = onDocumentWritten({ document: "expenses/{id}" }, async e 
 });
 // A payback recorded from the Money tab (no expense named) is applied to that pair's unpaid expenses, oldest
 // first, so each expense's Paid marks agree with the balances. Removing a payback takes its marks back.
-exports.onSettlementWritten = onDocumentWritten({ document: "settlements/{id}" }, async e => {
+exports.onSettlementWritten = onDocumentWritten({ document: "settlements/{id}", ...PUSH }, async e => {
   const before = e.data.before.exists ? e.data.before.data() : null, after = e.data.after.exists ? e.data.after.data() : null;
-  const s = after || before; if (!s || !s.from || !s.to || (before && after)) return;   // creates and deletes only
+  const s = after || before; if (!s || !s.from || !s.to) return;
+  if (before && after) { await notifyPayReactions(e.params.id, before, after).catch(err => logger.warn("payment reactions: " + err.message)); return; }
+  if (after) await notifyPayment(e.params.id, after).catch(err => logger.warn("payment alert: " + err.message));
   if (s.expenseId) {
     const ref = db.doc("expenses/" + s.expenseId), x = (await ref.get()).data(); if (!x) return;
     const mark = (x.paid || {})[s.from];
@@ -1549,6 +1570,39 @@ exports.onSettlementWritten = onDocumentWritten({ document: "settlements/{id}" }
   }
   await allocatePaybacks(s.from, s.to);
 });
+// "Jordan paid you $24.10": the person paid hears about it, or the payer does when the person paid marked it.
+// The alert carries the payment id (sid) so Activity can show reactions on it.
+const PAY_APPS = ["Venmo", "Zelle", "Cash App", "Apple Cash", "Apple Pay", "PayPal"];
+const isRealUid = u => typeof u === "string" && u && !u.startsWith("ph:");
+async function payNames(s) {
+  const [f, t, x] = await Promise.all([db.doc("users/" + s.from).get(), db.doc("users/" + s.to).get(), s.expenseId ? db.doc("expenses/" + s.expenseId).get() : null]);
+  return { from: firstName(f.exists && f.get("name")), to: firstName(t.exists && t.get("name")), what: (x && x.exists && x.get("desc")) || "" };
+}
+async function notifyPayment(sid, s) {
+  const recorder = s.addedBy || s.from, target = recorder === s.to ? s.from : s.to;
+  if (!isRealUid(target) || target === recorder) return;
+  const n = await payNames(s), amt = dollars(s.amountCents);
+  const how = PAY_APPS.includes(s.note) ? "with " + s.note : "";
+  const what = n.what || (!how && s.note) || "";
+  const title = target === s.to ? `${n.from} paid you ${amt}` : `${n.to} marked your ${amt} as paid`;
+  const body = [what, how].filter(Boolean).join(" · ") + (target === s.to ? (what || how ? ". " : "") + "Send a thank-you reaction." : "");
+  await notify([target], title, body || "Settled up.", `/#/money?pay=${sid}`, { type: "money", actorId: recorder, sid });
+}
+// A reaction on a payment goes to the other side of it: "Wes reacted 🙏 to your $24.10 payment".
+const RX_NAMED = { heart: "❤️", laugh: "😂", fire: "🔥", up: "👍", wow: "😮" };
+const rxEmoji = k => RX_NAMED[k] || (/^e[0-9a-f_]+$/.test(k) ? k.slice(1).split("_").map(h => String.fromCodePoint(parseInt(h, 16))).join("") : "");
+async function notifyPayReactions(sid, before, after) {
+  const was = before.reactions || {}, now = after.reactions || {}, added = [];
+  for (const [k, us] of Object.entries(now)) if (Array.isArray(us) && rxEmoji(k)) for (const u of us) if (!(was[k] || []).includes(u)) added.push([u, rxEmoji(k)]);
+  if (!added.length) return;
+  const n = await payNames(after), amt = dollars(after.amountCents);
+  for (const [u, emoji] of added) {
+    if (u !== after.from && u !== after.to) continue;
+    const other = u === after.to ? after.from : after.to; if (!isRealUid(other)) continue;
+    const who = u === after.to ? n.to : n.from;
+    await notify([other], `${who} reacted ${emoji} to ${other === after.from ? "your" : "the"} ${amt} payment`, n.what || "Tap to see it on Money.", `/#/money?pay=${sid}`, { type: "money", actorId: u, sid });
+  }
+}
 async function allocatePaybacks(from, to) {
   if (!from || !to || from === to) return 0;
   const [xs, ss] = await Promise.all([db.collection("expenses").where("involved", "array-contains", from).get(), db.collection("settlements").where("involved", "array-contains", from).get()]);

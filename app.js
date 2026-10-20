@@ -817,7 +817,7 @@ const tailOf = url => routeTail(url).split("?")[0];
 // tapped notification can cold-start the app.
 let focusKey = "";
 function focusRoute() {
-  const q = S.route.q || {}; if (!q.to && !q.c && !q.photo && !q.who && !q.pair && !q.night) return;
+  const q = S.route.q || {}; if (!q.to && !q.c && !q.photo && !q.who && !q.pair && !q.night && !q.pay) return;
   const key = location.hash; if (focusKey === key) return; focusKey = key;
   let tries = 0;
   const tick = () => {
@@ -830,8 +830,9 @@ function focusRoute() {
     // The specific thing behind the alert: a person's row on an expense, a request, a guest's chip, a settle-up row.
     const who = q.who && whoTarget(q.who, sec), pair = q.pair && document.querySelector(`[data-pair="${CSS.escape(q.pair)}"]`);
     const night = q.night && document.querySelector(`[data-nk="${CSS.escape(q.night)}"]`);
-    const specific = msg || who || pair || night;
-    const target = specific || ((!q.c && !q.who && !q.pair && !q.night || tries > 16) && sec);   // give the specific thing 4 seconds to load, then settle for its section
+    const pay = q.pay && document.querySelector(`[data-srow="${CSS.escape(q.pay)}"]`);
+    const specific = msg || who || pair || night || pay;
+    const target = specific || ((!q.c && !q.who && !q.pair && !q.night && !q.pay || tries > 16) && sec);   // give the specific thing 4 seconds to load, then settle for its section
     if (!target) { if (tries < 60) setTimeout(tick, 250); return; }
     target.scrollIntoView({ block: "center" });
     target.classList.add("focus-flash"); setTimeout(() => target.classList.remove("focus-flash"), 2400);
@@ -850,6 +851,13 @@ function whoTarget(uid, sec) {
 // Flash something that is still loading (comments inside the photo viewer): look for it a few times, then give up.
 function flashWhenFound(find, tries = 20) { const t = find(); if (t) { t.scrollIntoView({ block: "center" }); t.classList.add("focus-flash"); setTimeout(() => t.classList.remove("focus-flash"), 2400); return; } if (tries > 0) setTimeout(() => flashWhenFound(find, tries - 1), 250); }
 window.go = path => { location.hash = path; };
+// Tapping the logo goes Home from any page; on Home it scrolls back to the top. Caught at the document so it
+// works on every page and every redraw.
+document.addEventListener("click", e => {
+  const a = e.target.closest && e.target.closest(".brand-home"); if (!a) return;
+  e.preventDefault();
+  if ((location.hash || "#/").split("?")[0].replace(/^#\/?$/, "") === "") window.scrollTo({ top: 0, behavior: "smooth" }); else go("#/");
+}, true);
 
 // ---------- auth ----------
 const openPendingNotif = () => { const url = S._pendingNotif; if (!url) return; S._pendingNotif = null; fz.add("opening the held notification"); setTimeout(() => { location.hash = routeTail(url); focusRoute(); }, 0); };
@@ -1248,7 +1256,7 @@ function replaySplash() {
 }
 // What shows while the account is still loading: the real header and tabs, with soft placeholder cards.
 function loadingShell() {
-  return `<header class="topbar"><div class="brand has-dot"><span>${WORDMARK}</span><span class="brand-dot" aria-hidden="true"></span></div><div class="topbar-right"><span class="skel skel-chip"></span></div></header>
+  return `<header class="topbar"><div class="brand has-dot"><a class="brand-home" href="#/" aria-label="Friendly home">${WORDMARK}</a><span class="brand-dot" aria-hidden="true"></span></div><div class="topbar-right"><span class="skel skel-chip"></span></div></header>
   <nav class="tabs"><button class="tab on" type="button">Events</button><button class="tab" type="button">Groups</button><button class="tab" type="button">Money</button><button class="tab" type="button"><span class="curate-lbl">${CURATE_LABEL}<i class="spark">✦</i></span></button></nav>
   <main class="wrap boot-skel" aria-busy="true" aria-label="Loading"><div class="skel skel-banner"></div><div class="skel skel-line"></div><div class="skel-grid"><div class="skel skel-tile"></div><div class="skel skel-tile"></div><div class="skel skel-tile"></div><div class="skel skel-tile"></div></div></main>`;
 }
@@ -1524,7 +1532,7 @@ function shell(body) {
   return `
   ${isDemo() ? `<div class="demo-bar">${dot("happy", 26)}<span>Demo mode -- this is Riley, a shared public sandbox account. Explore freely; changes are visible to other visitors and reset nightly.</span></div>` : ""}
   <header class="topbar">
-    <div class="brand has-dot"><span data-go="#/">${WORDMARK}</span><button type="button" class="brand-dot" id="brandDot" aria-label="A tip from Dot"></button></div>
+    <div class="brand has-dot"><a class="brand-home" href="#/" aria-label="Friendly home">${WORDMARK}</a><button type="button" class="brand-dot" id="brandDot" aria-label="A tip from Dot"></button></div>
     <div class="topbar-right"><button class="bell" data-go="#/search" title="Search" aria-label="Search">${pebble("search", "sage", -9)}</button><button class="bell ${tab === "photos" ? "on" : ""}" data-go="#/photos" title="Memories" aria-label="Memories">${pebble("memories", "sun", 7)}</button>${S.msgsReady ? `<button class="bell peb-coral ${tab === "messages" ? "on" : ""}" data-go="${dmUnread() && !incomingRequests().length ? "#/messages" : "#/friends"}" title="Friends" aria-label="Friends">${pebble("friends", "coral", -5)}${msgBadge() ? `<span class="badge">${msgBadge()}</span>` : ""}</button>` : ""}<button class="bell" data-go="#/activity" title="Activity" aria-label="Activity">${pebble("bell", "ink", 10)}${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ""}</button>
     <button class="me-chip" data-go="#/profile">${avatar(S.user.uid)}<span>${esc(first(p.name))}</span></button></div>
   </header>
@@ -3539,11 +3547,12 @@ function openReactSheet(key, firstEmoji) {
   if (firstEmoji) groups = [...groups.filter(([e]) => e === firstEmoji), ...groups.filter(([e]) => e !== firstEmoji)];
   dialog(`<h3>Reactions</h3>${groups.map(([e, us]) => `<div class="rs-row"><span class="rs-e">${esc(e)}</span><div class="rs-people">${us.map(u => `<span class="rs-p">${avatar(u, "sm")}<span>${esc(u === me ? "You" : nameOf(u) || "Someone")}</span></span>`).join("")}</div></div>`).join("")}`, null, null);
 }
-const RX_SEL = "[data-react],[data-hype],[data-pr]";
+const RX_SEL = "[data-react],[data-hype],[data-pr],[data-payrx]";
 const rxKeyOf = b => {
   if (b.dataset.react) { const [cid, k] = b.dataset.react.split("|"); return ["c:" + cid, rshow(k)]; }
   if (b.dataset.hype) return ["hype:" + ((S.route && S.route.id) || ""), b.dataset.hype];
   if (b.dataset.pr) { const v = el("photoViewer"); return ["photo:" + ((v && v.dataset.pid) || ""), rshow(b.dataset.pr)]; }
+  if (b.dataset.payrx) { const [sid, k] = b.dataset.payrx.split("|"); return ["pay:" + sid, rshow(k)]; }
   return null;
 };
 let rxHold = 0, rxFired = 0;
@@ -3560,6 +3569,27 @@ document.addEventListener("pointerdown", e => {
 // The press that opened the sheet doesn't also toggle the reaction, and iOS doesn't pop its copy/lookup menu.
 document.addEventListener("click", e => { if (Date.now() - rxFired < 800 && e.target.closest && e.target.closest(RX_SEL)) { e.preventDefault(); e.stopPropagation(); } }, true);
 document.addEventListener("contextmenu", e => { if (e.target.closest && e.target.closest(RX_SEL)) e.preventDefault(); }, true);
+// Payments get reactions, a quick thank-you for the money. Either side of a payment can react, and the other side
+// hears about it (onSettlementWritten). Shown on the Money tab's Activity list and on the payment's Activity alert.
+const PAY_REACTS = ["❤️", "🙏", "🎉", "😂", "🔥", "👍"];
+function payReacts(s, open) {
+  const me = myUid(); if (!s || (s.from !== me && s.to !== me)) return "";
+  const r = s.reactions || {};
+  const groups = Object.entries(r).filter(([k, us]) => rshow(k) && Array.isArray(us) && us.length).map(([k, us]) => [rshow(k), us]);
+  reactWhoLine("pay:" + s.id, groups);
+  const shown = open ? PAY_REACTS.concat(groups.map(g => g[0]).filter(e => !PAY_REACTS.includes(e))) : groups.map(g => g[0]);
+  return `<div class="pay-rx">${shown.map(e => { const k = rkey(e), who = r[k] || [];
+    return `<button type="button" class="pay-rx-b ${who.includes(me) ? "on" : ""}" data-payrx="${esc(s.id)}|${k}" aria-label="React ${e}">${e}${who.length ? `<span>${who.length}</span>` : ""}</button>`; }).join("")}${open ? "" : `<button type="button" class="pay-rx-b add" data-payrxopen="${esc(s.id)}">${groups.length ? "＋" : "React"}</button>`}</div>`;
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest && e.target.closest("[data-payrx],[data-payrxopen]"); if (!b) return;
+  e.preventDefault(); e.stopPropagation();
+  if (Date.now() - rxFired < 800) return;   // that press opened Who reacted
+  if (b.dataset.payrxopen) { const box = b.closest(".pay-rx"), s = S.settlements.get(b.dataset.payrxopen); if (box && s) box.outerHTML = payReacts(s, true); return; }
+  const [sid, k] = b.dataset.payrx.split("|"), s = S.settlements.get(sid); if (!s) return;
+  const me = myUid(), on = ((s.reactions || {})[k] || []).includes(me);
+  updateDoc(doc(db, "settlements", sid), { [`reactions.${k}`]: on ? arrayRemove(me) : arrayUnion(me) }).catch(err => toast(err.message));
+}, true);
 const firstGrapheme = v => { try { return [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(v)][0].segment; } catch { return [...v][0]; } };
 let replyTo = null;   // { id, name, ctx } while composing a threaded reply
 const parentPatch = ev => replyTo && replyTo.ctx === ev.id ? { parentId: replyTo.id } : {};
@@ -3871,22 +3901,11 @@ function openCalendarDialog(ev) {
   };
   document.querySelectorAll("#appDialog [data-go]").forEach(b => b.onclick = () => { closeDialog(); go(b.dataset.go); });
 }
-// The morning after, the host's app posts a recap on the wall once.
-async function maybePostRecap(ev) {
-  if (!canManage(ev) || ev.recapPosted || ev._recapTried || ev.kind === "meeting") return;
-  const du = daysUntil(ev); if (du >= 0 || du < -7) return; ev._recapTried = true;
-  await new Promise(r => setTimeout(r, 4000)); if (!S.route || S.route.id !== ev.id) return;
-  const going = goingCount(ev); const photos = S.photos.length; const spent = [...S.expenses.values()].filter(x => x.eventId === ev.id).reduce((t, x) => t + x.amountCents, 0);
-  const polls = S.polls.map(p => { const counts = {}; Object.values(p.votes || {}).forEach(i => counts[i] = (counts[i] || 0) + 1); const top = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0]; return top != null && p.options ? p.q + ": " + p.options[top] : ""; }).filter(Boolean);
-  const text = `🎉 That's a wrap on ${ev.title}! ${going} went${photos ? `, ${photos} photo${photos === 1 ? "" : "s"} in the album` : ""}${polls.length ? ". " + polls.join("; ") : ""}${spent ? `. ${fmt$(spent)} on the tab, settle up on Money` : ""}. Thanks for coming!`;
-  try { await addDoc(subCol(ev, "comments"), { recap: true, authorId: myUid(), authorName: S.profile.name, text, createdAt: Date.now() }); await updateDoc(doc(db, "events", ev.id), { recapPosted: true }); } catch {}
-}
-
 function wireEventPage(ev) {
   if (ev.coverFull) fullCoverOf(ev).then(c => { const img = document.querySelector(".event-cover img"); if (img && c && img.getAttribute("src") !== c) img.src = c; });
   const id = ev.id;
   markPeeked("#/e/" + ev.id);
-  wireDay(ev); loadWeather(ev); maybePostRecap(ev);
+  wireDay(ev); loadWeather(ev);
   document.querySelectorAll("[data-jump]").forEach(b => b.onclick = () => { const t = el(b.dataset.jump); if (t) t.scrollIntoView({ behavior: "smooth", block: "start" }); });
   document.querySelectorAll("[data-viewprofile]").forEach(el2 => el2.onclick = () => openProfileDialog(el2.dataset.viewprofile));
   const dup = $("[data-dup]"); if (dup) dup.onclick = () => duplicateEvent(ev);
@@ -4328,7 +4347,7 @@ function moneyBody() {
   }).join("")}</div>` : ""}
   <div class="section-head"><h2>Activity</h2></div>
   <div class="card">${rows.length ? rows.map(r => {
-    if (r.kind === "s") return `<div class="ledger"><div class="li pay">⤴</div><div style="flex:1"><b>${esc(nameOf(r.from))} paid ${esc(nameOf(r.to))}</b><div class="muted sm">${r.note ? esc(r.note) + " · " : ""}${new Date(r.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(r.amountCents)}</span>${r.addedBy === me ? `<button class="btn ghost small" data-dels="${r.id}">✕</button>` : ""}</div>`;
+    if (r.kind === "s") return `<div class="ledger" data-srow="${esc(r.id)}"><div class="li pay">⤴</div><div style="flex:1;min-width:0"><b>${esc(nameOf(r.from))} paid ${esc(nameOf(r.to))}</b><div class="muted sm">${r.note ? esc(r.note) + " · " : ""}${new Date(r.createdAt).toLocaleDateString()}</div>${payReacts(r, false)}</div><span class="amt sm">${fmt$(r.amountCents)}</span>${r.addedBy === me ? `<button class="btn ghost small" data-dels="${r.id}">✕</button>` : ""}</div>`;
     const n = (r.split || []).length || 1;
     return `<div class="ledger" data-xrow="${r.id}"><div class="li">🧾</div><div style="flex:1"><b>${esc(r.desc)}</b><div class="muted sm">${esc(nameOf(r.paidBy))} paid · ${r.shares ? "itemized, " + n + " people" : `split ${n} way${n > 1 ? "s" : ""}`} · ${new Date(r.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(r.amountCents)}</span><button class="btn ghost small" data-xopen="${r.id}" title="Details & discussion">💬</button>${r.addedBy === me ? `<button class="btn ghost small" data-dele="${r.id}" title="Delete" style="margin-left:6px">✕</button>` : ""}</div>`;
   }).join("") : emptyState("💸", "No shared costs yet", "Add an expense after your next hangout.", "happy")}</div>`;
@@ -5154,6 +5173,7 @@ const NOTIF_CATS = [
   { key: "chat", label: "Group chat & comments" },
   { key: "reminders", label: "Day-of reminders & nudges" },
   { key: "money", label: "Expenses & paybacks" },
+  { key: "photos", label: "New photos" },
   { key: "birthdays", label: "Birthdays" },
 ];
 function profileBody() {
@@ -5990,7 +6010,7 @@ const isPeeked = a => { const tail = tailOf(a.url); if (tail === "#/" || tail ==
 const unreadCount = () => (S.activity || []).filter(a => a.createdAt > seenAt() && !isPeeked(a)).length;
 const newCountFor = urlTail => (S.activity || []).filter(a => a.createdAt > seenAt() && !isPeeked(a) && tailOf(a.url) === urlTail).length;
 const isNewEvent = ev => (S.activity || []).some(a => a.createdAt > seenAt() && !isPeeked(a) && tailOf(a.url) === "#/e/" + ev.id);
-const actIcon = a => /pick your items|picked their items/.test(a.title) ? "🧾" : /joined via your link/.test(a.title) ? "🔗" : /waiting on your RSVP/.test(a.title) ? "📣" : /mentioned you/.test(a.title) ? "＠" : /to a meeting/.test(a.title) ? "📅" : /You're in!/.test(a.title) ? "🎟️" : /still owe/.test(a.title) ? "💸" : /invited you/.test(a.title) ? "🎟️" : /^Today:/.test(a.title) ? "⏰" : /reported/i.test(a.title) ? "⚑" : /is going|might come|can't make|joined the waitlist|requested/.test(a.title) ? "✅" : "💬";
+const actIcon = a => a.sid || /paid you|as paid/.test(a.title) ? "💸" : a.type === "photo" ? "📸" : /pick your items|picked their items/.test(a.title) ? "🧾" : /joined via your link/.test(a.title) ? "🔗" : /waiting on your RSVP/.test(a.title) ? "📣" : /mentioned you/.test(a.title) ? "＠" : /to a meeting/.test(a.title) ? "📅" : /You're in!/.test(a.title) ? "🎟️" : /still owe/.test(a.title) ? "💸" : /invited you/.test(a.title) ? "🎟️" : /^Today:/.test(a.title) ? "⏰" : /reported/i.test(a.title) ? "⚑" : /is going|might come|can't make|joined the waitlist|requested/.test(a.title) ? "✅" : "💬";
 function notifCard() {
   let pushDismissed = false; try { pushDismissed = !!LS.get("friendlyPushDismissed"); } catch {}
   if (NATIVE || pushDismissed) return "";
@@ -6002,7 +6022,7 @@ function activityBody() {
   if (S._actOpenSeen == null) S._actOpenSeen = seenAt();   // keep "new" highlights until you leave the page
   const rows = S.activity || [];
   return `<div class="section-head"><h2>Activity</h2></div>
-  <div class="card">${rows.length ? rows.map(a => `<a class="act-row ${a.createdAt > S._actOpenSeen ? "new" : ""}" data-act="${esc(a.url || "#/")}"><span class="li">${actIcon(a)}</span><div style="flex:1;min-width:0"><b>${esc(a.title)}</b><div class="muted sm" style="overflow-wrap:anywhere">${esc(a.body || "")}</div></div><span class="muted sm">${ago(a.createdAt)}</span></a>`).join("") : emptyState("🔔", "Nothing yet", "Invites, comments, RSVPs, and reminders will show up here.", "sleepy")}</div>
+  <div class="card">${rows.length ? rows.map(a => `<a class="act-row ${a.createdAt > S._actOpenSeen ? "new" : ""}" data-act="${esc(a.url || "#/")}"><span class="li">${actIcon(a)}</span><div style="flex:1;min-width:0"><b>${esc(a.title)}</b><div class="muted sm" style="overflow-wrap:anywhere">${esc(a.body || "")}</div>${a.sid && S.settlements.get(a.sid) ? payReacts(S.settlements.get(a.sid), true) : ""}</div><span class="muted sm">${ago(a.createdAt)}</span></a>`).join("") : emptyState("🔔", "Nothing yet", "Invites, comments, RSVPs, and reminders will show up here.", "sleepy")}</div>
   ${rows.length ? `<div class="empty caughtup">${dot("sleepy", 64)}<b>You're all caught up</b><p class="muted">Nothing new since you last looked.</p></div>` : ""}`;
 }
 function wireActivity() {
