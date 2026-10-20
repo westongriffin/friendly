@@ -91,6 +91,22 @@ const IMAGE_MODELS = [
   { model: "gemini-3.1-flash-image", location: "global" },
   { model: "gemini-2.5-flash-image", location: LOCATION }
 ];
+// Covers and icons someone asks for (events, groups) use the top-quality model first (about 3x the cost per image);
+// Curate's nightly covers stay on the fast tier above.
+const IMAGE_MODELS_PRO = [{ model: "gemini-3-pro-image", location: "global" }, ...IMAGE_MODELS];
+// The most relaxed setting Google lets us choose for each adjustable filter (Wes, Oct 19 2026). Google's own fixed
+// filters (explicit content, minors, real public figures) still apply and can't be turned off.
+const IMAGE_SAFETY = ["HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_DANGEROUS_CONTENT", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_HARASSMENT"].map(category => ({ category, threshold: "OFF" }));
+// When the model answers without an image, say why in plain words (shown to the person who asked).
+function imageRefusal(j) {
+  const c = (j.candidates || [])[0] || {}, why = String(c.finishReason || "") + " " + String((j.promptFeedback || {}).blockReason || "");
+  const said = (((c.content || {}).parts) || []).map(p => p.text || "").join(" ").replace(/\s+/g, " ").trim().slice(0, 180);
+  if (/RECITATION/.test(why)) return "That came out too close to an existing copyrighted image. Try changing the idea a little.";
+  if (/PROHIBITED|BLOCKLIST/.test(why)) return "Google won't make images of that (usually real people, celebrities, brands, or explicit content). Try a different idea.";
+  if (/SAFETY|SPII/.test(why)) return "Google's image filter flagged this one. Try rewording it.";
+  if (said) return "Google's image model said: " + said;
+  return "";
+}
 const vertexHost = loc => (loc === "global" ? "" : loc + "-") + "aiplatform.googleapis.com";
 const gauth = new GoogleAuth({ scopes: "https://www.googleapis.com/auth/cloud-platform" });
 
@@ -107,14 +123,15 @@ async function toCoverJpeg(buf) {
 }
 
 // Preferred generator: a Gemini image model on Vertex (as our own service account).
-async function geminiGenerate(prompt) {
+async function geminiGenerate(prompt, { models = IMAGE_MODELS, aspect = "16:9" } = {}) {
   const token = (await (await gauth.getClient()).getAccessToken()).token;
-  let lastErr;
-  for (const { model, location } of IMAGE_MODELS) {
+  let lastErr, refusal = "";
+  for (const { model, location } of models) {
     const url = `https://${vertexHost(location)}/v1/projects/${PROJECT}/locations/${location}/publishers/google/models/${model}:generateContent`;
     const body = {
       contents: [{ role: "user", parts: [{ text: prompt + FLAIR }] }],
-      generationConfig: { responseModalities: ["TEXT", "IMAGE"], imageConfig: { aspectRatio: "16:9" } }
+      generationConfig: { responseModalities: ["TEXT", "IMAGE"], imageConfig: { aspectRatio: aspect } },
+      safetySettings: IMAGE_SAFETY
     };
     try {
       const r = await fetch(url, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -122,10 +139,11 @@ async function geminiGenerate(prompt) {
       const j = await r.json();
       const parts = (((j.candidates || [])[0] || {}).content || {}).parts || [];
       const img = parts.find(p => p.inlineData && p.inlineData.data);
-      if (!img) throw new Error(model + ": no image in response");
+      if (!img) { const why = imageRefusal(j); if (why) refusal = why; throw new Error(model + ": no image in response" + (why ? " (" + why + ")" : "")); }
       return { image: await toCoverJpeg(Buffer.from(img.inlineData.data, "base64")), model };
     } catch (e) { lastErr = e; logger.warn(e.message + ", trying next model"); }
   }
+  if (refusal) lastErr.refusal = refusal;   // every model said no: tell the person why
   throw lastErr;
 }
 
@@ -148,19 +166,19 @@ async function pollinationsGenerate(prompt) {
   throw lastErr;
 }
 
-exports.onCoverRequest = onDocumentCreated({ document: "coverRequests/{id}", region: "us-central1", timeoutSeconds: 120, memory: "512MiB" }, async e => {
+exports.onCoverRequest = onDocumentCreated({ document: "coverRequests/{id}", region: "us-central1", timeoutSeconds: 180, memory: "512MiB" }, async e => {
   const d = e.data && e.data.data(); if (!d || !d.prompt) return;
   const ref = e.data.ref;
-  const prompt = String(d.prompt).slice(0, 700);
-  let image = null, source = null;
-  try { const g = await geminiGenerate(prompt); image = g.image; source = g.model; }
+  const prompt = String(d.prompt).slice(0, 700), aspect = ["1:1", "16:9", "3:2", "4:3"].includes(d.aspect) ? d.aspect : "16:9";
+  let image = null, source = null, error = "Dot couldn't make it just now. Try again in a minute.";
+  try { const g = await geminiGenerate(prompt, { models: IMAGE_MODELS_PRO, aspect }); image = g.image; source = g.model; }
   catch (err) {
-    logger.warn("vertex unavailable, using fallback: " + err.message);
-    try { image = await pollinationsGenerate(prompt); source = "pollinations"; }
-    catch (err2) { logger.error("cover generation failed: " + err2.message); }
+    logger.warn("cover generation failed: " + err.message);
+    if (err.refusal) { await ref.update({ status: "error", error: err.refusal, refused: true }); return; }
+    if (/ 429/.test(err.message)) error = "Dot's image studio is swamped right now. Try again in a minute.";
   }
   if (image) await ref.update({ status: "done", source, image });
-  else await ref.update({ status: "error", error: "generation failed" });
+  else await ref.update({ status: "error", error });
 });
 
 // ---- Receipt reading (Gemini vision) ----

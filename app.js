@@ -615,33 +615,34 @@ const COVER_STYLES = [
   ["film", "🎞️ Film", "35mm film photograph, visible grain, slightly faded colors, nostalgic mood"]
 ];
 const coverStylePrompt = k => { const pool = COVER_STYLES.filter(s => s[2]); const s = COVER_STYLES.find(x => x[0] === k && x[2]) || pool[Math.floor(Math.random() * pool.length)]; return s[2]; };
-async function generateCover(prompt) {
+async function generateCover(prompt, opts = {}) {
   // Primary: a Gemini image model on Vertex, driven through a Firestore trigger.
   // We write a request doc; the Cloud Function generates the image and writes
   // it back. Keeps the function off the public internet and needs no key in
   // the app. Falls back to a free generator if it doesn't land -- and the
   // public demo account always uses that free path, so unlimited demo
   // traffic never bills the paid one.
-  if (!isDemo()) try {
-    const image = await imagenViaFirestore(prompt);
-    if (image) return compressImage(image, 1024, 0.8);
-  } catch (e) { console.warn("Imagen unavailable, using fallback:", e && e.message); }
+  if (!isDemo()) {
+    // The server's message is written for people (why Google said no, or that it's busy), so it goes straight to them.
+    const image = await imagenViaFirestore(prompt, opts.aspect);
+    return compressImage(image, 1024, 0.8);
+  }
   const seed = Math.floor(Math.random() * 1e6);
   const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt + ". High quality, no text, no words, no numbers, no dates")}?width=1024&height=640&nologo=true&model=flux&seed=${seed}`;
   const res = await fetch(url); if (!res.ok) throw new Error("Generator busy, try again");
   return compressImage(await blobToURL(await res.blob()), 1024, 0.74);
 }
 // Write coverRequests/{id}, wait for the function to fill in image/status.
-function imagenViaFirestore(prompt) {
+function imagenViaFirestore(prompt, aspect) {
   return new Promise(async (resolve, reject) => {
     const uid = S.user && S.user.uid; if (!uid) return reject(new Error("signed out"));
     const id = newId(), ref = doc(db, "coverRequests", id);
     let unsub = null, timer = null;
     const done = (fn, arg) => { if (timer) clearTimeout(timer); if (unsub) unsub(); deleteDoc(ref).catch(() => {}); fn(arg); };
     try {
-      await setDoc(ref, { uid, prompt: String(prompt).slice(0, 700), status: "pending", createdAt: Date.now() });
+      await setDoc(ref, { uid, prompt: String(prompt).slice(0, 700), ...(aspect ? { aspect } : {}), status: "pending", createdAt: Date.now() });
     } catch (e) { return reject(e); }
-    timer = setTimeout(() => done(reject, new Error("timed out")), 90000);
+    timer = setTimeout(() => done(reject, new Error("Dot took too long on that one. Try again?")), 170000);
     unsub = onSnapshot(ref, s => {
       const d = s.data(); if (!d) return;
       if (d.status === "done" && d.image) done(resolve, d.image);
@@ -1861,11 +1862,11 @@ function openGroupLookDialog(g) {
   el("glCoverAi").onclick = () => openBox("glCoverBox", "glCoverText");
   el("glCoverX").onclick = () => el("glCoverBox").classList.add("hidden");
   el("glIconGo").onclick = async () => { const idea = el("glIconText").value.trim() || `A fun icon for ${g.name}`, b = el("glIconGo"); busy(b, true, "✨ Making…");
-    try { const img = await generateCover(`A single playful sticker-style icon: ${idea}. One bold, simple subject, centered, flat bright colors, plain solid light background. No text, no letters, no numbers.`); L.icon = await squareImage(img, 256); redraw(); el("glIconBox").classList.add("hidden"); }
-    catch (e) { toast("Dot couldn't make one just now. Try again?"); } busy(b, false, "✨ Make it"); };
+    try { const img = await generateCover(`${idea}. A square icon for a group: one clear subject, centered, easy to read at a small size.`, { aspect: "1:1" }); L.icon = await squareImage(img, 256); redraw(); el("glIconBox").classList.add("hidden"); }
+    catch (e) { toast(e.message || "Dot couldn't make one just now. Try again?"); } busy(b, false, "✨ Make it"); };
   el("glCoverGo").onclick = async () => { const idea = el("glCoverText").value.trim() || `A cozy scene that feels like ${g.name}`, b = el("glCoverGo"); busy(b, true, "🎨 Painting…");
     try { L.cover = await generateCover(`A wide, inviting cover image: ${idea}. Style: ${coverStylePrompt(L.style)}. No text, no words, no letters.`); redraw(); el("glCoverBox").classList.add("hidden"); }
-    catch (e) { toast("Dot couldn't paint one just now. Try again?"); } busy(b, false, "🎨 Paint it"); };
+    catch (e) { toast(e.message || "Dot couldn't paint one just now. Try again?"); } busy(b, false, "🎨 Paint it"); };
 }
 function groupRow(g) {
   const n = (g.memberUids || []).length;
