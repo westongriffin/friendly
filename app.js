@@ -3654,13 +3654,25 @@ async function savePhoto(ev, p, btn) {
     const src = await bestPhoto(ev, p);
     // Android's web view has no share sheet and ignores download links, so the original opens in Chrome (press and
     // hold there to download). Photos without an original wait for the next Android app update, which saves natively.
-    if (NATIVE && IS_ANDROID) {
-      if (/^https?:/.test(src)) { window.open(src, "_blank"); toast("Opened in your browser. Press and hold the photo to download it."); return; }
-      toast("Saving this photo on Android is coming in the next app update."); return;
-    }
     const blob = await (await fetch(src)).blob();
     const ext = /png/.test(blob.type) ? "png" : /heic|heif/.test(blob.type) ? "heic" : "jpg";
-    const file = new File([blob], `${String(ev.title || "friendly").replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "friendly"}-${p.id.slice(0, 6)}.${ext}`, { type: blob.type || "image/jpeg" });
+    const name = `${String(ev.title || "friendly").replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "friendly"}-${p.id.slice(0, 6)}.${ext}`;
+    // Android app 1.0.5+: the native share sheet (Save to Photos lives there) via the Filesystem + Share plugins.
+    const FS = NATIVE && plugin("Filesystem"), SH = NATIVE && plugin("Share");
+    if (NATIVE && IS_ANDROID) {
+      if (FS && SH) {
+        try {
+          const b64 = (await blobToURL(blob)).split(",")[1];
+          const w = await FS.writeFile({ path: name, data: b64, directory: "CACHE" });
+          await SH.share({ title: ev.title || "Photo", files: [w.uri] }); return;
+        } catch (e) { if (/cancel/i.test(e.message || "")) return; }
+      }
+      // Older Android app: no share sheet in its web view and download links are ignored, so the original opens
+      // in Chrome (press and hold there to download).
+      if (/^https?:/.test(src)) { window.open(src, "_blank"); toast("Opened in your browser. Press and hold the photo to download it."); return; }
+      toast("Update Friendly from the Play Store to save photos."); return;
+    }
+    const file = new File([blob], name, { type: blob.type || "image/jpeg" });
     if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: ev.title || "Photo" }); return; } catch (e) { if (e.name === "AbortError") return; } }
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = file.name; document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 3000); toast("Saved");
