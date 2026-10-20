@@ -968,6 +968,9 @@ p .linkish{display:inline;margin:0;padding:0;color:var(--accent)}
 .pv-who b{font-size:15px}
 .pv-sub{font-size:12px;color:rgba(255,255,255,.62)}
 .pv-x{width:40px;height:40px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;font-size:17px;font-weight:700;flex:none;cursor:pointer}
+.pv-btns{display:flex;align-items:center;gap:8px;flex:none}
+.pv-save{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 13px 0 10px;border-radius:999px;background:rgba(255,255,255,.14);color:#fff;font-weight:600;font-size:13px;cursor:pointer} .pv-save:disabled{opacity:.5}
+.cur-guess{margin:-6px 0 10px}
 .pv-img{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:0 8px}
 .pv-img img{max-width:100%;max-height:100%;object-fit:contain;border-radius:10px}
 .pv-panel{flex:none;background:#1a1411;border-radius:18px 18px 0 0;padding:12px 14px 10px;max-height:46vh;display:flex;flex-direction:column}

@@ -2502,7 +2502,7 @@ async function pickedCity(input, allowEmpty) {
 async function saveCity(city, milesIn) {
   city = String(city || "").trim().slice(0, 60); if (city.length < 2) return toast("Tell me a city, like Frisco, TX.");
   const miles = CURATE_MILES.includes(Number(milesIn)) ? Number(milesIn) : myMiles();
-  try { await updateDoc(doc(db, "users", myUid()), miles === myMiles() ? { city } : { city, curateMiles: miles }); registerCity(city, miles); toast("Looking around " + city + "…", null, null, "thinking"); } catch (e) { toast(e.message); }
+  try { await updateDoc(doc(db, "users", myUid()), miles === myMiles() ? { city, cityGuess: deleteField() } : { city, cityGuess: deleteField(), curateMiles: miles }); registerCity(city, miles); toast("Looking around " + city + "…", null, null, "thinking"); } catch (e) { toast(e.message); }
 }
 function openCityDialog() {
   dialog(`<h3>Where are you?</h3><label class="field"><span>City</span><input id="cityIn" value="${esc(S.profile.city || "")}" placeholder="Start typing a city" maxlength="60" autocomplete="off"></label><p class="muted sm">Pick your city from the list. Used only to find things nearby. No location tracking.</p>`, "Save", async () => { const city = await pickedCity(el("cityIn")); if (city) { closeDialog(); saveCity(city); } });
@@ -2529,7 +2529,7 @@ function curateBody() {
   if (d) markCuratedSeen();
   const phaseText = { starting: "Warming up", searching: "Searching what's on and pairing places to eat", sorting: "Sorting the good ones" }[S._curPhase] || "Looking around";
   const lead = !d && !S._curError ? `Give me a minute. ${phaseText} within ${myMiles()} miles of ${city}…` : S._curError ? "I couldn't look around just now (" + S._curError + "). Try again in a bit." : shown.length ? (filtered.length ? CURATE_LEADS[curFilter] : "Nothing tagged for that yet, so here's everything I found.") : "Nothing yet. Build your own and I'll go looking.";
-  return `<div class="section-head cur-head"><h2>${CURATE_LABEL}</h2><span class="cur-loc"><button type="button" class="cur-loc-city" id="curCityBtn" aria-label="Change city">📍 <span>${esc(city)}</span></button>${milesSelect("curMiles")}</span></div>
+  return `<div class="section-head cur-head"><h2>${CURATE_LABEL}</h2><span class="cur-loc"><button type="button" class="cur-loc-city" id="curCityBtn" aria-label="Change city">📍 <span>${esc(city)}</span></button>${milesSelect("curMiles")}</span></div>${S.profile.cityGuess ? `<p class="muted sm cur-guess">Dot guessed your city from your phone number. Tap 📍 to change it.</p>` : ""}
   <div class="dot-say cur-dot">${dot(d ? "happy" : "thinking", 48)}<div class="say-bubble">${esc(lead)}<div class="cur-acts"><button type="button" class="btn small primary" id="curBuild">✨ Build me a night</button><button type="button" class="btn small" id="curBrowse">🔎 Browse ideas</button></div></div></div>
   <div class="chiprow">${CURATE_FILTERS.map(([k, l]) => `<button type="button" class="fchip ${curFilter === k ? "on" : ""}" data-cf="${k}">${l}</button>`).join("")}</div>
   ${!d && !S._curError ? `<div class="card empty compact">${dot("thinking", 64)}<p class="muted" style="margin:6px 0 0">Searching what's on, pairing dinners, checking the times. About half a minute the first time.</p></div>` : ""}
@@ -2621,8 +2621,10 @@ const upcomingNights = () => { const t = todayStr(), now = new Date(), mins = no
   return ((S.curated && S.curated.nights) || []).filter(n => !n.date || n.date > t || (n.date === t && (!/^\d{2}:\d{2}$/.test(n.start || "") || +n.start.slice(0, 2) * 60 + +n.start.slice(3) > mins - 60))); };
 // Weekend picks first, then by date; ones with a painted cover ahead of the rest. `min` tops the list up with
 // cover-less nights so the tray never shows fewer than that many (the tab only wants covers).
+// Thursday to Sunday the weekend leads; Monday to Wednesday tonight leads, so a quiet weeknight gets a same-day idea.
 function topPicks(max, min = 0) {
-  const ns = upcomingNights(), wk = n => (n.tags || []).includes("weekend") ? 0 : 1;
+  const ns = upcomingNights(), t = todayStr(), dow = new Date().getDay(), weekendish = dow >= 4 || dow === 0;
+  const wk = n => weekendish ? ((n.tags || []).includes("weekend") ? 0 : 1) : (n.date === t ? 0 : 1);
   const order = (a, b) => wk(a) - wk(b) || (a.date + (a.start || "")).localeCompare(b.date + (b.start || ""));
   const withCover = ns.filter(n => coverUrl(n)).sort(order).slice(0, max);
   return withCover.length >= min ? withCover : [...withCover, ...ns.filter(n => !coverUrl(n)).sort(order).slice(0, min - withCover.length)];
@@ -2647,15 +2649,16 @@ function shortWhen(n) {
   let [h, m] = n.start.split(":").map(Number); const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12;
   return `${day} · ${h}${m ? ":" + String(m).padStart(2, "0") : ""} ${ap}`;
 }
-// The weekend tray: three picks with their covers, "See all", and a close that hides it until tomorrow.
+// The picks tray, every day: three picks with their covers, "See all", and a close that hides it until tomorrow.
+// Weekends it leads with the weekend; weeknights it leads with tonight.
 function curateTray(upcoming, first) {
   if (isDemo() || !(S.profile.city || "").trim()) return "";
-  const t = todayStr(), soon = upcoming.some(e => e.date >= t && e.date <= addDays(t, 7)), dow = new Date().getDay(), weekendish = dow >= 4 || dow === 0;
-  if (soon && !weekendish) return "";
+  const t = todayStr(), dow = new Date().getDay(), weekendish = dow >= 4 || dow === 0;
   if (LS.get("friendlyTrayHidden2") === t) return "";
   const picks = topPicks(6, 3); if (!picks.some(coverUrl)) return needIdeaCard(upcoming);
+  const label = !weekendish && picks[0].date === t ? "tonight" : weekendish && picks.every(n => (n.tags || []).includes("weekend")) ? "this weekend" : "the week ahead";
   return `<section class="cur-tray ${first ? "first" : ""}" aria-label="Dot's picks"><span class="ptr" aria-hidden="true"></span>
-    <div class="cur-tray-head">${dot("thinking", 22)}<b>Dot's picks for ${weekendish && picks.every(n => (n.tags || []).includes("weekend")) ? "this weekend" : "the week ahead"}</b><button type="button" class="link-btn" data-go="#/curate">See all</button><button type="button" class="tray-x" data-hide-tray="1" aria-label="Hide until tomorrow">✕</button></div>
+    <div class="cur-tray-head">${dot("thinking", 22)}<b>Dot's picks for ${label}</b><button type="button" class="link-btn" data-go="#/curate">See all</button><button type="button" class="tray-x" data-hide-tray="1" aria-label="Hide until tomorrow">✕</button></div>
     <div class="cur-tray-row">${picks.map(n => `<button type="button" class="cur-pick" data-go="#/curate?night=${encodeURIComponent(nightKey(n))}">${coverUrl(n) ? `<img src="${esc(coverUrl(n))}" alt="" loading="lazy">` : `<span class="cp-emoji" aria-hidden="true">${esc([...String(n.emojis || n.emoji || "✨")].slice(0, 2).join(""))}</span>`}<span class="cp-txt"><b>${esc(n.title)}</b><span>${esc(shortWhen(n))}</span></span></button>`).join("")}</div></section>`;
 }
 function needIdeaCard(upcoming) {
@@ -3606,6 +3609,25 @@ function wallParticipants(ev) {
 }
 // ----- One photo, full screen: the full-size image, reactions, and its own comments -----
 const photoFullCache = new Map();
+// The best copy of a photo we have: the original from storage when it's there, else the full-size copy, else the preview.
+async function bestPhoto(ev, p) {
+  if (p.fullUrl) return p.fullUrl;
+  if (p.full && !photoFullCache.has(p.id)) { try { const d = await getDoc(doc(db, "events", ev.id, "photoFull", p.id)); if (d.exists()) photoFullCache.set(p.id, d.data().img); } catch {} }
+  return photoFullCache.get(p.id) || p.img;
+}
+// Save to the camera roll: on a phone the share sheet (its Save Image), elsewhere a download.
+async function savePhoto(ev, p, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const src = await bestPhoto(ev, p), blob = await (await fetch(src)).blob();
+    const ext = /png/.test(blob.type) ? "png" : /heic|heif/.test(blob.type) ? "heic" : "jpg";
+    const file = new File([blob], `${String(ev.title || "friendly").replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "friendly"}-${p.id.slice(0, 6)}.${ext}`, { type: blob.type || "image/jpeg" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: ev.title || "Photo" }); return; } catch (e) { if (e.name === "AbortError") return; } }
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = file.name; document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 3000); toast("Saved");
+  } catch (e) { toast("Couldn't save that photo: " + e.message); }
+  finally { if (btn) btn.disabled = false; }
+}
 const photoBadges = p => { const r = Object.values(p.reactions || {}).reduce((t, v) => t + (Array.isArray(v) ? v.length : 0), 0), c = p.commentCount || 0;
   return r || c ? `<span class="ph-badges">${r ? `<span>❤️ ${r}</span>` : ""}${c ? `<span>💬 ${c}</span>` : ""}</span>` : ""; };
 function closePhoto() { const v = el("photoViewer"); if (!v) return; (v._unsubs || []).forEach(fn => fn()); v.remove(); if (!el("appDialog")) unlockScroll(); }
@@ -3613,13 +3635,14 @@ function openPhoto(ev, p) {
   closePhoto();
   const me = myUid(), host = ev.hostId === me || (ev.cohostUids || []).includes(me) || isAdmin();
   const box = document.createElement("div"); box.className = "photo-viewer"; box.id = "photoViewer"; box._unsubs = []; box.dataset.pid = p.id;
-  box.innerHTML = `<div class="pv-top"><div class="pv-who">${avatar(p.addedBy)}<div><b>${esc(first(nameOf(p.addedBy)))}</b><div class="pv-sub">${esc(ev.title || "")}${p.createdAt ? " · " + esc(ago(p.createdAt)) : ""}</div></div></div><button type="button" class="pv-x" id="pvClose" aria-label="Close">✕</button></div>
+  box.innerHTML = `<div class="pv-top"><div class="pv-who">${avatar(p.addedBy)}<div><b>${esc(first(nameOf(p.addedBy)))}</b><div class="pv-sub">${esc(ev.title || "")}${p.createdAt ? " · " + esc(ago(p.createdAt)) : ""}</div></div></div><span class="pv-btns"><button type="button" class="pv-save" id="pvSave" aria-label="Save photo"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M4 19h16"/></svg><span>Save</span></button><button type="button" class="pv-x" id="pvClose" aria-label="Close">✕</button></span></div>
     <div class="pv-img"><img id="pvImg" src="${esc(photoFullCache.get(p.id) || p.img)}" alt=""></div>
     <div class="pv-panel"><div class="pv-reacts" id="pvReacts"></div><div class="pv-who-line" id="pvWho"></div>
       <div class="pv-comments" id="pvComments"><p class="pv-empty">Loading comments…</p></div>
       <form class="pv-form" id="pvForm"><input id="pvText" placeholder="Add a comment…" maxlength="500" autocomplete="off" enterkeyhint="send"><button class="btn primary small" type="submit">Post</button></form></div>`;
   document.body.appendChild(box); lockScroll();
   el("pvClose").onclick = closePhoto;
+  el("pvSave").onclick = () => savePhoto(ev, cur, el("pvSave"));
   const pref = doc(db, "events", ev.id, "photos", p.id);
   let cur = p;
   const paintReacts = () => {
@@ -4299,7 +4322,7 @@ function editEvent(ev) {
     <span class="field-label" style="margin-top:10px">Co-hosts (can edit &amp; manage)</span><div class="check-grid">${contactChecks("ecoh", new Set(ev.cohostUids || []))}</div>`,
     "Save", async () => {
       const cohostUids = [...document.querySelectorAll("input[name=ecoh]:checked")].map(i => i.value).filter(u => u !== ev.hostId);
-      try { await updateDoc(doc(db, "events", ev.id), { cohostUids, ...(cohostUids.length ? { invitedUids: arrayUnion(...cohostUids) } : {}), title: el("eTitle").value.trim(), date: el("eDate").value, ...(() => { const st = sortStops(cleanStops(E.stops)); return st.length >= 2 ? { stops: st, time: (st.find(x => x.time) || {}).time || el("eTime").value, location: st[0].place || el("eWhere").value.trim(), food: "" } : { stops: [], time: el("eTime").value, location: el("eWhere").value.trim() }; })(), ...(el("eFood") && cleanStops(E.stops).length < 2 ? { food: el("eFood").value.trim() } : {}), notes: el("eNotes").value.trim(), allowPlus: el("ePlusOn").checked, plusMax: plusMaxVal("e"), ...(el("eBringOn") ? { dayBring: el("eBringOn").checked, dayCarpool: el("eCarOn").checked } : {}), ...readRepeat("e") }); closeDialog(); toast("Saved"); } catch (e) { toast(e.message); }
+      try { await updateDoc(doc(db, "events", ev.id), { cohostUids, ...(cohostUids.length ? { invitedUids: arrayUnion(...cohostUids) } : {}), updatedBy: myUid(), title: el("eTitle").value.trim(), date: el("eDate").value, ...(() => { const st = sortStops(cleanStops(E.stops)); return st.length >= 2 ? { stops: st, time: (st.find(x => x.time) || {}).time || el("eTime").value, location: st[0].place || el("eWhere").value.trim(), food: "" } : { stops: [], time: el("eTime").value, location: el("eWhere").value.trim() }; })(), ...(el("eFood") && cleanStops(E.stops).length < 2 ? { food: el("eFood").value.trim() } : {}), notes: el("eNotes").value.trim(), allowPlus: el("ePlusOn").checked, plusMax: plusMaxVal("e"), ...(el("eBringOn") ? { dayBring: el("eBringOn").checked, dayCarpool: el("eCarOn").checked } : {}), ...readRepeat("e") }); closeDialog(); toast("Saved"); } catch (e) { toast(e.message); }
     });
   attachPlaces(el("eWhere"));
   stopCtx = ectx; wireStops(); wireRepeat("e"); wirePlusFields("e");
@@ -5249,7 +5272,7 @@ function wireProfile() {
       const birthday = (el("pBday") || {}).value || "";
       const email = (el("pEmail") || {}).value || ""; if (email && !email.includes("@")) return toast("That email doesn't look right.");
       const city = el("pCity") ? await pickedCity(el("pCity"), true) : (S.profile.city || ""); if (city === null) return;
-      await updateDoc(doc(db, "users", myUid()), { name, venmo, phone, zelle, cashapp, payPref, city, phoneE164: toE164(phone) || myPhoneE164(), birthday, email: email.trim().toLowerCase() });
+      await updateDoc(doc(db, "users", myUid()), { name, venmo, phone, zelle, cashapp, payPref, city, cityGuess: deleteField(), phoneE164: toE164(phone) || myPhoneE164(), birthday, email: email.trim().toLowerCase() });
       if (city) registerCity(city);
       // propagate name/contact into each group's denormalized members map
       for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}`]: { name, venmo, phone, os: myOs(), zelle, cashapp, payPref, photo: myPhotoSm(), birthday } }).catch(() => {});
