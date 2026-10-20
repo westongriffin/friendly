@@ -100,7 +100,13 @@ img{max-width:100%}
 .section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:18px 0 12px}
 /* activity bell + feed + notification prompt */
 .topbar-right{display:flex;align-items:center;gap:8px}
-.bell{position:relative;width:40px;height:40px;border-radius:50%;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);font-size:18px;display:grid;place-items:center}
+/* Header buttons are pebbles (see pebble() in app.js): the SVG draws the shape, so the button itself is bare. */
+.bell{position:relative;width:38px;height:38px;border-radius:50%;background:none;border:0;padding:0;display:grid;place-items:center;transition:transform .15s}
+.bell .peb{position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);overflow:visible;filter:drop-shadow(0 2px 3px rgba(60,40,20,.18))}
+.bell .peb-ic{position:relative;width:21px;height:21px}
+.bell:active{transform:scale(.92)}
+.bell .badge{z-index:1;box-shadow:0 0 0 2px var(--surface)}
+.bell.peb-coral .badge{background:var(--ink)}   /* never a coral badge on a coral pebble */
 .badge{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;border-radius:9px;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:grid;place-items:center;padding:0 5px}
 .act-row{display:flex;align-items:center;gap:12px;padding:12px 15px;border-top:1px solid var(--line)} .act-row:first-child{border-top:0} .act-row.new{background:var(--surface2)}
 .notif-card{display:flex;align-items:center;gap:12px;padding:13px 15px;margin-bottom:14px;flex-wrap:wrap}
@@ -931,8 +937,8 @@ html{background:var(--bg)}
 /* Narrow phones (iPhone mini/SE width): the logo never wraps; the profile chip shows just the photo */
 .topbar .brand{white-space:nowrap;flex:none}
 @media (max-width:439px){.topbar .me-chip > span:not(.avatar){display:none}.topbar .me-chip{padding:3px}}
-@media (max-width:389px){.topbar-right{gap:6px}.topbar .bell{width:36px;height:36px;font-size:16px}}
-.bell.on{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 22%,transparent)}
+@media (max-width:389px){.topbar-right{gap:6px}.topbar .bell{width:34px;height:34px}.topbar .bell .peb-ic{width:19px;height:19px}}
+.bell.on::after{content:"";position:absolute;left:50%;bottom:-8px;width:5px;height:5px;margin-left:-2.5px;border-radius:50%;background:var(--ink)}   /* the page you are on */
 /* Text invites: the iPhone auto-send (Shortcut) card */
 .auto-card{background:var(--surface2);border:1px solid var(--line);border-radius:14px;padding:12px 12px 6px;margin-top:10px;font-size:14px}
 .auto-card p{margin:4px 0 10px;color:var(--ink)}

@@ -1499,6 +1499,24 @@ function watchTabs() {
   tabsObserver = new IntersectionObserver(([en]) => tabs.classList.toggle("stuck", !en.isIntersecting && en.boundingClientRect.top < 0), { threshold: 0 });
   tabsObserver.observe(sentinel);
 }
+// Header buttons are pebbles: Dot's body shape in a flat brand color with Dot's gloss, each tilted a little
+// (brand guide: Search sage, Memories sun, Friends coral, Alerts ink). The icon sits on top of the pebble.
+const PEB_PATH = "M-1.5,-10.2 C2.5,-11 6.5,-9 8.2,-6.5 C10,-4 11,1 10.2,4.5 C9.4,8 6,11 1,10.6 C-3.5,10.2 -6,9.5 -8,7.5 C-10.2,5.3 -11,0 -10.4,-3.5 C-9.8,-7 -5.5,-9.6 -1.5,-10.2 Z";
+const PEB_INK = "#2A2019", PEB_SUN = "#FFC145";
+const PEB_FILL = { sage: "#7CC79B", sun: PEB_SUN, coral: "#FF6B57", ink: PEB_INK };
+const pebIcon = inner => `<svg class="peb-ic" viewBox="0 0 28 28" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
+const pebStroke = (c, w = 2.3) => `stroke="${c}" stroke-width="${w}"`;
+const PEB_ICONS = {
+  search: c => pebIcon(`<circle cx="12.4" cy="12.4" r="6.6" ${pebStroke(c, 2.5)}/><path d="M17.4 17.4 L22 22" ${pebStroke(c, 3)}/><path d="M9.6 11 A3.2 3.2 0 0 1 11.6 9.1" ${pebStroke(c, 1.8)} opacity=".55"/>`),
+  // Two polaroids: outlines only, so the pebble shows through; the front one is filled with the pebble color to hide the back one.
+  memories: (c, bg) => pebIcon(`<g transform="rotate(13 17 12)"><rect x="10.5" y="3.5" width="13" height="15.5" rx="1.8" ${pebStroke(c, 2)} opacity=".6"/></g><g transform="rotate(-9 11.5 15.5)"><rect x="4.5" y="7" width="14" height="16.5" rx="1.8" fill="${bg}" ${pebStroke(c)}/><rect x="7.2" y="9.7" width="8.6" height="8.2" rx="1" fill="${c}"/><circle cx="13.4" cy="12" r="1.5" fill="${c === PEB_INK ? PEB_SUN : PEB_INK}"/></g>`),
+  friends: c => pebIcon(`<circle cx="18.6" cy="9" r="3.3" ${pebStroke(c, 2.2)} opacity=".6"/><path d="M15.8 15.4 C16.6 15 17.6 14.8 18.6 14.8 C21.4 14.8 23.4 16.7 24 20.4" ${pebStroke(c, 2.2)} opacity=".6"/><circle cx="10.6" cy="10.2" r="3.9" ${pebStroke(c)}/><path d="M3.8 22.4 C4.6 18.4 7.2 16.4 10.6 16.4 C14 16.4 16.6 18.4 17.4 22.4" ${pebStroke(c)}/>`),
+  bell: c => pebIcon(`<path d="M8.2 18.4 V13.2 A5.8 5.8 0 0 1 19.8 13.2 V18.4 L21.6 20.4 H6.4 Z" ${pebStroke(c, 2.4)}/><path d="M12.2 23.2 A2 2 0 0 0 15.8 23.2" ${pebStroke(c === PEB_INK ? c : PEB_SUN, 2.4)}/>`)
+};
+function pebble(icon, color, tilt) {
+  const fill = PEB_FILL[color], ic = color === "ink" ? "#FFFEFC" : PEB_INK;
+  return `<svg class="peb" viewBox="-12 -12 24 24" style="transform:rotate(${tilt}deg)" aria-hidden="true"><path transform="scale(1.05)" d="${PEB_PATH}" fill="${fill}"/><ellipse cx="-4.6" cy="-5.8" rx="3.4" ry="1.9" fill="#fff" opacity="${color === "ink" ? ".16" : ".45"}" transform="rotate(-35 -4.6 -5.8)"/></svg>${PEB_ICONS[icon](ic, fill)}`;
+}
 function shell(body) {
   const p = S.profile;
   const tab = S.route.name;
@@ -1507,7 +1525,7 @@ function shell(body) {
   ${isDemo() ? `<div class="demo-bar">${dot("happy", 26)}<span>Demo mode -- this is Riley, a shared public sandbox account. Explore freely; changes are visible to other visitors and reset nightly.</span></div>` : ""}
   <header class="topbar">
     <div class="brand has-dot"><span data-go="#/">${WORDMARK}</span><button type="button" class="brand-dot" id="brandDot" aria-label="A tip from Dot"></button></div>
-    <div class="topbar-right"><button class="bell" data-go="#/search" title="Search">🔍</button><button class="bell ${tab === "photos" ? "on" : ""}" data-go="#/photos" title="Memories" aria-label="Memories">📸</button>${S.msgsReady ? `<button class="bell ${tab === "messages" ? "on" : ""}" data-go="${dmUnread() && !incomingRequests().length ? "#/messages" : "#/friends"}" title="Friends" aria-label="Friends">👥${msgBadge() ? `<span class="badge">${msgBadge()}</span>` : ""}</button>` : ""}<button class="bell" data-go="#/activity" title="Activity">🔔${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ""}</button>
+    <div class="topbar-right"><button class="bell" data-go="#/search" title="Search" aria-label="Search">${pebble("search", "sage", -9)}</button><button class="bell ${tab === "photos" ? "on" : ""}" data-go="#/photos" title="Memories" aria-label="Memories">${pebble("memories", "sun", 7)}</button>${S.msgsReady ? `<button class="bell peb-coral ${tab === "messages" ? "on" : ""}" data-go="${dmUnread() && !incomingRequests().length ? "#/messages" : "#/friends"}" title="Friends" aria-label="Friends">${pebble("friends", "coral", -5)}${msgBadge() ? `<span class="badge">${msgBadge()}</span>` : ""}</button>` : ""}<button class="bell" data-go="#/activity" title="Activity" aria-label="Activity">${pebble("bell", "ink", 10)}${unreadCount() ? `<span class="badge">${unreadCount()}</span>` : ""}</button>
     <button class="me-chip" data-go="#/profile">${avatar(S.user.uid)}<span>${esc(first(p.name))}</span></button></div>
   </header>
   <div class="tabs-sentinel"></div>
