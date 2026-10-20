@@ -504,7 +504,8 @@ function cleanNight(n) {
     cost: clip(n.cost, 50), size: clip(n.size, 40), parking: clip(n.parking, 120), why: clip(n.why, 260), ticketUrl: isUrl(n.ticketUrl) ? sv(n.ticketUrl, 300) : "",
     emoji: noLone(sv(n.emoji, 8).replace(/[A-Za-z0-9\s]/g, "").slice(0, 4)), emojis: noLone(sv(n.emojis, 12).replace(/[A-Za-z0-9\s]/g, "").slice(0, 8)),
     scene: sv(n.scene, 140), theme: THEME_IDS.includes(n.theme) ? n.theme : "midnight",
-    coverId: nodeCrypto.createHash("md5").update("v2|" + sv(n.title, 80) + "|" + sv(n.date, 10)).digest("hex").slice(0, 12)   // v2: repaint after the style change
+    // v3: keyed by the main spot, not the date, so a place that comes back next week keeps its cover (curateCovers/{id}).
+    coverId: nodeCrypto.createHash("md5").update("v3|" + ((stops.find(x => x.kind === "do") || stops[0] || {}).name || sv(n.title, 80)).toLowerCase().trim()).digest("hex").slice(0, 12)
   };
 }
 const nightShape = `Return ONLY a JSON array, no prose: [{"title": short and specific, "date": "YYYY-MM-DD", "start": 24-hour "HH:MM" of the first stop, "tags": [any of weekend, tonight, date, group, cheap, family], "stops": [{"time": like "5:30 PM", "name": the real venue or event name, "note": one useful detail (walk time, what to order, parking), "kind": "eat" | "do" | "go", "url": the listing or booking page if you found one}], "cost": like "$45 a head all in", "size": like "Best for 2–6", "parking": one short line, "why": one sentence in Dot's voice on why this night works, "ticketUrl": the ticket page if tickets are sold, "emoji": one emoji for the night, "emojis": exactly two emojis, the thing to do then the food (like "⚾🌮"), "scene": a 10-to-16-word visual description of the night for an illustration, concrete objects and setting only, no people's faces, no text (like "a baseball game under stadium lights beside a plate of street tacos"), "theme": the one of ${THEME_IDS.join(", ")} that fits the vibe (sunset or golden for dinners, confetti for parties, garden or blossom for brunch and outdoors, midnight or cosmic for nights out and shows, disco, rave or retro for dance and costume nights, citrus or bubblegum for playful daytime plans, aurora for big arena events)}]. Every stop is a different venue; never list the same place twice. Only include things you actually found; never invent an event, a venue, or a price. Times must make sense in sequence. Always use the Oxford comma in lists.`;
@@ -602,25 +603,47 @@ const CURATE_STYLES = ["candid documentary photograph", "35mm film photograph wi
 // every city within minutes, and the old parallel painters (each publish re-triggering another painter for the same
 // nights) ran into Vertex's rate limit so most nights went without a cover. Our own coverIds/paintingUntil writes
 // don't start another painter; curateCoverSweep below picks up whatever is still missing.
+// Covers are painted only when someone is about to look at them: the app writes the ids it is showing to
+// coverWants/{cityKey}, and the painter fills in the missing ones (a few at a time, up to a daily cap per city). A
+// nightly rebuild paints nothing by itself; repeats of a spot reuse its cover from curateCovers/{id}.
+const COVERS = () => db.collection("curateCovers");
+const PAINT_PER_RUN = 6, PAINT_PER_DAY = 14, WANT_KEEP = 40;
 const coverIdsOf = x => ((x && x.nights) || []).map(n => n.coverId).filter(Boolean).sort().join();
-exports.onCuratedWritten = onDocumentWritten({ document: "curated/{cityKey}", region: "us-central1", timeoutSeconds: 540, memory: "1GiB" }, async e => {
-  const after = e.data && e.data.after && e.data.after.exists ? e.data.after.data() : null; if (!after) return;
-  const before = e.data.before && e.data.before.exists ? e.data.before.data() : null;
-  const nudged = !before || (after.coverNudge || 0) !== (before.coverNudge || 0);
-  if (before && coverIdsOf(before) === coverIdsOf(after) && !nudged) return;   // our own bookkeeping writes
-  const ref = e.data.after.ref, t0 = Date.now();
-  await ref.update({ paintingUntil: t0 + 540e3 }).catch(() => {});
-  try { await paintCityCovers(ref, after, t0); } finally { await ref.update({ paintingUntil: 0 }).catch(() => {}); }
-});
-async function paintCityCovers(ref, after, t0) {
-  const nights = (after.nights || []).filter(n => n.coverId);
-  const col = ref.collection("covers");
-  const have = new Set((await col.select().get()).docs.map(d => d.id));
-  const todo = nights.filter(n => !have.has(n.coverId)).slice(0, 30);
+const dayKey = () => new Date().toISOString().slice(0, 10);
+async function haveCovers(ids) {
+  const out = new Set(); if (!ids.length) return out;
+  for (let i = 0; i < ids.length; i += 100) { const snaps = await db.getAll(...ids.slice(i, i + 100).map(id => COVERS().doc(id)), { fieldMask: ["createdAt"] }); snaps.forEach(d => { if (d.exists) out.add(d.id); }); }
+  return out;
+}
+async function publishCovers(ref, after, have) {
+  const ids = (after.nights || []).map(n => n.coverId).filter(id => id && have.has(id)).sort();
+  if (ids.join() !== (after.coverIds || []).slice().sort().join()) await ref.update({ coverIds: ids });
+  return ids;
+}
+async function paintWanted(ref, cityKey, t0) {
+  const snap = await ref.get(); if (!snap.exists) return 0; const after = snap.data();
+  const nights = (after.nights || []).filter(n => n.coverId), ids = [...new Set(nights.map(n => n.coverId))];
+  const have = await haveCovers(ids);
+  // Covers painted before this change live under the city doc; they still count (and serve) until the nights rotate,
+  // and the ones no current night uses are dropped.
+  const oldCol = ref.collection("covers"), oldIds = (await oldCol.select().get()).docs.map(d => d.id);
+  oldIds.forEach(id => { if (ids.includes(id)) have.add(id); });
+  await Promise.all(oldIds.filter(id => !ids.includes(id)).map(id => oldCol.doc(id).delete().catch(() => {})));
+  const wantsSnap = await db.doc("coverWants/" + cityKey).get(); const wants = wantsSnap.exists ? (wantsSnap.get("ids") || []) : [];
+  const todo = wants.filter(id => have.has(id) === false && ids.includes(id));
+  const today = dayKey(), used = after.paintDay === today ? (after.paints || 0) : 0, room = Math.max(0, PAINT_PER_DAY - used);
+  const batch = todo.slice(0, Math.min(PAINT_PER_RUN, room));
+  // Touch covers in use, so the cleanup keeps them.
+  const touch = [...have].filter(id => wants.includes(id)); if (touch.length) await Promise.all(touch.slice(0, 40).map(id => COVERS().doc(id).set({ lastUsedAt: Date.now() }, { merge: true }).catch(() => {})));
+  await publishCovers(ref, after, have);
+  if (!batch.length) { if (todo.length && !room) logger.info(`covers: ${cityKey} hit today's cap (${PAINT_PER_DAY})`); return 0; }
   const shrink = async dataUrl => { const b64 = String(dataUrl).split(",")[1]; const out = await sharp(Buffer.from(b64, "base64")).resize({ width: 720, withoutEnlargement: true }).jpeg({ quality: 74 }).toBuffer(); return "data:image/jpeg;base64," + out.toString("base64"); };
-  const paint = async n => {
-    // Each night gets its own photographic look, lit for when it happens, so the feed doesn't repeat one palette.
-    const h = parseInt(n.coverId.slice(0, 6), 16) || 0, hr = parseInt((n.start || "19:00").slice(0, 2), 10);
+  let painted = 0;
+  for (const id of batch) {
+    if (Date.now() - t0 > 420e3) break;
+    const n = nights.find(x => x.coverId === id);
+    // Each cover gets its own photographic look, lit for when the night happens, so the feed doesn't repeat one palette.
+    const h = parseInt(id.slice(0, 6), 16) || 0, hr = parseInt((n.start || "19:00").slice(0, 2), 10);
     const light = hr < 11 ? "soft morning daylight" : hr < 17 ? "bright natural daylight" : hr < 20 ? "early evening light" : "night, lit by the venue's own lights";
     const prompt = `${n.scene || n.title}, ${n.title || ""}. ${CURATE_STYLES[h % CURATE_STYLES.length]}, ${light}, real people and real places, natural true-to-life colors, not a cartoon`;
     let image = null;
@@ -628,37 +651,60 @@ async function paintCityCovers(ref, after, t0) {
       try { image = (await geminiGenerate(prompt)).image; }
       catch (err) { if (!/ 429/.test(err.message) || Date.now() - t0 > 400e3) { logger.warn("cover failed: " + err.message.slice(0, 120)); break; } await new Promise(r => setTimeout(r, 10e3 * 2 ** a + Math.random() * 5e3)); }
     }
-    if (image) { try { image = await shrink(image); } catch (e3) {} await col.doc(n.coverId).set({ image, title: n.title, createdAt: Date.now() }); have.add(n.coverId); }
-  };
-  let published = (after.coverIds || []).slice().sort().join();
-  const publish = async () => { const ids = nights.map(n => n.coverId).filter(id => have.has(id)).sort(); if (ids.join() !== published) { await ref.update({ coverIds: ids }); published = ids.join(); } };
-  await publish();
-  for (const n of todo) { if (Date.now() - t0 > 420e3) break; await paint(n); await publish(); }
-  // drop covers no night uses any more
-  const keep = new Set(nights.map(n => n.coverId));
-  await Promise.all([...have].filter(id => !keep.has(id)).map(id => col.doc(id).delete().catch(() => {})));
+    if (!image) continue;
+    try { image = await shrink(image); } catch (e3) {}
+    await COVERS().doc(id).set({ image, title: n.title, city: cityKey, createdAt: Date.now(), lastUsedAt: Date.now() }); have.add(id); painted++;
+    await ref.update({ paints: FieldValue.increment(1), paintDay: today }).catch(() => {});
+    await publishCovers(ref, { ...after, paints: used + painted }, have);
+  }
+  if (painted) logger.info(`covers: painted ${painted} for ${cityKey}`);
+  return painted;
 }
-// Every 20 minutes: nudge the one city missing the most covers (and not being painted right now) so its painter
-// runs again. Cheap when everything is painted: it reads the city docs and stops.
+// One painter per city at a time (a lease on the city doc); whoever finds it busy leaves it to the sweep.
+async function paintWithLease(ref, cityKey) {
+  const t0 = Date.now();
+  const got = await db.runTransaction(async t => { const d = await t.get(ref); if (!d.exists || (d.get("paintingUntil") || 0) > t0) return false; t.update(ref, { paintingUntil: t0 + 540e3 }); return true; });
+  if (!got) return;
+  try { await paintWanted(ref, cityKey, t0); } finally { await ref.update({ paintingUntil: 0 }).catch(() => {}); }
+}
+exports.onCuratedWritten = onDocumentWritten({ document: "curated/{cityKey}", region: "us-central1", timeoutSeconds: 540, memory: "1GiB" }, async e => {
+  const after = e.data && e.data.after && e.data.after.exists ? e.data.after.data() : null; if (!after) return;
+  const before = e.data.before && e.data.before.exists ? e.data.before.data() : null;
+  const nudged = !before || (after.coverNudge || 0) !== (before.coverNudge || 0);
+  if (before && coverIdsOf(before) === coverIdsOf(after) && !nudged) return;   // our own bookkeeping writes
+  await paintWithLease(e.data.after.ref, e.params.cityKey);
+});
+exports.onCoverWant = onDocumentWritten({ document: "coverWants/{cityKey}", region: "us-central1", timeoutSeconds: 540, memory: "1GiB" }, async e => {
+  const after = e.data && e.data.after && e.data.after.exists ? e.data.after.data() : null; if (!after) return;
+  const ids = (after.ids || []).filter(x => typeof x === "string" && /^[a-f0-9]{12}$/.test(x));
+  if (ids.length > WANT_KEEP) { await e.data.after.ref.set({ ids: ids.slice(-WANT_KEEP) }, { merge: true }); return; }   // trimmed; this write comes back around
+  const before = e.data.before && e.data.before.exists ? (e.data.before.get("ids") || []) : [];
+  if (before.length && ids.every(id => before.includes(id)) && ids.length === before.length) return;   // nothing new asked for
+  await paintWithLease(db.doc("curated/" + e.params.cityKey), e.params.cityKey);
+});
+// Every 20 minutes: retry the one city with the most covers still wanted and missing (a painter that hit the
+// rate limit or the lease). Cheap when everything asked for is painted.
 exports.curateCoverSweep = onSchedule({ schedule: "every 20 minutes", timeZone: "America/Chicago", timeoutSeconds: 60, memory: "256MiB" }, async () => {
-  const q = await db.collection("curated").get(), now = Date.now();
-  const missing = d => { const x = d.data(), have = new Set(x.coverIds || []); return ((x.nights || []).filter(n => n.coverId && !have.has(n.coverId))).length; };
+  const [q, w] = await Promise.all([db.collection("curated").get(), db.collection("coverWants").get()]), now = Date.now();
+  const wants = Object.fromEntries(w.docs.map(d => [d.id, d.get("ids") || []]));
+  const missing = d => { const x = d.data(), have = new Set(x.coverIds || []), ids = new Set((x.nights || []).map(n => n.coverId)); return (wants[d.id] || []).filter(id => ids.has(id) && !have.has(id)).length; };
   const best = q.docs.filter(d => (d.get("paintingUntil") || 0) < now && missing(d) > 0).sort((a, b) => missing(b) - missing(a))[0];
-  if (best) { logger.info(`cover sweep: ${best.id} missing ${missing(best)}`); await best.ref.update({ coverNudge: now }); }
+  if (best) { logger.info(`cover sweep: ${best.id} wants ${missing(best)} more`); await best.ref.update({ coverNudge: now }); }
 });
 exports.curateCover = onRequest({ region: "us-central1", invoker: "public", memory: "256MiB" }, async (req, res) => {
   const c = String(req.query.c || "").replace(/[^a-z0-9-]/g, "").slice(0, 60), id = String(req.query.id || "").replace(/[^a-f0-9]/g, "").slice(0, 12);
   if (!c || !id) { res.status(400).end(); return; }
-  const snap = await db.doc(`curated/${c}/covers/${id}`).get();
+  let snap = await COVERS().doc(id).get(); if (!snap.exists) snap = await db.doc(`curated/${c}/covers/${id}`).get();
   const img = snap.exists ? String(snap.data().image || "") : ""; const m = /^data:(image\/[a-z]+);base64,(.+)$/.exec(img);
   if (!m) { res.set("Cache-Control", "public, max-age=60").status(404).end(); return; }
   res.set("Content-Type", m[1]).set("Cache-Control", "public, max-age=2592000, immutable").send(Buffer.from(m[2], "base64"));
 });
 exports.curateNightly = onSchedule({ schedule: "30 3 * * *", timeZone: "America/Chicago", timeoutSeconds: 540, memory: "512MiB" }, async () => {
   const cities = await db.collection("curateCities").get();
-  const cutoff = Date.now() - 45 * 864e5;
+  const cutoff = Date.now() - 14 * 864e5;   // the app stamps seenAt when someone opens Curate or the picks tray in that city
+  let built = 0, skipped = 0;
   for (const doc of cities.docs) {
-    const c = doc.data(); if (!c.city || (c.updatedAt || 0) < cutoff) continue;
+    const c = doc.data(); if (!c.city || Math.max(c.seenAt || 0, c.updatedAt || 0) < cutoff) { skipped++; continue; } built++;
     try {
       const tz = c.tz || "America/Chicago";
       const now = new Date(); const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" });
@@ -666,6 +712,10 @@ exports.curateNightly = onSchedule({ schedule: "30 3 * * *", timeZone: "America/
       await buildAndCacheCity(c.city, tz, today, weekday, null, c.miles);
     } catch (err) { logger.warn("curate failed for " + c.city + ": " + err.message); }
   }
+  logger.info(`curateNightly: built ${built} cities, skipped ${skipped} nobody opened in two weeks`);
+  const stale = await COVERS().where("lastUsedAt", "<", Date.now() - 60 * 864e5).limit(200).get();
+  await Promise.all(stale.docs.map(d => d.ref.delete().catch(() => {})));
+  if (stale.size) logger.info(`curateNightly: dropped ${stale.size} covers unused for 60 days`);
 });
 
 exports.onPlanRequest = onDocumentCreated({ document: "planRequests/{id}", region: "us-central1", timeoutSeconds: 300, memory: "512MiB" }, async e => {

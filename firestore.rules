@@ -411,9 +411,15 @@ service cloud.firestore {
       allow read: if signedIn();
       match /covers/{coverId} { allow read: if signedIn(); }
     }
+    // The covers a city's people are looking at right now; the server paints just those.
+    match /coverWants/{cityKey} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.resource.data.keys().hasOnly(['ids', 'at'])
+        && request.resource.data.ids is list && request.resource.data.ids.size() <= 80;
+    }
     match /curateCities/{cityKey} {
       allow read: if signedIn();
-      allow create, update: if signedIn() && request.resource.data.keys().hasOnly(['key', 'city', 'tz', 'updatedAt', 'miles'])
+      allow create, update: if signedIn() && request.resource.data.keys().hasOnly(['key', 'city', 'tz', 'updatedAt', 'miles', 'seenAt'])
         && request.resource.data.city is string && request.resource.data.city.size() <= 60
         && (!('miles' in request.resource.data) || request.resource.data.miles in [5, 10, 25, 50]);
     }

@@ -2406,6 +2406,7 @@ function ensureCurated() {
   const city = (S.profile && S.profile.city || "").trim(), miles = myMiles(), key = curatedKey(city, miles); if (!key) return;
   if (curKey === key && curSub) return;
   if (curSub) curSub(); if (curCoverSub) curCoverSub(); curKey = key; S.curCovers = {}; S._curBuilding = false; S._curError = "";
+  stampCitySeen(key);
   // Show the last nights this phone saw right away; the live copy replaces them when it arrives.
   S.curated = null; try { const c = JSON.parse(LS.get("friendlyCurated:" + key) || "null"); if (c && c.nights) S.curated = c; } catch {}
 
@@ -2422,6 +2423,22 @@ function ensureCurated() {
   }, err => { S._curError = err.message; render(); });
 }
 // Painted covers are served one image at a time (cached by the phone) instead of riding along with the nights list.
+// Covers are painted on request: the nights on screen without one are asked for (once per session each), and
+// the live curated doc brings the new ids back as they're painted.
+let wantTimer = 0; const wantQueue = new Set(), wantSent = new Set();
+function wantCovers(nights) {
+  if (isDemo() || !curKey) return;
+  const have = (S.curated && S.curated.coverIds) || [];
+  nights.forEach(n => { const id = n && n.coverId; if (id && !have.includes(id) && !wantSent.has(curKey + id)) { wantSent.add(curKey + id); wantQueue.add(id); } });
+  if (!wantQueue.size || wantTimer) return;
+  wantTimer = setTimeout(() => { const ids = [...wantQueue].slice(0, 30); wantQueue.clear(); wantTimer = 0;
+    setDoc(doc(db, "coverWants", curKey), { ids: arrayUnion(...ids), at: Date.now() }, { merge: true }).catch(e => console.warn("cover wants:", e.message)); }, 400);
+}
+// Once a day per phone: this city still has someone looking, so the nightly refresh keeps it.
+function stampCitySeen(key) {
+  const k = "friendlyCitySeen:" + key, t = todayStr(); if (isDemo() || LS.get(k) === t) return;
+  LS.set(k, t); setDoc(doc(db, "curateCities", key), { seenAt: Date.now() }, { merge: true }).catch(() => {});
+}
 function coverUrl(n) { const ids = (S.curated && S.curated.coverIds) || []; return n && n.coverId && curKey && ids.includes(n.coverId) ? `${FN_BASE}/curateCover?c=${curKey}&id=${n.coverId}` : ""; }
 function nightWhen(n) { const d = evDate({ date: n.date }); return `${d.toLocaleDateString("en-US", { weekday: "short" })} · ${MONTHS[d.getMonth()]} ${d.getDate()}${n.start ? " · " + fmtTime(n.start) : ""}`; }
 // Nights saved before the server merged repeats can list one venue twice in a row; show it once.
@@ -2525,6 +2542,7 @@ function curateBody() {
   const fits = n => curFilter === "tonight" ? n.date === t : curFilter === "weekend" ? n.date >= wkFrom && n.date <= wkTo : (n.tags || []).includes(curFilter);
   const filtered = nights.filter(fits).sort((a, b) => ((b.src === curFilter) - (a.src === curFilter)) || (a.date + (a.start || "")).localeCompare(b.date + (b.start || "")));
   const all = filtered.length ? filtered : nights; let shown = S._curMore === curFilter ? all : all.slice(0, 4); const extra = all.length - shown.length;
+  wantCovers(shown);
   const want = S.route.q && S.route.q.night, picked = want && ((d && d.nights) || []).find(n => nightKey(n) === want);
   if (picked && !shown.includes(picked)) shown = [picked, ...shown];
   if (d) markCuratedSeen();
@@ -2616,7 +2634,7 @@ function wireCurate() {
 // The row on the Events tab: shows up when the week ahead is empty, or from Thursday on for the weekend.
 // Curate's picks as the rest of the app shows them: the tab carries the covers of the top picks and how many are new
 // since you last looked; the Events tab gets a tray of them from Thursday on (or when the week ahead is empty).
-const nightKey = n => String(n.coverId || ((n.title || "") + "|" + (n.date || "")));
+const nightKey = n => (n.title || "") + "|" + (n.date || "");
 // Nights still ahead: later days, or today's that haven't started yet (an hour's grace).
 const upcomingNights = () => { const t = todayStr(), now = new Date(), mins = now.getHours() * 60 + now.getMinutes();
   return ((S.curated && S.curated.nights) || []).filter(n => !n.date || n.date > t || (n.date === t && (!/^\d{2}:\d{2}$/.test(n.start || "") || +n.start.slice(0, 2) * 60 + +n.start.slice(3) > mins - 60))); };
@@ -2627,8 +2645,7 @@ function topPicks(max, min = 0) {
   const ns = upcomingNights(), t = todayStr(), dow = new Date().getDay(), weekendish = dow >= 4 || dow === 0;
   const wk = n => weekendish ? ((n.tags || []).includes("weekend") ? 0 : 1) : (n.date === t ? 0 : 1);
   const order = (a, b) => wk(a) - wk(b) || (a.date + (a.start || "")).localeCompare(b.date + (b.start || ""));
-  const withCover = ns.filter(n => coverUrl(n)).sort(order).slice(0, max);
-  return withCover.length >= min ? withCover : [...withCover, ...ns.filter(n => !coverUrl(n)).sort(order).slice(0, min - withCover.length)];
+  return ns.slice().sort(order).slice(0, max);
 }
 const curSeen = () => { try { return new Set(JSON.parse(LS.get("friendlyCurSeen") || "[]")); } catch { return new Set(); } };
 function markCuratedSeen() {
@@ -2638,7 +2655,7 @@ function markCuratedSeen() {
 }
 function curateTab(on) {
   const picks = topPicks(3), seen = curSeen(), fresh = upcomingNights().filter(n => !seen.has(nightKey(n))).length;
-  const cov = picks.map(coverUrl);
+  const cov = picks.map(coverUrl).filter(Boolean);
   const stack = cov.length ? `<span class="cur-stack" aria-hidden="true">${cov.length > 2 ? `<img class="s0" src="${esc(cov[1])}" alt="">` : ""}${cov.length > 1 ? `<img class="s1" src="${esc(cov[cov.length > 2 ? 2 : 1])}" alt="">` : ""}<span class="cur-front">${cov.map((u, i) => `<img src="${esc(u)}" alt="" style="animation-delay:${-i * 3}s${cov.length === 1 ? ";animation:none" : ""}">`).join("")}</span>${fresh && !on ? `<span class="cur-new">${fresh > 9 ? "9+" : fresh}</span>` : ""}</span>` : "";
   return `<button class="tab tab-curate ${on ? "on" : ""} ${cov.length ? "has-picks" : ""}" data-go="#/curate" aria-label="${CURATE_LABEL}${fresh ? `, ${fresh} new pick${fresh > 1 ? "s" : ""}` : ""}">${stack}<span class="curate-lbl">${CURATE_LABEL}<i class="spark">✦</i></span>${fresh && !on && !cov.length ? `<span class="cur-new">${fresh > 9 ? "9+" : fresh}</span>` : ""}</button>`;
 }
@@ -2656,7 +2673,8 @@ function curateTray(upcoming, first) {
   if (isDemo() || !(S.profile.city || "").trim()) return "";
   const t = todayStr(), dow = new Date().getDay(), weekendish = dow >= 4 || dow === 0;
   if (LS.get("friendlyTrayHidden2") === t) return "";
-  const picks = topPicks(6, 3); if (!picks.some(coverUrl)) return needIdeaCard(upcoming);
+  const picks = topPicks(6); if (!picks.length) return needIdeaCard(upcoming);
+  wantCovers(picks.slice(0, 4));
   const label = !weekendish && picks[0].date === t ? "tonight" : weekendish && picks.every(n => (n.tags || []).includes("weekend")) ? "this weekend" : "the week ahead";
   return `<section class="cur-tray ${first ? "first" : ""}" aria-label="Dot's picks"><span class="ptr" aria-hidden="true"></span>
     <div class="cur-tray-head">${dot("thinking", 22)}<b>Dot's picks for ${label}</b><button type="button" class="link-btn" data-go="#/curate">See all</button><button type="button" class="tray-x" data-hide-tray="1" aria-label="Hide until tomorrow">✕</button></div>
@@ -3633,7 +3651,14 @@ async function bestPhoto(ev, p) {
 async function savePhoto(ev, p, btn) {
   if (btn) btn.disabled = true;
   try {
-    const src = await bestPhoto(ev, p), blob = await (await fetch(src)).blob();
+    const src = await bestPhoto(ev, p);
+    // Android's web view has no share sheet and ignores download links, so the original opens in Chrome (press and
+    // hold there to download). Photos without an original wait for the next Android app update, which saves natively.
+    if (NATIVE && IS_ANDROID) {
+      if (/^https?:/.test(src)) { window.open(src, "_blank"); toast("Opened in your browser. Press and hold the photo to download it."); return; }
+      toast("Saving this photo on Android is coming in the next app update."); return;
+    }
+    const blob = await (await fetch(src)).blob();
     const ext = /png/.test(blob.type) ? "png" : /heic|heif/.test(blob.type) ? "heic" : "jpg";
     const file = new File([blob], `${String(ev.title || "friendly").replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "friendly"}-${p.id.slice(0, 6)}.${ext}`, { type: blob.type || "image/jpeg" });
     if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: ev.title || "Photo" }); return; } catch (e) { if (e.name === "AbortError") return; } }
