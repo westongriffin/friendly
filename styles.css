@@ -1342,3 +1342,9 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 .mascot-takes{text-align:left;padding:4px 14px}
 .mascot-takes div{padding:9px 0;line-height:1.4;border-top:1px solid var(--line)}
 .mascot-takes div:first-child{border-top:0}
+/* Coral's arm reaches past the pair's drawing box (more so mid-wave): let it show instead of clipping. The pair's
+   drop shadow (a CSS filter) crops to the element's box, so the box gets invisible room around the drawing; that room
+   lets taps through to the faces underneath. */
+.fs-pair-svg,.mascot-card .blip,.fs-open svg{overflow:visible}
+.fs-pair{padding:16px 22px 4px;margin:-42px -22px -4px;pointer-events:none}
+.fs-pair .fsp-l,.fs-pair .fsp-r,.fs-pair .coral-pop{pointer-events:auto}
