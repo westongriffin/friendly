@@ -172,17 +172,43 @@ const RECEIPT_MODEL = "gemini-2.5-flash";
 // against the printed subtotal and total; if it doesn't add up, the model is shown exactly what is off and asked
 // again (twice at most), and the reading that adds up best wins.
 const RECEIPT_PROMPT = `Read this receipt and return every charge on it.
-- items: each purchased item with the amount it adds to the bill. A price in the right-hand price column is its own charge, even when it sits on an indented modifier or add-on line under an item (for example "Margarita $10.00" under a drink, or "Extra shot 0.75"): add that amount to the item it belongs to. A price shown in parentheses inside an item's description (for example "House Milk ($0.26)") is usually already included in that item's price: do not add it again. Merge quantity lines into one item with the extended price. Apply per-line discounts.
+- items: one entry per printed line item, in the order printed.
+  - qty: the quantity printed before the item's name (for example the 2 in "2 Creste di Gallo $34.00"); 0 when the line has no quantity of its own.
+  - name: the item's name without the quantity, written the way a menu would (Title Case, not ALL CAPS).
+  - price: the amount in the price column for that line, which is the line's total (quantity × unit price). If only a unit price is printed next to a quantity, multiply.
+  - A line with no quantity of its own that sits under an item (an add-on or modifier like "Add Truffle $3.00" under "Side of Fries") keeps qty 0 and its own price; it is still listed.
+  - A discount or comp line (a minus sign like "- $8.00", or a percent off like "Food- Celebration (100%)") is listed where it is printed with a NEGATIVE price (-8 for "- $8.00").
+  - A price shown in parentheses inside an item's description (for example "House Milk ($0.26)") is usually already included in that item's price: do not add it again.
 - fees: every surcharge, service charge, credit card fee, delivery, kitchen, health, or similar fee, each with its name and amount. Never fold a fee into tax.
-- tax: sales tax only. tip: gratuity or tip, including an automatic gratuity (0 if none is printed).
-- subtotal and total exactly as printed, and the merchant name.
-Check your work before answering: the items must add up to the printed subtotal, and subtotal + tax + fees + tip must equal the printed total. Prices on long receipts can sit a line above or below their item; use the subtotal to tell which line a price belongs to. Amounts are dollars as numbers. Ignore payment, change, card, and loyalty lines.`;
+- tax: all sales taxes added together (for example a state tax plus a local tax). tip: gratuity or tip, including an automatic gratuity (0 if none is printed).
+- subtotal: the subtotal AFTER discounts (when both a pre-discount subtotal and a subtotal are printed, use the second). total exactly as printed. merchant: the restaurant or store name.
+Check your work before answering: the items (discounts included as negatives) must add up to the subtotal, and subtotal + tax + fees + tip must equal the printed total. Prices on long receipts can sit a line above or below their item; use the subtotal to tell which line a price belongs to. Amounts are dollars as numbers. Ignore payment, change, card, and loyalty lines.`;
 const RECEIPT_SCHEMA = { type: "OBJECT", required: ["items"], properties: {
   merchant: { type: "STRING" },
-  items: { type: "ARRAY", items: { type: "OBJECT", required: ["name", "price"], properties: { name: { type: "STRING" }, price: { type: "NUMBER" } } } },
+  items: { type: "ARRAY", items: { type: "OBJECT", required: ["name", "price"], properties: { qty: { type: "NUMBER" }, name: { type: "STRING" }, price: { type: "NUMBER" } } } },
   fees: { type: "ARRAY", items: { type: "OBJECT", required: ["name", "amount"], properties: { name: { type: "STRING" }, amount: { type: "NUMBER" } } } },
   subtotal: { type: "NUMBER" }, tax: { type: "NUMBER" }, tip: { type: "NUMBER" }, total: { type: "NUMBER" }
 } };
+// Turns the reading into lines people can pick from: "2× Creste di Gallo"; an add-on (no quantity of its own, under
+// an item, on a receipt that prints quantities) joins the item above ("Side of Fries + Truffle"); a discount comes
+// off the item right above it (a 100% comp makes that item free) or, when there's nothing to take it from, becomes
+// a negative fee that splits in proportion like tax. Zero-price lines left over are dropped.
+function tidyReceipt(d) {
+  const raw = (d.items || []).map(i => ({ qty: Math.max(0, Math.round(Number(i.qty) || 0)), name: String(i.name || "Item").trim(), price: Number(i.price) || 0 }));
+  const printsQty = raw.filter(i => i.qty > 0).length >= Math.max(2, raw.length / 2), out = [], fees = [...(d.fees || [])];
+  for (const i of raw) {
+    const prev = out[out.length - 1];
+    if (i.price < 0) {
+      if (prev && prev.price + i.price >= -0.005) { prev.price = Math.round((prev.price + i.price) * 100) / 100; prev.note = i.name; }
+      else fees.push({ name: i.name || "Discount", amount: i.price });
+      continue;
+    }
+    if (printsQty && i.qty === 0 && prev && i.price >= 0) { prev.price = Math.round((prev.price + i.price) * 100) / 100; prev.name += " + " + i.name.replace(/^(add|extra|sub)\s+/i, ""); continue; }
+    out.push({ ...i });
+  }
+  d.items = out.filter(i => i.price > 0 || /free|comp/i.test(i.note || "")).map(i => ({ name: (i.qty > 1 ? i.qty + "× " : "") + i.name + (i.price === 0 && i.note ? " (comped)" : ""), price: i.price, qty: i.qty || 1 }));
+  d.fees = fees; return d;
+}
 const toC = v => Math.round((Number(v) || 0) * 100);
 function receiptGaps(d) {
   const items = (d.items || []).reduce((n, i) => n + toC(i.price), 0), fees = (d.fees || []).reduce((n, f) => n + toC(f.amount), 0);
@@ -215,6 +241,7 @@ async function readReceipt(dataUrl) {
     if (ng.off < g.off && Array.isArray(next.items) && next.items.length) { best = next; g = ng; }
   }
   if (!Array.isArray(best.items) || !best.items.length) throw new Error("no line items found");
+  tidyReceipt(best);
   best.check = { itemGap: g.itemGap, totalGap: g.totalGap, tries };
   logger.info(`receipt read in ${tries} tr${tries > 1 ? "ies" : "y"}, off by ${g.off} cents`);
   return best;

@@ -927,7 +927,7 @@ function subscribeAll(u) {
   add(on("expenses", query(collection(db, "expenses"), where("involved", "array-contains", u.uid)), snap => {
     S.expenses = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }]));
     S.nameHints = S.nameHints || new Map(); for (const x of S.expenses.values()) for (const [k, n] of Object.entries(x.guestNames || {})) if (n) S.nameHints.set(k, n);
-    renderSoon();
+    refreshEvMoney(); renderSoon();
   }));
   add(on("settlements", query(collection(db, "settlements"), where("involved", "array-contains", u.uid)), snap => {
     S.settlements = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); renderSoon();
@@ -954,7 +954,7 @@ function subscribeAll(u) {
   // open, a change redraws only that page so taps from everyone show up without the screen jumping.
   add(on("receiptSplits", query(collection(db, "receiptSplits"), where("uids", "array-contains", u.uid)), snap => {
     const was = S._splitsKey; S.splits = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); S.splitsReady = true;
-    S._splitsKey = [...S.splits.values()].map(t => t.id + ":" + t.status).sort().join();
+    S._splitsKey = [...S.splits.values()].map(t => t.id + ":" + t.status).sort().join(); refreshEvMoney();
     if (S.route.name === "pick" && el("pickRoot")) patchPick(); else if (S.route.name === "pick" || S.route.name === "money" || was !== S._splitsKey) renderSoon();
   }));
   // activity feed (written by Cloud Functions for everything I'd be notified about)
@@ -1077,7 +1077,7 @@ function avatar(uid, cls = "") { const info = S.contacts.get(uid) || {}; const n
 // that links elsewhere opens the profile instead. Skipped inside pickers, dialogs, and your own chip.
 document.addEventListener("click", e => {
   const a = e.target.closest && e.target.closest("[data-pf]"); if (!a || !S.user) return;
-  if (a.closest("#appDialog, .inv-hit, label.cbox, .me-chip, .topbar, [data-choose], .tour-card, .mini-guests, .dm-row")) return;
+  if (a.closest("#appDialog, .inv-hit, label.cbox, .me-chip, .topbar, [data-choose], .tour-card, .mini-guests, .dm-row, .pk-people, .pk-item, .split-who")) return;
   const uid = a.dataset.pf; if (!uid || uid === S.user.uid) return;
   e.preventDefault(); e.stopPropagation(); openProfileDialog(uid);
 }, true);
@@ -2191,7 +2191,7 @@ const INVITES_SHORTCUT_URL = "https://www.icloud.com/shortcuts/96d0a800f5d6409c9
 const AUTO_SEND = NATIVE && !IS_ANDROID && !!INVITES_SHORTCUT_URL;
 const autoSendReady = v => { try { if (v === undefined) return LS.get("friendlyAutoSend") === "1"; if (v) LS.set("friendlyAutoSend", "1"); else LS.remove("friendlyAutoSend"); } catch { return false; } };
 const shortcutRunUrl = (numbers, body) => "shortcuts://run-shortcut?name=" + encodeURIComponent("Friendly Invites") + "&input=text&text=" + encodeURIComponent(JSON.stringify({ m: body, p: numbers.map(n => n.replace(/[^+\d]/g, "")) }));
-function openTextInviteDialog(texted, text, where = "event") {
+function openTextInviteDialog(texted, text, where = "event", title = "Text your invite") {
   let idx = -1, active = false, wasHidden = false;
   // auto-send states: "offer" (setup card), "added" (back from the Add Shortcut screen), "ready", "sent", "off"
   let auto = AUTO_SEND && texted.length > 1 ? (autoSendReady() ? "ready" : "offer") : "off", pending = null;
@@ -2209,13 +2209,13 @@ function openTextInviteDialog(texted, text, where = "event") {
     : auto === "sent" ? `<div class="sent-banner">✓ Sent to all ${n} from your number</div><p class="muted sm" style="margin:6px 0 0">They're in your Messages too, so replies come straight to you. <button type="button" class="linkish" id="autoUndo">Didn't go through? Send one at a time</button></p>`
     : "";
   const oneAtATime = auto === "ready" || auto === "added" || auto === "offer";
-  dialog(`<h3>Text your invite</h3>
+  dialog(`<h3>${esc(title)}</h3>
     <p class="muted" style="margin-top:-6px">${auto === "off" ? "Edit the message if you want, then send it to everyone one at a time -- iPhone only lets you send from Messages yourself, so this walks you through each person: it opens Messages, you tap Send, and coming back here opens the next one." : "Edit the message if you want, then send it to everyone. The texts come from your own number."}</p>
     <label class="field"><span>Message</span><textarea id="txtMsg" maxlength="480">${esc(text)}</textarea></label>
     <div id="autoBox">${autoHtml()}</div>
     <button type="button" class="btn ${oneAtATime ? "" : "primary"}" id="textAll" style="width:100%;margin:10px 0 12px">💬 Send to all ${n}, one at a time${oneAtATime ? " instead" : ""}</button>
     <div class="stack" id="txtRows">${rowsHtml()}</div>
-    <p class="muted sm" style="margin:10px 0 0">${{ friends: `You can always come back and text stragglers from <b>Friends › Invited</b>.`, group: `You can always come back and text stragglers from the group's <b>Invited</b> list or <b>Friends › Invited</b>.`, event: `You can always come back and text stragglers from the event's <b>Guest list</b> or <b>Friends › Invited</b>.` }[where]}</p>`, null, null);
+    <p class="muted sm" style="margin:10px 0 0">${{ expense: `You can text anyone again from the expense: tap <b>Text</b> next to their name.`, friends: `You can always come back and text stragglers from <b>Friends › Invited</b>.`, group: `You can always come back and text stragglers from the group's <b>Invited</b> list or <b>Friends › Invited</b>.`, event: `You can always come back and text stragglers from the event's <b>Guest list</b> or <b>Friends › Invited</b>.` }[where]}</p>`, null, null);
   const currentText = () => el("txtMsg").value;
   const renderRows = () => { const box = el("txtRows"); if (box) box.innerHTML = rowsHtml(); wireRowButtons(); };
   function renderAuto() {
@@ -3304,6 +3304,28 @@ function planCardHtml(ev, plain) {
         <span class="stop-txt"><b>${esc(x.name || x.place)}${state === "cur" ? ` <span class="stop-pill now">Now</span>` : state === "next" ? ` <span class="stop-pill">Up next</span>` : ""}</b>${x.name && x.place ? `<small>${esc(placeLine(x))}</small>` : ""}${x.note ? `<small class="stop-note">${esc(x.note)}</small>` : ""}</span>
         ${(x.place || x.name) && state !== "done" ? `<a class="stop-dir" href="${esc(stopMapUrl(x))}" target="_blank" rel="noopener">Directions</a>` : ""}</div>`; }).join("")}</div></div>`;
 }
+// The event's money in one place: receipts people are still picking from, the event's expenses with your share,
+// and Add expense. Refreshed in place when expenses or shared receipts change.
+function evMoneyInner(ev) {
+  const me = myUid(), picks = [...(S.splits || new Map()).values()].filter(t => t.eventId === ev.id && t.status === "open").sort((a, b) => b.createdAt - a.createdAt);
+  const xs = [...S.expenses.values()].filter(x => x.eventId === ev.id).sort((a, b) => b.createdAt - a.createdAt), total = xs.reduce((n, x) => n + (x.amountCents || 0), 0);
+  const shareOf = x => x.shares ? (x.shares[me] || 0) : ((x.split || []).includes(me) ? Math.round(x.amountCents / x.split.length) : 0);
+  const row = (go, title, sub, amt) => `<button type="button" class="ev-x-row" data-evgo="${esc(go)}"><span class="ev-x-ico">🧾</span><span class="ev-x-main"><b>${esc(title)}</b><span class="muted-th sm">${sub}</span></span><span class="ev-x-amt">${amt}</span></button>`;
+  return `<div class="glass-head">Expenses <span>${total ? fmt$(total) + " spent" : ""}</span></div>
+    ${picks.map(t => { const boss = t.createdBy === me, left = pickLeft(t).length; return row("#/pick/" + t.id, t.desc || "Receipt", boss ? (left ? `${left} line${left === 1 ? "" : "s"} nobody has picked` : "Ready to finish") : (t.done || {})[me] ? "You're done · tap to change" : "<b>Pick what you had</b>", fmt$(splitTotal(t))); }).join("")}
+    ${xs.map(x => row("#/x/" + x.id, x.desc || "Expense", (x.paidBy === me ? "You paid" : esc(first(nameOf(x.paidBy))) + " paid") + (x.paidBy !== me && shareOf(x) ? " · your share " + fmt$(shareOf(x)) : ""), fmt$(x.amountCents))).join("")}
+    ${picks.length || xs.length ? "" : `<p class="muted-th sm" style="margin:0 0 10px">Nothing yet. Add what you spent and it splits with the crew, or scan the receipt and let everyone pick their own.</p>`}
+    <button type="button" class="btn-th ev-x-add" data-expense>＋ Add expense</button>`;
+}
+function wireEvMoney(ev) {
+  const card = el("moneyCard"); if (!card) return;
+  card.querySelectorAll("[data-evgo]").forEach(b => b.onclick = () => go(b.dataset.evgo));
+  const add = card.querySelector("[data-expense]"); if (add) add.onclick = () => openExpense(ev.id, ev.invitedUids, ev.groupId || null);
+}
+function refreshEvMoney() {
+  if (S.route.name !== "event") return; const card = el("moneyCard"), ev = S.events.get(S.route.id); if (!card || !ev) return;
+  card.innerHTML = evMoneyInner(ev); wireEvMoney(ev);
+}
 function renderEventPage(root, id) {
   const ev = S.events.get(id);
   // A background redraw with nothing new for this page: keep what's on screen (its own listeners keep the
@@ -3393,7 +3415,6 @@ function eventInner(ev) {
       ${manage && u !== me && u !== ev.hostId ? `<button class="approve setrsvp" data-setrsvp="${u}" title="Mark their RSVP" aria-label="Mark ${esc(first(nameOf(u)))}'s RSVP">✎</button><button class="approve remove" data-removeguest="${u}" title="Remove from guest list">✕</button>` : ""}</span>`).join("")}</div></div>`;
   }).join("");
 
-  const cost = [...S.expenses.values()].filter(x => x.eventId === ev.id).reduce((t, x) => t + x.amountCents, 0);
 
   return `
   <button class="ev-back" data-go="#/">‹</button>
@@ -3418,6 +3439,7 @@ function eventInner(ev) {
     <button type="button" class="jump-chip" data-jump="pollsCard">Polls</button>
     <button type="button" class="jump-chip" data-jump="playlistCard">Playlist</button>
     <button type="button" class="jump-chip" data-jump="photosCard">Photos</button>
+    <button type="button" class="jump-chip" data-jump="moneyCard">Expenses</button>
     <button type="button" class="jump-chip" data-jump="wall">Wall</button>
   </div>
 
@@ -3449,12 +3471,12 @@ function eventInner(ev) {
   <div class="ev-card-glass" id="pollsCard">${pollsInner(ev)}</div>
   <div class="ev-card-glass" id="playlistCard">${playlistInner(ev)}</div>
   <div class="ev-card-glass" id="photosCard">${photosInner(ev)}</div>
+  <div class="ev-card-glass" id="moneyCard">${evMoneyInner(ev)}</div>
   <div class="ev-card-glass" id="wall">${wallInner(ev)}</div>
 
   <div class="ev-actions">
     <button class="btn-th" data-share>Share invite</button>
     <button class="btn-th" data-cal>Add to calendar</button>
-    <button class="btn-th" data-expense>${cost ? fmt$(cost) + " · " : ""}Expenses</button>
     ${manage ? `<button class="btn-th" data-edit>Edit</button><button class="btn-th" data-dup>Duplicate</button><button class="btn-th danger" data-del>Delete</button>` : ""}
   </div>
   <div class="ev-foot">Friendly</div>`;
@@ -3889,7 +3911,7 @@ function wireEventPage(ev) {
   document.querySelectorAll("[data-uninvitephone]").forEach(b => b.onclick = () => uninviteEventPhone(ev, b.dataset.uninvitephone));
   const join = $("[data-join]"); if (join) join.onclick = () => joinViaLink(ev, join);
   const cal = $("[data-cal]"); if (cal) cal.onclick = () => downloadIcs(ev);
-  const exp = $("[data-expense]"); if (exp) exp.onclick = () => openExpense(ev.id, ev.invitedUids, ev.groupId || null);
+  wireEvMoney(ev);
   const edit = $("[data-edit]"); if (edit) edit.onclick = () => editEvent(ev);
   const del = $("[data-del]"); if (del) del.onclick = () => delEvent(ev);
   wireWall(ev);
@@ -4325,6 +4347,8 @@ function expenseBody(id) {
   <div class="group-hero"><span class="li" style="width:52px;height:52px;font-size:24px">🧾</span>
     <div><h1>${esc(x.desc || "Expense")}</h1><div class="muted">${fmt$(x.amountCents)} · ${esc(nameOf(x.paidBy))} paid${ev ? " · " + esc(ev.title) : ""} · ${new Date(x.createdAt).toLocaleDateString()}</div></div></div>
   ${x.receipt ? `<div class="btnrow" style="margin-top:12px"><button class="btn small" id="viewReceipt">🧾 View receipt</button></div>` : ""}
+  ${x.addedBy !== myUid() ? "" : Object.keys(x.paid || {}).some(u => u !== x.paidBy) ? `<p class="muted sm" style="margin-top:10px">Someone has already paid, so this can't be changed. Mark their payment unpaid first if it needs fixing.</p>`
+    : `<div class="btnrow" style="margin-top:12px"><button class="btn small" id="xReopen">${(x.items || []).length ? "✏️ Reopen to make changes" : "✏️ Change who's splitting"}</button></div>`}
   <div class="section-head"><h2>${x.shares ? "Who owes what" : `Split ${n} way${n > 1 ? "s" : ""}`}</h2></div>
   <div class="card">${(x.split || []).map(u => {
     const me = myUid(), cents = x.shares ? (x.shares[u] || 0) : share, paid = (x.paid || {})[u], payer = u === x.paidBy, canManage = me === x.paidBy || me === x.addedBy;
@@ -4368,6 +4392,7 @@ function wireExpensePage() {
   const x = S.expenses.get(S.route.id); if (!x) return;
   const pseudo = { id: x.id, _col: ["expenses", x.id], _manage: false, title: x.desc };
   if (el("viewReceipt")) el("viewReceipt").onclick = () => lightbox(x.receipt);
+  if (el("xReopen")) el("xReopen").onclick = () => (x.items || []).length ? reopenAsPick(x) : changeSplitPeople(x);
   const share = u => x.shares ? (x.shares[u] || 0) : Math.round(x.amountCents / ((x.split || []).length || 1));
   const mine = share(myUid());
   document.querySelectorAll("[data-xvenmo]").forEach(b => b.onclick = () => payVenmo(x.paidBy, mine, "pay", x.id));
@@ -4503,7 +4528,17 @@ const payerOptions = (people, sel) => { const opt = ([u, i]) => `<option value="
 // Who an expense can be between. From an event: that event's guests, whether or not you share a group with them
 // (their names travel with the event), Going first and pre-checked; from a group: its members; from Money:
 // everyone you know. Anyone else you know is offered under "More people", collapsed.
-function expensePeople(eventId, restrict) {
+// People not on Friendly yet who belong on an expense: the event's and group's phone invites and friends you
+// texted. They're "ph:+1…" ids; when they sign up with that number the server swaps in their account (onUserPhone).
+function phonePeople(eventId, groupId) {
+  const out = new Map(), add = (e164, name) => { if (e164 && !out.has("ph:" + e164)) out.set("ph:" + e164, { name: name || fmtPhone(e164) }); };
+  const ev = eventId ? S.events.get(eventId) : null, g = groupId ? S.groups.get(groupId) : ev && ev.groupId ? S.groups.get(ev.groupId) : null;
+  if (ev) (ev.invitedPhones || []).forEach(p => add(p, (ev.invitedPhoneNames || {})[p]));
+  if (g) (g.invitedPhones || []).forEach(p => add(p, (g.invitedPhoneNames || {})[p]));
+  invitedByText().forEach(r => add(r.phone, r.name));
+  return out;
+}
+function expensePeople(eventId, restrict, groupId) {
   const me = myUid(), info = u => S.contacts.get(u) || { name: nameOf(u) };
   const ev = eventId ? S.events.get(eventId) : null;
   let main = [], checked = new Set(), tags = new Map();
@@ -4511,13 +4546,15 @@ function expensePeople(eventId, restrict) {
     const r = ev.rsvps || {}, rank = u => u === me ? 0 : r[u] === "going" ? 1 : r[u] === "maybe" ? 2 : !r[u] ? 3 : 4;
     main = [...new Set([me, ...(ev.invitedUids || [])])].sort((x, y) => rank(x) - rank(y)).map(u => [u, info(u)]);
     main.forEach(([u]) => { if (u === me || r[u] === "going") checked.add(u); else tags.set(u, r[u] === "no" ? "can't go" : r[u] === "maybe" ? "maybe" : r[u] ? r[u] : "no answer"); });
+    // guests invited by text who said they're going are part of the crew too
+    for (const p of ev.invitedPhones || []) { const id = "ph:" + p; main.push([id, { name: (ev.invitedPhoneNames || {})[p] || fmtPhone(p) }]); if (phoneStatus(ev, p) === "going") checked.add(id); }
   } else if (restrict) {
     main = [...new Set([me, ...restrict])].map(u => [u, info(u)]); main.forEach(([u]) => checked.add(u));
   } else {
     main = [...S.contacts.entries()];   // from the Money tab: nobody is picked for you
   }
   const inMain = new Set(main.map(([u]) => u));
-  const others = [...S.contacts.entries()].filter(([u]) => !inMain.has(u));
+  const others = [...S.contacts.entries(), ...phonePeople(eventId, groupId).entries()].filter(([u]) => !inMain.has(u));
   return { main, others, checked, tags };
 }
 // "Split between": who's in (faces, names, and each person's share), quick picks for the usual crowds, and a
@@ -4539,10 +4576,10 @@ function wireSplit(pp, eventId, restrict) {
   const ensure = u => { if (!inputs().some(i => i.value === u)) el("xSplit").insertAdjacentHTML("beforeend", `<input type="checkbox" name="spl" value="${esc(u)}">`); };
   const sel = () => new Set(splitPicked());
   const face = (u, cls = "xs") => isGuest(u) ? `<span class="avatar ${cls} texted-av">${esc(initials(nm(u)).slice(0, 1))}</span>` : avatar(u, cls);
-  const tag = u => isGuest(u) ? "not on Friendly" : "";   // RSVPs show as the list's sections
+  const tag = u => isGuest(u) ? fmtPhone(u.slice(3)) + " · gets a text" : "";   // RSVPs show as the list's sections
   const quick = [];
   if (ev) {
-    const going = [me, ...[...inv].filter(u => r[u] === "going")], maybe = [...inv].filter(u => r[u] === "maybe");
+    const going = [me, ...[...inv].filter(u => r[u] === "going"), ...(ev.invitedPhones || []).filter(p => phoneStatus(ev, p) === "going").map(p => "ph:" + p)], maybe = [...inv].filter(u => r[u] === "maybe");
     quick.push(["Everyone going", going]); if (maybe.length) quick.push(["Going + maybe", [...going, ...maybe]]);
   } else if (restrict) quick.push(["Everyone here", [me, ...restrict]]);
   else for (const g of S.groups.values()) quick.push([`${groupMini(g)} ${esc(g.name)}`, [me, ...(g.memberUids || [])]]);
@@ -4559,11 +4596,12 @@ function wireSplit(pp, eventId, restrict) {
   };
   const open = () => {
     const inner = document.querySelector("#appDialog .dlg-inner"); if (!inner || el("spPanel")) return;
-    const s = sel(), others = inputs().map(i => i.value).filter(u => u !== me), az = us => us.sort((a, b) => nm(a).localeCompare(nm(b)));
+    const s = sel(), all = inputs().map(i => i.value).filter(u => u !== me), others = all.filter(u => !isGuest(u)), guests = all.filter(isGuest), az = us => us.sort((a, b) => nm(a).localeCompare(nm(b)));
     const secs = ev ? [["Going", others.filter(u => inv.has(u) && r[u] === "going")], ["Maybe", others.filter(u => inv.has(u) && r[u] === "maybe")], ["No answer yet", others.filter(u => inv.has(u) && !r[u])], ["Can't go", others.filter(u => inv.has(u) && r[u] && !["going", "maybe"].includes(r[u]))], ["Others you know", others.filter(u => !inv.has(u))]]
       : restrict ? [["In this group", others.filter(u => restrict.includes(u))], ["Others you know", others.filter(u => !restrict.includes(u))]]
       : others.some(u => s.has(u)) ? [["Splitting", others.filter(u => s.has(u))], ["Everyone else", others.filter(u => !s.has(u))]] : [["People you know", others]];
-    const row = u => `<button type="button" class="sp-row ${s.has(u) ? "on" : ""}" data-spu="${esc(u)}" data-find="${esc(nm(u).toLowerCase())}">${face(u, "")}<span class="sp-nm"><b>${esc(nm(u))}</b>${tag(u) ? `<span class="muted sm">${esc(tag(u))}</span>` : ""}</span><span class="sp-check" aria-hidden="true"></span></button>`;
+    secs.push(["Not on Friendly yet", guests]);   // they get a text to join and settle up
+    const row = u => `<button type="button" class="sp-row ${s.has(u) ? "on" : ""}" data-spu="${esc(u)}" data-find="${esc((nm(u) + " " + (isGuest(u) ? u.slice(3) : "")).toLowerCase())}">${face(u, "")}<span class="sp-nm"><b>${esc(nm(u))}</b>${tag(u) ? `<span class="muted sm">${esc(tag(u))}</span>` : ""}</span><span class="sp-check" aria-hidden="true"></span></button>`;
     inner.classList.add("sp-open");
     inner.insertAdjacentHTML("beforeend", `<div class="split-panel" id="spPanel">
       <div class="sp-top"><h3 style="margin:0">Who's splitting?</h3><span class="muted sm" id="spCount"></span></div>
@@ -4592,6 +4630,15 @@ function wireSplit(pp, eventId, restrict) {
   S._splitPaint = paint; paint();
   return { add: (id, name) => { names.set(id, name); ensure(id); inputs().find(i => i.value === id).checked = true; paint(); } };
 }
+// After an expense with people not on Friendly: text them to join and settle up (their share waits for them).
+function textSettleUp(rec) {
+  const guests = [...new Set([...(rec.split || []), ...(rec.involved || [])])].filter(u => isGuest(u) && u !== rec.paidBy); if (!guests.length) return;
+  const ev = rec.eventId ? S.events.get(rec.eventId) : null, what = ev ? ev.title : rec.merchant || rec.desc || "our tab";
+  const name = u => (rec.guestNames || {})[u] || nameHint(u) || fmtPhone(u.slice(3)), payer = rec.paidBy === myUid() ? first(S.profile.name || "me") : first(nameOf(rec.paidBy));
+  const hi = guests.length === 1 && !/^\(?\d/.test(name(guests[0])) ? `Hey ${first(name(guests[0]))}!` : "Hey!";
+  const text = `${hi} Join Friendly to settle up with ${payer} for ${what}: https://officialfriendly.com (free). Sign up with this number and your share will be waiting.`;
+  setTimeout(() => openTextInviteDialog(guests.map(u => ({ name: name(u), e164: u.slice(3) })), text, "expense", "Text them to settle up"), 400);
+}
 // Everyone who can appear in a payback: people you know plus anyone on one of your expenses (a guest who joined
 // an event by link, say).
 function moneyPeople(...must) {
@@ -4609,7 +4656,7 @@ function matchGroupId(involved) {
 }
 const inGroup = (x, g) => x.groupId === g.id || (!x.groupId && (x.involved || []).length >= 2 && [...new Set(x.involved)].sort().join("|") === [...new Set(g.memberUids || [])].sort().join("|"));
 function openExpense(eventId, restrict, groupId) {
-  const people = expensePeople(eventId, restrict);
+  const people = expensePeople(eventId, restrict, groupId);
   dialog(`<h3>Add expense</h3>
     ${window.Blip && !isDemo() ? `<button type="button" class="btn small tell-dot" id="xTell">${dot("happy", 24)} Or just tell me: “Dinner was 120, I paid, split with Sam and Alex.”</button>` : ""}
     <label class="field"><span>What was it?</span><input id="xDesc" maxlength="80" placeholder="Pizza & drinks"></label>
@@ -4624,9 +4671,9 @@ function openExpense(eventId, restrict, groupId) {
       const split = [...document.querySelectorAll('input[name=spl]:checked')].map(i => i.value); if (!split.length) return toast("Pick who splits it.");
       const paidBy = el("xPayer").value; const involved = [...new Set([...split, paidBy])];
       const rec = { desc: el("xDesc").value.trim(), amountCents: amount, paidBy, split, involved, eventId: eventId || null, groupId: groupId || (eventId && (S.events.get(eventId) || {}).groupId) || matchGroupId(involved), addedBy: myUid(), createdAt: Date.now(), guestNames: guestNamesFor(involved) };
-      try { await saveExpense(rec); closeDialog(); toast("Expense added"); } catch (e) { toast("Couldn't save that expense: " + e.message); }
+      try { await saveExpense(rec); closeDialog(); toast("Expense added"); textSettleUp(rec); } catch (e) { toast("Couldn't save that expense: " + e.message); }
     });
-  S._dlgGuests = {};
+  S._dlgGuests = Object.fromEntries([...people.main, ...people.others].filter(([u]) => isGuest(u)).map(([u, i]) => [u, i.name]));
   const split = wireSplit(people, eventId, restrict);
   if (el("xAddGuest")) el("xAddGuest").onclick = () => guestAdder(el("xGuests"), (id, name) => {
     if (splitPicked().includes(id)) { toast(`${first(name)} is already splitting it.`); return; }
@@ -4750,10 +4797,10 @@ function computeShares(items, tax, tip) {
   return { shares, subtotal, total };
 }
 function itemizeDialog(eventId, restrict, seed, data, receipt, groupId) {
-  const pp = expensePeople(eventId, restrict);
+  const pp = expensePeople(eventId, restrict, groupId);
   const keep = seed.people && seed.people.length > 1 ? new Set([...seed.people, seed.paidBy]) : null;   // the people already picked to split it
   const people = keep ? [...pp.main, ...pp.others].filter(([u]) => keep.has(u)) : [...pp.main, ...pp.others.filter(([u]) => u === seed.paidBy)];
-  S._dlgGuests = {};
+  S._dlgGuests = Object.fromEntries([...pp.main, ...pp.others].filter(([u]) => isGuest(u)).map(([u, i]) => [u, i.name]));
   const items = (data.items || []).map(it => ({ name: String(it.name || "Item").slice(0, 60), cents: toCents(it.price), uids: new Set() }));
   const fees = Array.isArray(data.fees) ? data.fees.filter(f => f && toCents(f.amount)) : [];
   const st = { tax: toCents(data.tax), tip: toCents(data.tip), fees: fees.reduce((n, f) => n + toCents(f.amount), 0) }, printed = toCents(data.total);
@@ -4784,7 +4831,7 @@ function itemizeDialog(eventId, restrict, seed, data, receipt, groupId) {
       const rec = { desc: el("xDesc").value.trim() || data.merchant || "Receipt", amountCents: total, paidBy, split, shares, involved, eventId: eventId || null, groupId: groupId || (eventId && (S.events.get(eventId) || {}).groupId) || matchGroupId(involved), addedBy: myUid(), createdAt: Date.now(),
         items: items.filter(it => it.cents).map(it => ({ name: it.name, cents: it.cents, uids: [...it.uids] })), tax: st.tax, tip: st.tip, fees: st.fees, feeNames: fees.map(f => String(f.name || "Fee").slice(0, 40)), merchant: data.merchant || "", receipt: receipt || "", guestNames: guestNamesFor(involved) };
       rec.groupId = groupId || (eventId && (S.events.get(eventId) || {}).groupId) || null;
-      try { await saveExpense(rec); closeDialog(); toast("Itemized expense added"); } catch (e) { toast("Couldn't save that expense: " + e.message); }
+      try { await saveExpense(rec); closeDialog(); toast("Itemized expense added"); textSettleUp(rec); } catch (e) { toast("Couldn't save that expense: " + e.message); }
     });
   const renderSum = () => {
     const { shares, subtotal, total } = computeShares(items, st.tax + st.fees, st.tip);
@@ -4872,8 +4919,8 @@ function pickInner(t) {
   if (!open) return head + `<div class="card empty" style="margin-top:14px">${dot("happy", 64)}<b>All split up</b><p class="muted">This receipt is now an expense${shares[me] ? `. Your share is <b>${fmt$(shares[me])}</b>` : ""}.</p>${t.expenseId ? `<button class="btn primary" data-go="#/x/${esc(t.expenseId)}">Open the expense</button>` : ""}</div>`;
   const state = u => (t.done || {})[u] ? "done" : Object.keys((t.picks || {})[u] || {}).length ? "picking" : "";
   const people = [...(t.people || [])].sort((a, b) => (a === me ? -1 : b === me ? 1 : 0));
-  const strip = `<div class="pk-people">${people.map(u => `<button type="button" class="pk-person ${state(u)} ${boss && pickFor === u ? "for" : ""}" data-pkfor="${esc(u)}" ${boss ? "" : "tabindex=\"-1\""}>${pickFace(t, u, "lg")}<span class="pk-pn">${esc(u === me ? "You" : first(pickName(t, u)))}</span><span class="pk-ps">${state(u) === "done" ? "✓ Done" : state(u) === "picking" ? "Picking…" : isGuest(u) ? "You pick" : "Not yet"}</span></button>`).join("")}</div>`;
-  const tools = boss ? `<div class="btnrow pk-tools"><button type="button" class="btn small" id="pkPeople">👥 People</button><button type="button" class="btn small" id="pkEdit">✏️ Edit receipt</button></div>` : "";
+  const strip = `<div class="pk-people">${people.map(u => `<button type="button" class="pk-person ${state(u)} ${boss && pickFor === u ? "for" : ""}" data-pkfor="${esc(u)}" ${boss ? "" : "tabindex=\"-1\""}>${pickFace(t, u, "lg")}<span class="pk-pn">${esc(u === me ? "You" : first(pickName(t, u)))}</span><span class="pk-ps">${state(u) === "done" ? "✓ Done" : state(u) === "picking" ? "Picking…" : isGuest(u) ? "You pick" : "Not yet"}</span></button>`).join("")}${boss ? `<button type="button" class="pk-person pk-add" id="pkAdd"><span class="avatar lg">＋</span><span class="pk-pn">Add</span><span class="pk-ps">people</span></button>` : ""}</div>`;
+  const tools = boss ? `<div class="btnrow pk-tools"><button type="button" class="btn small" id="pkEdit">✏️ Edit receipt</button></div>` : "";
   const hint = boss && pickFor !== me ? `Picking for <b>${esc(first(pickName(t, pickFor)))}</b>. Tap what they had. <button type="button" class="linkish" data-pkfor="${esc(me)}">Back to you</button>`
     : `Tap what you had. Shared something? Tap it too and it splits.${boss ? " Tap a person to pick for them." : ""}`;
   const row = it => {
@@ -4882,10 +4929,10 @@ function pickInner(t) {
     const mineCents = on && n > 1 ? Math.round(it.cents * c[pickFor] / tw) : 0;
     return `<div class="pk-item ${on ? "on" : ""} ${n ? "" : "open"}" data-pk="${esc(it.id)}" data-sig="${esc(JSON.stringify(c))}" role="button" tabindex="0">
       <div class="pk-main"><b>${esc(it.name)}</b><span class="pk-who">${who.slice(0, 5).map(u => pickFace(t, u)).join("")}<span>${label}</span></span></div>
-      <div class="pk-right"><span class="pk-price">${fmt$(it.cents)}</span>${mineCents ? `<span class="pk-yours">${pickFor === me ? "you" : esc(first(pickName(t, pickFor)))} ${fmt$(mineCents)}</span>` : ""}${n > 1 ? `<button type="button" class="pk-por" data-pkp="${esc(it.id)}">Portions</button>` : ""}</div>
+      <div class="pk-right"><span class="pk-price">${fmt$(it.cents)}</span>${mineCents ? `<span class="pk-yours">${pickFor === me ? "you" : esc(first(pickName(t, pickFor)))} ${fmt$(mineCents)}</span>` : ""}${boss ? `<button type="button" class="pk-por" data-pkp="${esc(it.id)}">Who had it?</button>` : n > 1 ? `<button type="button" class="pk-por" data-pkp="${esc(it.id)}">Portions</button>` : ""}</div>
       <span class="pk-check" aria-hidden="true"></span></div>`;
   };
-  const items = (t.items || []).filter(it => it.cents || it.name);
+  const items = (t.items || []).filter(it => it.cents > 0);   // $0 lines (modifiers, comps) stay in Edit receipt
   const mineCount = items.filter(it => pickClaims(t, it)[pickFor]).length, done = !!(t.done || {})[me];
   const sum = `<div class="itz-sum card pk-sum"><div><span>Items</span><b>${fmt$(subtotal)}</b></div>${t.tax || t.fees ? `<div><span>Tax${t.fees ? " & fees" : ""}</span><b>${fmt$((t.tax || 0) + (t.fees || 0))}</b></div>` : ""}${t.tip ? `<div><span>Tip</span><b>${fmt$(t.tip)}</b></div>` : ""}<div class="tot"><span>Total</span><b>${fmt$(splitTotal(t))}</b></div>
     <div class="pk-shares">${people.map(u => `<div><span>${esc(pickName(t, u))}</span><b>${fmt$(shares[u] || 0)}</b></div>`).join("")}${left.length ? `<div class="muted"><span>Nobody yet</span><b>${fmt$(left.reduce((n, it) => n + it.cents, 0))} + tax & tip</b></div>` : ""}</div></div>`;
@@ -4906,10 +4953,13 @@ function wirePick(id) {
     if (!had && navigator.vibrate) try { navigator.vibrate(8); } catch {}
   });
   root.querySelectorAll("[data-pkfor]").forEach(b => b.onclick = () => { if (!boss) return; pickFor = b.dataset.pkfor; patchPick(); });
-  if (el("pkDone")) el("pkDone").onclick = () => { const x = cur(); const d = !!((x.done || {})[me]); updateDoc(doc(db, "receiptSplits", id), new FieldPath("done", me), d ? deleteField() : Date.now()).catch(e => toast(e.message)); if (!d) toast("Thanks! You're all set.", null, null, "happy"); };
+  // I'm done: thank them and take them back where they came from (the event's Expenses, or Money); they can reopen it there.
+  if (el("pkDone")) el("pkDone").onclick = () => { const x = cur(); const d = !!((x.done || {})[me]); updateDoc(doc(db, "receiptSplits", id), new FieldPath("done", me), d ? deleteField() : Date.now()).catch(e => toast(e.message));
+    if (d) return; const back = x.eventId && S.events.has(x.eventId) ? "#/e/" + x.eventId + "?to=moneyCard" : "#/money";
+    toast(`Thanks! Your picks are saved. Change them anytime from ${back === "#/money" ? "Money" : "the event's Expenses"}.`, null, null, "happy"); go(back); };
   if (el("pkLeft")) el("pkLeft").onclick = () => { const r = root.querySelector(".pk-item.open"); if (!r) return; r.scrollIntoView({ block: "center", behavior: "smooth" }); r.classList.remove("flash"); void r.offsetWidth; r.classList.add("flash"); toast("Tap a person above, then the lines that are theirs."); };
   if (el("pkFinish")) el("pkFinish").onclick = () => finishPick(id);
-  if (el("pkPeople")) el("pkPeople").onclick = () => openPickPeople(id);
+  if (el("pkAdd")) el("pkAdd").onclick = () => openPickPeople(id);
   if (el("pkEdit")) el("pkEdit").onclick = () => openPickEdit(id);
   wirePickPhoto(id);
 }
@@ -4928,19 +4978,35 @@ function patchPick() {
   if (S._porRedraw) S._porRedraw();
 }
 const wireShellLinks = box => box.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
+// One line of the receipt. The creator ticks everyone who had it (portions when it wasn't even), fixes its name or
+// price, or removes it; everyone else can add or adjust only themselves.
 function openPortions(id, itemId) {
-  const me = myUid();
+  const me = myUid(); let editing = false, armed = false;
   const draw = () => {
     const t = (S.splits || new Map()).get(id), it = t && (t.items || []).find(x => x.id === itemId); if (!it) return "";
     const c = pickClaims(t, it), who = Object.keys(c), tw = who.reduce((s, u) => s + c[u], 0), boss = t.createdBy === me;
-    return `<h3>${esc(it.name)} · ${fmt$(it.cents)}</h3><p class="muted sm" style="margin-top:-8px">It splits by portions. Had 2 of the 3? Make yours 2.</p>
-      <div class="por-list">${who.map(u => `<div class="por-row">${pickFace(t, u, "")}<div style="flex:1;min-width:0"><b>${esc(pickName(t, u))}</b><div class="muted sm">${fmt$(Math.round(it.cents * c[u] / tw))}</div></div>
-        ${u === me || boss ? `<div class="stepper"><button type="button" data-porw="${esc(u)}|${c[u] - 1}" aria-label="Less">−</button><span>${c[u]}</span><button type="button" data-porw="${esc(u)}|${c[u] + 1}" aria-label="More">＋</button></div>` : `<span class="por-n">${c[u]}</span>`}</div>`).join("")}</div>
-      ${c[me] ? "" : `<button type="button" class="btn small" data-porw="${esc(me)}|1">＋ I had some too</button>`}`;
+    const list = boss ? [...(t.people || [])].sort((a, b) => (a === me ? -1 : b === me ? 1 : 0)) : who;
+    const row = u => { const on = c[u] > 0, can = u === me || boss;
+      return `<div class="por-row ${on ? "on" : ""}">${pickFace(t, u, "")}<div style="flex:1;min-width:0"><b>${esc(pickName(t, u))}</b><div class="muted sm">${on ? fmt$(Math.round(it.cents * c[u] / tw)) + (who.length > 1 && !who.every(x => c[x] === c[who[0]]) ? ` · ${c[u]} of ${tw} portions` : "") : "Didn't have it"}</div></div>
+        ${on && can ? `<div class="stepper"><button type="button" data-porw="${esc(u)}|${c[u] - 1}" aria-label="Less">−</button><span>${c[u]}</span><button type="button" data-porw="${esc(u)}|${c[u] + 1}" aria-label="More">＋</button></div>` : on ? `<span class="por-n">${c[u]}</span>` : can ? `<button type="button" class="btn small" data-porw="${esc(u)}|1">Had it</button>` : ""}</div>`; };
+    const head = editing ? `<div class="por-edit"><input id="porName" value="${esc(it.name)}" maxlength="60" aria-label="Item"><input id="porPrice" inputmode="decimal" value="${(it.cents / 100).toFixed(2)}" aria-label="Price"><button type="button" class="btn primary small" id="porSave">Save</button></div>`
+      : `<h3>${esc(it.name)} · ${fmt$(it.cents)}</h3>`;
+    return `${head}<p class="muted sm" style="margin-top:-8px">${boss ? "Tap Had it for everyone who shared it. It splits evenly; had 2 of the 3? Make theirs 2." : "It splits by portions. Had 2 of the 3? Make yours 2."}</p>
+      <div class="por-list">${list.map(row).join("")}</div>
+      ${!boss && !c[me] ? `<button type="button" class="btn small" data-porw="${esc(me)}|1">＋ I had some too</button>` : ""}
+      ${boss ? `<div class="por-tools">${editing ? "" : `<button type="button" class="btn ghost small" id="porEditBtn">✏️ Name or price</button>`}<button type="button" class="btn ghost small por-del" id="porDel">${armed ? "Tap again to remove" : "Remove this line"}</button></div>` : ""}`;
   };
   dialog(`<div id="porBox">${draw()}</div>`, null);
-  const wire = () => document.querySelectorAll("#porBox [data-porw]").forEach(b => b.onclick = () => { const [u, w] = b.dataset.porw.split("|"); setPick(id, u, itemId, Math.max(0, Math.min(20, +w))); });
-  S._porRedraw = () => { const b = el("porBox"); if (!b) { S._porRedraw = null; return; } b.innerHTML = draw() || `<p class="muted">That line was removed.</p>`; wire(); };
+  const ref = doc(db, "receiptSplits", id), items = () => (((S.splits || new Map()).get(id) || {}).items || []);
+  const wire = () => {
+    document.querySelectorAll("#porBox [data-porw]").forEach(b => b.onclick = () => { const [u, w] = b.dataset.porw.split("|"); setPick(id, u, itemId, Math.max(0, Math.min(20, +w))); });
+    if (el("porEditBtn")) el("porEditBtn").onclick = () => { editing = true; S._porRedraw(); const n = el("porName"); if (n) n.focus(); };
+    if (el("porSave")) el("porSave").onclick = () => { const name = el("porName").value.trim().slice(0, 60) || "Item", cents = toCents(el("porPrice").value);
+      updateDoc(ref, { items: items().map(x => x.id === itemId ? { ...x, name, cents } : x) }).then(() => { editing = false; S._porRedraw(); }).catch(e => toast(e.message)); };
+    if (el("porDel")) el("porDel").onclick = () => { if (!armed) { armed = true; S._porRedraw(); return; }
+      updateDoc(ref, { items: items().filter(x => x.id !== itemId) }).then(() => { closeDialog(); toast("Line removed. Everyone sees the new totals."); }).catch(e => toast(e.message)); };
+  };
+  S._porRedraw = () => { const b = el("porBox"); if (!b) { S._porRedraw = null; return; } if (editing && el("porName")) return; b.innerHTML = draw() || `<p class="muted">That line was removed.</p>`; wire(); };
   wire();
 }
 function openPickEdit(id) {
@@ -4965,11 +5031,12 @@ function openPickEdit(id) {
 function openPickPeople(id) {
   const t = (S.splits || new Map()).get(id); if (!t) return;
   const me = myUid(), inT = new Set(t.people || []), added = {};
-  const pp = { main: (t.people || []).map(u => [u, { name: (t.names || {})[u] || nameOf(u) }]), others: [...S.contacts.entries()].filter(([u]) => !inT.has(u)), checked: new Set(t.people || []), tags: new Map() };
+  const pp = { main: (t.people || []).map(u => [u, { name: (t.names || {})[u] || nameOf(u) }]), others: [...S.contacts.entries(), ...phonePeople(t.eventId, t.groupId).entries()].filter(([u]) => !inT.has(u)), checked: new Set(t.people || []), tags: new Map() };
+  const known = Object.fromEntries([...pp.main, ...pp.others].map(([u, i]) => [u, i.name]));
   dialog(`<h3>Who's on this receipt?</h3><p class="muted sm" style="margin-top:-8px">Everyone you add gets a notification to pick their items. For people not on Friendly, you pick.</p>
     ${splitField(pp)}<div id="xGuests"></div><button type="button" class="btn ghost small" id="xAddGuest" style="margin-top:8px">＋ Someone not on Friendly</button>`, "Save", async () => {
     const next = [...new Set([me, ...splitPicked()])], gone = (t.people || []).filter(u => !next.includes(u)), names = { ...(t.names || {}) };
-    next.forEach(u => { if (!names[u]) names[u] = added[u] || (S.contacts.get(u) || {}).name || nameOf(u); });
+    next.forEach(u => { if (!names[u]) names[u] = added[u] || known[u] || (S.contacts.get(u) || {}).name || nameOf(u); });
     const args = ["people", next, "uids", next.filter(u => !isGuest(u)), "names", names];
     gone.forEach(u => { if ((t.picks || {})[u]) args.push(new FieldPath("picks", u), deleteField()); if ((t.done || {})[u]) args.push(new FieldPath("done", u), deleteField()); });
     try { await updateDoc(doc(db, "receiptSplits", id), ...args); closeDialog(); toast(next.length > inT.size ? "Added. They'll get a notification." : "Saved"); }
@@ -4987,14 +5054,49 @@ function finishPick(id) {
     try {
       let receipt = ""; if (t.hasReceipt) { try { receipt = ((await getDoc(doc(db, "receiptSplits", id, "files", "receipt"))).data() || {}).image || ""; } catch {} }
       const split = Object.keys(shares), involved = [...new Set([...split, t.paidBy])];
-      const xid = await saveExpense({ desc: t.desc, amountCents: total, paidBy: t.paidBy, split, shares, involved, eventId: t.eventId || null, groupId: t.groupId || matchGroupId(involved), addedBy: myUid(), createdAt: Date.now(),
+      const rec = { desc: t.desc, amountCents: total, paidBy: t.paidBy, split, shares, involved, eventId: t.eventId || null, groupId: t.groupId || matchGroupId(involved), addedBy: myUid(), createdAt: Date.now(),
         items: (t.items || []).filter(it => it.cents).map(it => { const c = pickClaims(t, it); return { name: it.name, cents: it.cents, uids: Object.keys(c), ...(Object.values(c).some(v => v !== 1) ? { w: c } : {}) }; }),
-        tax: t.tax || 0, tip: t.tip || 0, fees: t.fees || 0, feeNames: t.feeNames || [], merchant: t.merchant || "", receipt, guestNames: Object.fromEntries(involved.filter(isGuest).map(u => [u, (t.names || {})[u] || ""])), fromSplit: id });
+        tax: t.tax || 0, tip: t.tip || 0, fees: t.fees || 0, feeNames: t.feeNames || [], merchant: t.merchant || "", receipt, guestNames: Object.fromEntries(involved.filter(isGuest).map(u => [u, (t.names || {})[u] || ""])), fromSplit: id };
+      const xid = await saveExpense(rec);
       await updateDoc(doc(db, "receiptSplits", id), { status: "done", expenseId: xid });
       deleteDoc(doc(db, "receiptSplits", id, "files", "receipt")).catch(() => {});
-      closeDialog(); toast("Expense added. Everyone sees their share.", null, null, "happy"); go("#/x/" + xid);
+      closeDialog(); toast("Expense added. Everyone sees their share.", null, null, "happy"); go("#/x/" + xid); textSettleUp(rec);
     } catch (e) { ok.disabled = false; ok.textContent = "Add the expense"; toast("Couldn't add it: " + e.message); }
   });
+}
+// Until anyone has paid, the person who added an itemized expense can reopen it as a live receipt: lines, people
+// and picks stay as they were, the expense comes off everyone's balances, and Finish makes it again.
+function reopenAsPick(x) {
+  dialog(`<h3>Reopen this receipt?</h3><p>You can add or remove people, fix or remove lines, and change who had what. It comes off everyone's balances until you tap Finish again.</p>`, "Reopen", async () => {
+    const ok = el("dlgOk"); ok.disabled = true; ok.textContent = "Reopening…";
+    try {
+      const me = myUid(); let id = x.fromSplit && S.splits && S.splits.has(x.fromSplit) && S.splits.get(x.fromSplit).createdBy === me ? x.fromSplit : "";
+      if (id) { await updateDoc(doc(db, "receiptSplits", id), { status: "open", expenseId: deleteField() }); if (x.receipt) setDoc(doc(db, "receiptSplits", id, "files", "receipt"), { image: x.receipt }).catch(() => {}); }
+      else {
+        const people = [...new Set([me, ...(x.involved || [])])], names = {};
+        people.forEach(u => { names[u] = (x.guestNames || {})[u] || (S.contacts.get(u) || {}).name || nameOf(u); });
+        id = await sendPickToCrew({ items: (x.items || []).map(it => ({ name: it.name, cents: it.cents, uids: [] })), tax: x.tax, fees: x.fees, tip: x.tip, feeNames: x.feeNames, desc: x.desc, merchant: x.merchant, paidBy: x.paidBy, people, names, eventId: x.eventId, groupId: x.groupId, receipt: x.receipt });
+        const args = []; (x.items || []).forEach((it, k) => (it.uids || []).forEach(u => { if (people.includes(u)) args.push(new FieldPath("picks", u, "i" + k), (it.w && it.w[u]) || 1); }));
+        if (args.length) await updateDoc(doc(db, "receiptSplits", id), ...args);
+      }
+      await deleteDoc(doc(db, "expenses", x.id));
+      closeDialog(); go("#/pick/" + id); toast("Reopened. Make your changes, then tap Finish.", null, null, "happy");
+    } catch (e) { ok.disabled = false; ok.textContent = "Reopen"; toast("Couldn't reopen it: " + e.message); }
+  });
+}
+// An evenly split expense: change who's in it (until anyone has paid).
+function changeSplitPeople(x) {
+  const base = expensePeople(x.eventId || null, null), pp = { ...base, checked: new Set(x.split || []) };
+  const known = new Set([...pp.main, ...pp.others].map(([u]) => u)); (x.split || []).filter(u => !known.has(u)).forEach(u => pp.main.push([u, { name: (x.guestNames || {})[u] || nameOf(u) }]));
+  const added = {};
+  dialog(`<h3>Who's splitting ${esc(x.desc || "this")}?</h3>${splitField(pp)}<div id="xGuests"></div><button type="button" class="btn ghost small" id="xAddGuest" style="margin-top:8px">＋ Someone not on Friendly</button>`, "Save", async () => {
+    const split = splitPicked(); if (!split.length) return toast("Pick who splits it.");
+    const guestNames = { ...(x.guestNames || {}), ...added };
+    try { await updateDoc(doc(db, "expenses", x.id), { split, involved: [...new Set([...split, x.paidBy])], guestNames }); closeDialog(); toast("Updated. Everyone's share changed with it."); }
+    catch (e) { toast("Couldn't save: " + e.message); }
+  });
+  const sp = wireSplit(pp, x.eventId || null, null);
+  el("xAddGuest").onclick = () => guestAdder(el("xGuests"), (gid, name) => { if (splitPicked().includes(gid)) return toast(`${first(name)} is already splitting it.`); added[gid] = name; sp.add(gid, name); });
 }
 // Open shared receipts on the Money tab.
 function pickCards() {

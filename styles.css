@@ -1203,3 +1203,19 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 .pe-line .pr{width:86px}
 .pe-del{width:34px;height:34px;border:0;border-radius:50%;background:var(--surface2);color:var(--muted);cursor:pointer;flex:none}
 .pe-line input{border:1px solid var(--line);border-radius:9px;padding:9px 10px;background:var(--bg);font:inherit}
+.itz-sum .pk-shares{display:block}
+.pk-add .avatar{background:var(--surface2);color:var(--accent);font-size:24px;font-weight:600;box-shadow:0 0 0 2px var(--surface),0 0 0 4px var(--line)}
+/* Event page: Expenses */
+.ev-x-row{display:flex;align-items:center;gap:10px;width:100%;padding:10px 4px;border:0;border-bottom:1px solid var(--th-line, rgba(127,127,127,.18));background:none;font:inherit;color:var(--th-ink);text-align:left;cursor:pointer}
+.ev-x-ico{font-size:20px;flex:none}
+.ev-x-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.ev-x-main b{font-size:15px}
+.ev-x-amt{font-weight:700;font-variant-numeric:tabular-nums;flex:none}
+.ev-x-add{margin-top:10px;width:100%}
+.por-row.on b{color:var(--ink)}
+.por-row:not(.on) b{color:var(--muted)}
+.por-edit{display:flex;gap:6px;align-items:center;margin-bottom:14px}
+.por-edit input{border:1px solid var(--line);border-radius:9px;padding:9px 10px;background:var(--bg);font:inherit;min-width:0}
+.por-edit #porName{flex:1} .por-edit #porPrice{width:84px}
+.por-tools{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;padding-top:10px;border-top:1px solid var(--line)}
+.por-del{color:var(--bad)}
