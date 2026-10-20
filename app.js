@@ -1864,7 +1864,7 @@ function openGroupLookDialog(g) {
     try { const img = await generateCover(`A single playful sticker-style icon: ${idea}. One bold, simple subject, centered, flat bright colors, plain solid light background. No text, no letters, no numbers.`); L.icon = await squareImage(img, 256); redraw(); el("glIconBox").classList.add("hidden"); }
     catch (e) { toast("Dot couldn't make one just now. Try again?"); } busy(b, false, "✨ Make it"); };
   el("glCoverGo").onclick = async () => { const idea = el("glCoverText").value.trim() || `A cozy scene that feels like ${g.name}`, b = el("glCoverGo"); busy(b, true, "🎨 Painting…");
-    try { L.cover = await generateCover(`A wide, inviting cover image: ${idea}. Warm and full of atmosphere. Style: ${coverStylePrompt(L.style)}. No text, no words, no letters.`); redraw(); el("glCoverBox").classList.add("hidden"); }
+    try { L.cover = await generateCover(`A wide, inviting cover image: ${idea}. Style: ${coverStylePrompt(L.style)}. No text, no words, no letters.`); redraw(); el("glCoverBox").classList.add("hidden"); }
     catch (e) { toast("Dot couldn't paint one just now. Try again?"); } busy(b, false, "🎨 Paint it"); };
 }
 function groupRow(g) {
