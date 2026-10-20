@@ -297,7 +297,9 @@ service cloud.firestore {
       match /photos/{photoId} {
         allow read: if canReadEvent();
         allow create: if canReadEvent() && request.resource.data.addedBy == uid();
-        allow update: if canReadEvent() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']);
+        // Anyone on the event reacts; whoever added the photo attaches its full-size copy (fullUrl) once it's uploaded.
+        allow update: if canReadEvent() && (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
+          || (resource.data.addedBy == uid() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['fullUrl', 'fullBytes', 'fullType'])));
         allow delete: if isAdmin() || (signedIn() && resource.data.addedBy == uid());
         // Comments on one photo — guests post; delete your own (hosts and admins: anyone's).
         match /comments/{commentId} {

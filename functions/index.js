@@ -15,6 +15,7 @@ const webpush = require("web-push");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
+const { getStorage } = require("firebase-admin/storage");
 const { getAuth } = require("firebase-admin/auth");
 const { GoogleAuth } = require("google-auth-library");
 const sharp = require("sharp");
@@ -817,8 +818,9 @@ exports.slimEventCover = onDocumentWritten({ document: "events/{id}", region: "u
 const PHOTO_SLIM_OVER = 70000;
 exports.slimEventPhoto = onDocumentWritten({ document: "events/{eid}/photos/{pid}", region: "us-central1", memory: "512MiB" }, async e => {
   const { eid, pid } = e.params, fullRef = db.doc(`events/${eid}/photoFull/${pid}`);
-  if (!e.data.after.exists) {   // photo removed: its full image and its comments go too
+  if (!e.data.after.exists) {   // photo removed: its full image, its original in storage, and its comments go too
     await fullRef.delete().catch(() => {});
+    await getStorage().bucket().deleteFiles({ prefix: `events/${eid}/photos/${pid}/` }).catch(err => logger.warn("photo file delete " + err.message));
     await db.recursiveDelete(db.collection(`events/${eid}/photos/${pid}/comments`)).catch(() => {});
     return;
   }
@@ -1252,7 +1254,8 @@ exports.onEventCreated = onDocumentCreated({ document: "events/{id}", ...MAIL },
 // Event deleted -> cancel the calendar entries, drop the preview.
 exports.onEventDeleted = onDocumentDeleted({ document: "events/{id}", ...MAIL }, async e => {
   const ev = e.data && e.data.data(); if (!ev) return;
-  await Promise.all([sendInviteEmails(e.params.id, ev, "CANCEL"), db.doc("previews/" + e.params.id).delete().catch(() => {}), notifyCanceled(e.params.id, ev)]);
+  await Promise.all([sendInviteEmails(e.params.id, ev, "CANCEL"), db.doc("previews/" + e.params.id).delete().catch(() => {}), notifyCanceled(e.params.id, ev),
+    getStorage().bucket().deleteFiles({ prefix: `events/${e.params.id}/` }).catch(err => logger.warn("event files delete " + err.message))]);
 });
 // "Taco Tuesday was canceled": everyone invited to an upcoming event hears when it's deleted.
 const todayIn = tz => new Intl.DateTimeFormat("en-CA", { timeZone: tz || "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());

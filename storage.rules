@@ -1,0 +1,15 @@
+rules_version = '2';
+// Full-size event photos live here as events/{eventId}/photos/{photoId}/full.
+// Who may see a photo is decided by the Firestore photo doc (its URL is only in there);
+// uploads are any signed-in person's images under 30 MB, and only the server removes files.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /events/{eventId}/photos/{photoId}/{file} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null
+        && request.resource.size < 30 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if false;
+    }
+  }
+}

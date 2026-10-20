@@ -12,6 +12,7 @@ import {
   getFirestore, initializeFirestore, persistentLocalCache, persistentSingleTabManager, terminate, clearIndexedDbPersistence, doc, getDoc, setDoc, updateDoc, deleteDoc, collection,
   query, where, onSnapshot, addDoc, arrayUnion, arrayRemove, deleteField, orderBy, limit, getDocs, FieldPath
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-storage.js";
 import { firebaseConfig, mapsKey, adminUids, vapidPublicKey, giphyKey } from "./firebase-config.js";
 import { THEMES, themeOf, applyTheme, startParticles, DEFAULT_THEME, CUSTOM_FONTS, CUSTOM_PARTICLES, makeCustomTheme } from "./themes.js";
 
@@ -3609,6 +3610,19 @@ function wallParticipants(ev) {
 }
 // ----- One photo, full screen: the full-size image, reactions, and its own comments -----
 const photoFullCache = new Map();
+// The original file goes to storage after the preview is on the wall, so the wall never waits on a big upload.
+// Save and the viewer prefer it once it's there (fullUrl on the photo doc). Skipped when the file is tiny.
+const FULL_MIN_BYTES = 900000;
+const showable = t => /^image\/(jpeg|png|webp|gif)$/.test(t || "");
+async function uploadOriginal(eid, pid, file) {
+  if (!file || isDemo() || !(file.size > FULL_MIN_BYTES) || file.size > 30 * 1024 * 1024) return;
+  try {
+    const r = storageRef(getStorage(), `events/${eid}/photos/${pid}/full`);
+    await uploadBytes(r, file, { contentType: file.type || "image/jpeg", cacheControl: "public, max-age=31536000, immutable" });
+    const fullUrl = await getDownloadURL(r);
+    await updateDoc(doc(db, "events", eid, "photos", pid), { fullUrl, fullBytes: file.size, fullType: file.type || "image/jpeg" });
+  } catch (e) { fz.add("original upload failed: " + e.message); fz.save(); }
+}
 // The best copy of a photo we have: the original from storage when it's there, else the full-size copy, else the preview.
 async function bestPhoto(ev, p) {
   if (p.fullUrl) return p.fullUrl;
@@ -3663,7 +3677,8 @@ function openPhoto(ev, p) {
     list.querySelectorAll("[data-pcdel]").forEach(b => b.onclick = () => deleteDoc(doc(db, "events", ev.id, "photos", p.id, "comments", b.dataset.pcdel)).catch(e => toast(e.message)));
     list.scrollTop = list.scrollHeight;
   }, () => { const list = el("pvComments"); if (list) list.innerHTML = `<p class="pv-empty">Comments aren't available right now.</p>`; }));
-  if (p.full && !photoFullCache.has(p.id)) getDoc(doc(db, "events", ev.id, "photoFull", p.id)).then(d => { if (!d.exists()) return; photoFullCache.set(p.id, d.data().img); const im = el("pvImg"); if (im) im.src = d.data().img; }).catch(() => {});
+  if (p.full && !photoFullCache.has(p.id)) getDoc(doc(db, "events", ev.id, "photoFull", p.id)).then(d => { if (!d.exists()) return; photoFullCache.set(p.id, d.data().img); const im = el("pvImg"); if (im && !im.dataset.orig) im.src = d.data().img; }).catch(() => {});
+  if (p.fullUrl && showable(p.fullType)) { const big = new Image(); big.onload = () => { const im = el("pvImg"); if (im && im.closest("#photoViewer") && (el("photoViewer") || {}).dataset.pid === p.id) { im.dataset.orig = "1"; im.src = p.fullUrl; } }; big.src = p.fullUrl; }
   el("pvForm").onsubmit = async e => {
     e.preventDefault(); const t = el("pvText"), text = t.value.trim(); if (!text) return;
     t.value = "";
@@ -4073,8 +4088,10 @@ function photosInner(ev) {
 function wirePhotos(ev) {
   if (el("addPhoto")) el("addPhoto").onclick = async () => {
     const f = await pickFile("image/*", "event photo"); if (!f) return; toast("Uploading photo…");
-    try { const img = await compressImage(f, 1400, 0.8); await addDoc(collection(db, "events", ev.id, "photos"), { img, addedBy: myUid(), createdAt: Date.now() }); }
-    catch (e) { toast("Couldn't add photo: " + e.message); }
+    let ref;
+    try { const img = await compressImage(f, 1400, 0.8); ref = await addDoc(collection(db, "events", ev.id, "photos"), { img, addedBy: myUid(), createdAt: Date.now() }); }
+    catch (e) { return toast("Couldn't add photo: " + e.message); }
+    uploadOriginal(ev.id, ref.id, f);
   };
   document.querySelectorAll("[data-photo]").forEach(im => im.onclick = () => { const p = S.photos.find(x => x.id === im.dataset.photo); if (p) openPhoto(ev, p); });
   document.querySelectorAll("[data-delphoto]").forEach(b => b.onclick = () => { if (confirm("Remove this photo?")) deleteDoc(doc(subCol(ev, "photos"), b.dataset.delphoto)).catch(e => toast(e.message)); });

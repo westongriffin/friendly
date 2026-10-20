@@ -6,6 +6,16 @@
   "functions": {
     "source": "functions",
     "runtime": "nodejs22",
-    "ignore": ["node_modules", ".npmcache", ".git", "firebase-debug.log", "firebase-debug.*.log", "*.local"]
+    "ignore": [
+      "node_modules",
+      ".npmcache",
+      ".git",
+      "firebase-debug.log",
+      "firebase-debug.*.log",
+      "*.local"
+    ]
+  },
+  "storage": {
+    "rules": "storage.rules"
   }
 }
