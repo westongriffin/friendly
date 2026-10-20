@@ -796,6 +796,7 @@ function routeFromPath(h) {
   if (p[0] === "messages" || p[0] === "friends" || p[0] === "invited") return { name: "messages", tab: p[0] };
   if (p[0] === "drafts") return { name: "drafts" };
   if (p[0] === "m") return { name: "dm", id: p[1] };
+  if (p[0] === "fs") return { name: "friendship", id: p[1] };
   if (p[0] === "photos") return { name: "photos" };
   if (p[0] === "search") return { name: "search" };
   if (p[0] === "new") return { name: "new" };
@@ -1586,6 +1587,7 @@ function wireShell() {
   if (S.route.name === "drafts") wireDrafts();
   if (S.route.name === "messages" && S.msgsReady) wireMessages();
   if (S.route.name === "dm" && S.msgsReady) wireDm(S.route.id);
+  if (S.route.name === "friendship") wireFriendship(S.route.id);
   if (S.route.name === "photos") wirePhotosPage();
   if (S.route.name === "search") wireSearch();
   if (S.route.name !== "activity") S._actOpenSeen = null;
@@ -1625,6 +1627,7 @@ function routeBody(r) {
   if (r.name === "drafts") return draftsBody();
   if (r.name === "messages" && S.msgsReady) return messagesBody(r.tab);
   if (r.name === "dm" && S.msgsReady) return dmBody(r.id);
+  if (r.name === "friendship") return friendshipBody(r.id);
   if (r.name === "photos") return photosPageBody();
   if (r.name === "search") return searchBody();
   if (r.name === "profile") return profileBody();
@@ -3104,6 +3107,7 @@ function openProfileDialog(uid) {
     <h2 style="margin:12px 0 2px">${esc(info.name || "Friend")}</h2>
     ${info.birthday ? `<p class="muted sm" style="margin:0">🎂 ${esc(fmtDay({ date: info.birthday }))}</p>` : ""}
     ${friendActions(uid) ? `<div class="btnrow" style="justify-content:center;margin-top:12px">${friendActions(uid)}</div>` : ""}
+    ${S.contacts.has(uid) ? `<button type="button" class="btn fs-open" data-go="#/fs/${esc(uid)}">${fsPair(34, true)}<span>Our ${fsWord()}</span></button>` : ""}
   </div>
   ${info.venmo || (info.phone && appleCashFor(uid)) ? `<div class="form-card card" style="margin-top:14px">
     ${info.venmo ? `<div class="member-row"><span class="li">💸</span><div style="flex:1;min-width:0"><b>Venmo</b><div class="muted sm mono">${esc(info.venmo)}</div></div></div>` : ""}
@@ -5383,7 +5387,7 @@ function messagesBody(tab = "messages") {
     const all = friends.map(otherIn).sort((a, b) => personName(a).localeCompare(personName(b)));
     return head + reqs + (all.length ? `${search("Search your friends…")}
   <div class="section-head" style="margin-top:18px"><h2>All friends</h2><span class="muted sm">${all.length}</span></div>
-  <div class="card">${all.map(u => row(u, `<b>${esc(personName(u))}</b>`, `<button class="btn small" data-go="#/m/${pairOf(u)}">Message</button>`)).join("")}</div>`
+  <div class="card">${all.map(u => row(u, `<b>${esc(personName(u))}</b><div class="muted sm">Our Friendlyship ›</div>`, `<button class="btn small" data-go="#/m/${pairOf(u)}" data-stop="1">Message</button>`, "#/fs/" + u)).join("")}</div>`
       : inc.length ? "" : emptyState("👥", "No friends yet", "Add friends to message them one-on-one, even if you're not in a group together.", "happy"));
   }
   const reqLink = inc.length ? `<button type="button" class="req-link" data-go="#/friends">👋 ${inc.length === 1 ? "1 friend request" : inc.length + " friend requests"} waiting <span>›</span></button>` : "";
@@ -5394,6 +5398,143 @@ function messagesBody(tab = "messages") {
 }
 // Everyone you've invited anywhere and are still waiting on: friend requests you sent, friends you texted to join,
 // people invited to groups you host who haven't joined, and people who haven't answered your upcoming events.
+// ---------- OUR FRIENDLYSHIP: your history with one person ----------
+// Opened from a friend's row in Friends and from anyone's profile card. Everything comes from what the app already
+// holds (plans you both went to, their photos, expenses and paybacks between you, groups you share, reactions on
+// each other's photos); comments between you load once the page is open, from the plans you shared.
+function fsData(u) {
+  const me = myUid(), t = todayStr(), f = friendshipWith(u);
+  const both = ev => { const r = ev.rsvps || {}, inv = new Set(ev.invitedUids || []); if (!inv.has(me) || !inv.has(u) || ev.kind === "meeting") return false; return ev.date < t ? r[me] === "going" && r[u] === "going" : r[me] !== "no" && r[u] !== "no"; };
+  const evs = [...S.events.values()].filter(both);
+  const past = evs.filter(ev => ev.date < t).sort((a, b) => b.date.localeCompare(a.date)), next = evs.filter(ev => ev.date >= t).sort((a, b) => a.date.localeCompare(b.date));
+  const photos = past.flatMap(ev => (S.memories.get(ev.id) || []).map(p => ({ p, ev })));
+  const xs = [...S.expenses.values()].filter(x => (x.involved || []).includes(u) && (x.involved || []).includes(me)).sort((a, b) => b.createdAt - a.createdAt);
+  const ss = [...S.settlements.values()].filter(s => (s.from === u && s.to === me) || (s.from === me && s.to === u)).sort((a, b) => b.createdAt - a.createdAt);
+  const bal = pairwise().find(p => (p.from === u && p.to === me) || (p.from === me && p.to === u));
+  const all = [...S.memories.values()].flat(), rx = (list, who) => list.reduce((n, p) => n + Object.values(p.reactions || {}).filter(us => Array.isArray(us) && us.includes(who)).length, 0);
+  const spots = {}; past.forEach(ev => { const g = ev.groupId && S.groups.get(ev.groupId), k = g ? `${groupMini(g)} ${esc(g.name)}` : ev.location ? esc(placeName(ev.location)) : ""; if (k) spots[k] = (spots[k] || 0) + 1; });
+  const top = Object.entries(spots).sort((a, b) => b[1] - a[1])[0];
+  const since = Math.min((f && f.createdAt) || Infinity, ...past.map(ev => evDate(ev).getTime()), ...xs.map(x => x.createdAt || Infinity));
+  return { evs, past, next, photos, xs, ss, bal, top, since, split: xs.reduce((n, x) => n + (x.amountCents || 0), 0),
+    theyOnMine: rx(all.filter(p => p.addedBy === me), u), meOnTheirs: rx(all.filter(p => p.addedBy === u), me),
+    groups: [...S.groups.values()].filter(g => (g.memberUids || []).includes(u) && (g.memberUids || []).includes(me)) };
+}
+// The Friendlyship mark (Dot and a coral friend) and wordmark; the big one animates the first time a page opens.
+const fsPair = (size, still) => window.Blip && window.Blip.pair ? window.Blip.pair({ size, still }) : "";
+// "ship" fades coral to yellow letter by letter and does a little shimmy now and then.
+const fsWord = () => `<span class="fs-word">Friend<span class="tilt">l</span>y<span class="ship" aria-label="ship">${[..."ship"].map((c, i) => `<span style="--i:${i}" aria-hidden="true">${c}</span>`).join("")}</span></span>`;
+// How much of each section shows; See more adds a page at a time.
+const FS_STEP = { mem: 9, next: 3, past: 5, money: 5, cm: 4, groups: 6 };
+const fsShown = (u, k) => ((S._fsMore && S._fsMore.u === u && S._fsMore[k]) || FS_STEP[k]);
+const fsMoreBtn = (k, left) => left > 0 ? `<button type="button" class="fs-more" data-fsmore="${k}">See more <span>${left} more</span></button>` : "";
+function friendshipBody(u) {
+  const me = myUid(), fn = first(personName(u)), d = fsData(u), play = S._fsPlayed !== u ? "play" : ""; S._fsPlayed = u;
+  const hi = coralPop();   // Coral's hello (first Friendlyship page on this phone): she waves and bounces while it shows
+  const stat = (n, l) => `<div class="fs-stat"><b>${n}</b><span>${l}</span></div>`;
+  const hero = `<button class="link-back" data-go="#/friends">‹ Friends</button>
+    <div class="fs-hero"><div class="fs-faces">${avatar(me, "xl")}<span class="fs-pair ${play} ${hi ? "intro" : ""}">${fsPair(104)}${hi}</span>${avatar(u, "xl")}</div>
+      <div class="fs-kicker">Our ${fsWord()}</div><h1>You & ${esc(fn)}</h1>
+      ${isFinite(d.since) ? `<div class="muted sm">Making plans together since ${new Date(d.since).toLocaleDateString("en-US", { month: "long", year: "numeric" })}</div>` : ""}
+      <div class="fs-stats">${stat(d.evs.length, d.evs.length === 1 ? "plan together" : "plans together")}${stat(d.photos.length, d.photos.length === 1 ? "photo" : "photos")}${stat(fmt$(d.split).replace(/\.00$/, ""), "split together")}</div>
+      <div class="btnrow fs-acts">${isFriend(u) ? `<button class="btn primary" data-go="#/m/${pairOf(u)}">💬 Message</button>` : ""}<button class="btn" id="fsPlan">＋ Plan something together</button></div></div>`;
+  return `<div class="fs-page">${hero}<div id="fsRest">${fsRest(u, d)}</div></div>`;
+}
+// Tap Dot or Coral on a Friendlyship page: a profile for each. Dot is the planner; Coral, her best friend, is the
+// fun one (more energy, more chaos, more photos). PG-13 on purpose.
+const MASCOTS = {
+  dot: { name: "Dot", tag: "Friendly's planner-in-chief", coral: false, other: "coral",
+    vibes: ["🔋 Steady energy", "📋 Certified Type A", "☕ Iced coffee, always"],
+    bio: ["Hi, I'm Dot. I started out as the dot over the y in Friendly and grew into a pebble with opinions. I'm the one who actually makes the plan: I pick the place, chase the maybes, paint the cover, and read the receipt so nobody has to do math three drinks in.",
+      "People call me the mom friend. I prefer \"head of logistics.\" I care a lot, I overthink a little, and yes, I remember exactly who said they were coming and then didn't."],
+    night: "Dinner at 7, a second spot within walking distance, home by midnight. Coral has other ideas. Coral always has other ideas.",
+    takes: ["\"Maybe\" isn't an RSVP. It's a cry for help.", "Splitting the bill evenly when you had a side salad and water? Absolutely not.", "Every group chat gets 48 hours: make the plan or let it die."],
+    facts: [["🎂", "Born", "The day Friendly was, already holding a clipboard"], ["🦸", "Superpower", "Turning \"we should hang out\" into a date, a time, and a place"], ["🙈", "Guilty pleasure", "Color-coding a calendar nobody else looks at"],
+      ["😤", "Pet peeve", "\"I'm 5 minutes away\" (they are in the shower)"], ["🎨", "Side hustle", "Painting covers. Beret on, judgment off."], ["🏆", "Most likely to", "Send the reminder text, then the reminder about the reminder"],
+      ["👯", "Best friend", "Coral. She's pure chaos and I'd take a bullet for her."]] },
+  coral: { name: "Coral", tag: "Dot's best friend · the fun one", coral: true, other: "dot",
+    vibes: ["⚡ 1,000% energy", "🎉 Chaos, but make it cute", "🍹 \"One more round\""],
+    bio: ["Hiii, I'm Coral! Dot's best friend and the reason your group chat has 47 unread messages. I came from the coral l in Friendly, which is why I'm a little tilted. That's my story and I'm sticking to it.",
+      "Dot makes the plan; I make it a night. I start the photo dump, remember every inside joke, and keep track of who owes who, because somebody has to, and let's be honest, it's not going to be you."],
+    night: "Starts on a rooftop, ends at a diner at 2 AM, with one detour nobody can fully explain the next morning.",
+    takes: ["Every great night needs one bad decision. A small one. Like karaoke.", "No photos? Then it didn't happen.", "\"I'll Venmo you later\" is the biggest lie in friendship."],
+    facts: [["🎂", "Born", "Right next to Dot in the Friendly logo, already waving"], ["🦸", "Superpower", "Never forgetting a birthday, an inside joke, or a tab"], ["🐿️", "Attention span", "Golden retriever at a squirrel convention"],
+      ["🙈", "Guilty pleasure", "Saying \"one more drink\" and meaning four"], ["🎤", "Banned from", "Two karaoke bars and one group chat. Worth it."], ["🏆", "Most likely to", "Start the dance floor, then make sure everyone gets home safe"],
+      ["👯", "Best friend", "Dot. She's the brains, I'm the hype. It works."]] }
+};
+// The first Friendlyship page on a phone: Coral says hi in a small bubble over her head that fades on its own.
+function coralPop() {
+  let seen = false; try { seen = LS.get("friendlyCoralHi") === "1"; LS.set("friendlyCoralHi", "1"); } catch {}
+  return seen ? "" : `<button type="button" class="coral-pop" id="coralPop">Hi, I'm Coral! Dot's best friend 👋</button>`;
+}
+function openMascot(k) {
+  const m = MASCOTS[k]; if (!m || !window.Blip) return;
+  dialog(`<div class="mascot-card m-${k}">${window.Blip.svg({ mood: "happy", size: 112, wave: true, coral: m.coral })}<h2>${m.name}</h2><span class="mascot-tag">${m.tag}</span>
+    <div class="mascot-vibes">${m.vibes.map(v => `<span>${esc(v)}</span>`).join("")}</div>
+    ${m.bio.map(p => `<p class="mascot-bio">${esc(p)}</p>`).join("")}
+    <div class="mascot-sec">Ideal night out</div><div class="card mascot-night">🌙 ${esc(m.night)}</div>
+    <div class="mascot-sec">Hot takes</div><div class="card mascot-takes">${m.takes.map(t => `<div>🔥 ${esc(t)}</div>`).join("")}</div>
+    <div class="mascot-sec">Fun facts</div><div class="card mascot-facts">${m.facts.map(([i, l, v]) => `<div class="member-row"><span class="li">${i}</span><div style="flex:1;min-width:0"><div class="muted sm">${l}</div><b>${esc(v)}</b></div></div>`).join("")}</div>
+    <button type="button" class="linkish mascot-other" id="mascotOther">Meet ${MASCOTS[m.other].name} ›</button></div>`, null);
+  el("mascotOther").onclick = () => openMascot(m.other);
+  // open at the top (the dialog otherwise scrolls down to its only button)
+  const top = () => { const d = el("appDialog"); if (d) d.scrollTop = 0; if (document.activeElement && document.activeElement.id === "mascotOther") document.activeElement.blur(); };
+  top(); requestAnimationFrame(top); setTimeout(top, 60);
+}
+function fsRest(u, d) {
+  const me = myUid(), fn = first(personName(u)), n = k => fsShown(u, k);
+  const when = ev => { const x = evDate(ev); return `${MONTHS[x.getMonth()]} ${x.getDate()}${x.getFullYear() !== new Date().getFullYear() ? ", " + x.getFullYear() : ""}`; };
+  const first1 = d.past[d.past.length - 1];
+  const hl = [first1 && ["🥇", "First plan together", `${esc(first1.title)} · ${when(first1)}`, first1.id], d.top && d.top[1] > 1 && ["📍", "Your spot", `${d.top[0]} · ${d.top[1]} times`], d.next[0] && ["🔜", "Next up", `${esc(d.next[0].title)} · ${when(d.next[0])}`, d.next[0].id]].filter(Boolean);
+  const highlights = hl.length ? `<div class="section-head"><h2>Highlights</h2></div><div class="card">${hl.map(([i, k, v, id]) => `<div class="member-row ${id ? "dm-row" : ""}" ${id ? `data-go="#/e/${id}" role="button"` : ""}><span class="li">${i}</span><div style="flex:1;min-width:0"><div class="muted sm">${k}</div><b>${v}</b></div>${id ? `<span class="chev">›</span>` : ""}</div>`).join("")}</div>` : "";
+  const mem = d.photos.length ? `<div class="section-head"><h2>Memories</h2><span class="muted sm">${d.photos.length} from your plans</span></div><div class="photo-grid mem-grid fs-mem">${d.photos.slice(0, n("mem")).map(({ p, ev }) => `<div class="photo-tile"><img src="${esc(p.img)}" data-fsp="${esc(ev.id)}|${esc(p.id)}" alt="" loading="lazy">${photoBadges(p)}</div>`).join("")}</div>${fsMoreBtn("mem", d.photos.length - n("mem"))}` : "";
+  const evRow = ev => { const k = (S.memories.get(ev.id) || []).length, host = ev.hostId === u ? `${esc(fn)} hosted` : ev.hostId === me ? "You hosted" : "";
+    return `<div class="member-row dm-row" data-go="#/e/${ev.id}" role="button">${ev.cover ? `<img class="fs-thumb" src="${esc(ev.cover)}" alt="">` : `<span class="fs-thumb fs-emo">${esc(ev.emoji || "🎉")}</span>`}<div style="flex:1;min-width:0"><b>${esc(ev.title)}</b><div class="muted sm">${when(ev)}${host ? " · " + host : ""}${k ? ` · ${k} photo${k === 1 ? "" : "s"}` : ""}</div></div><span class="chev">›</span></div>`; };
+  const plans = d.evs.length ? `<div class="section-head"><h2>Plans together</h2></div><div class="card">${d.next.length ? `<div class="fs-sub">Coming up</div>${d.next.slice(0, n("next")).map(evRow).join("")}${fsMoreBtn("next", d.next.length - n("next"))}` : ""}${d.past.length ? `<div class="fs-sub">Been there</div>${d.past.slice(0, n("past")).map(evRow).join("")}${fsMoreBtn("past", d.past.length - n("past"))}` : ""}</div>` : "";
+  const share = x => x.shares ? (x.shares[u] || 0) : ((x.split || []).includes(u) ? Math.round(x.amountCents / x.split.length) : 0);
+  const balLine = !d.bal ? `<div class="member-row"><span class="li">✅</span><div style="flex:1"><b>You're all square</b></div></div>` : d.bal.to === me ? `<div class="member-row"><span class="li">💸</span><div style="flex:1"><b>${esc(fn)} owes you ${fmt$(d.bal.amount)}</b></div><button class="btn small" data-go="#/money">Settle up</button></div>` : `<div class="member-row"><span class="li">💸</span><div style="flex:1"><b>You owe ${esc(fn)} ${fmt$(d.bal.amount)}</b></div><button class="btn small primary" data-go="#/money">Pay</button></div>`;
+  const rows = [...d.xs.map(x => ({ at: x.createdAt, html: `<div class="ledger dm-row" data-go="#/x/${x.id}" role="button"><div class="li">🧾</div><div style="flex:1;min-width:0"><b>${esc(x.desc || "Expense")}</b><div class="muted sm">${x.paidBy === me ? "You paid" : x.paidBy === u ? esc(fn) + " paid" : esc(first(nameOf(x.paidBy))) + " paid"}${share(x) && x.paidBy !== u ? ` · ${esc(fn)}'s share ${fmt$(share(x))}` : ""}</div></div><span class="amt sm">${fmt$(x.amountCents)}</span></div>` })),
+    ...d.ss.map(s => ({ at: s.createdAt, html: `<div class="ledger"><div class="li">✅</div><div style="flex:1;min-width:0"><b>${s.from === me ? "You paid " + esc(fn) : esc(fn) + " paid you"}</b><div class="muted sm">${esc(s.method || "Payback")} · ${new Date(s.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(s.amountCents)}</span></div>` }))].sort((a, b) => b.at - a.at);
+  const money = rows.length ? `<div class="section-head"><h2>Money between you</h2><span class="muted sm">${fmt$(d.split)} split in ${d.xs.length} expense${d.xs.length === 1 ? "" : "s"}</span></div><div class="card">${balLine}${rows.slice(0, n("money")).map(r => r.html).join("")}${fsMoreBtn("money", rows.length - n("money"))}</div>` : "";
+  const back = `<div class="section-head"><h2>Back and forth</h2></div><div class="card" id="fsBack">${fsBackInner(u, d)}</div>`;
+  const gs = d.groups, groups = gs.length ? `<div class="section-head"><h2>Groups you share</h2></div><div class="fs-groups">${gs.slice(0, n("groups")).map(g => `<button class="fchip" data-go="#/g/${g.id}">${groupMini(g)} ${esc(g.name)}</button>`).join("")}${gs.length > n("groups") ? `<button class="fchip" data-fsmore="groups">+${gs.length - n("groups")} more</button>` : ""}</div>` : "";
+  const empty = !d.evs.length && !d.xs.length ? `<div class="card empty" style="margin-top:14px">${dot("happy", 64)}<b>Your story starts here</b><p class="muted">Plans you go to together, photos, and money between you will show up here.</p></div>` : "";
+  return empty + highlights + mem + plans + money + back + groups;
+}
+function fsBackInner(u, d) {
+  const fn = first(personName(u)), c = S._fsComments && S._fsComments.u === u ? S._fsComments.list : null;
+  const times = n => n + (n === 1 ? " time" : " times"), them = d.theyOnMine ? `${esc(fn)} reacted to your photos ${times(d.theyOnMine)}` : "", you = d.meOnTheirs ? `You reacted to ${esc(fn)}'s ${times(d.meOnTheirs)}` : "";
+  const rx = them || you ? `<div class="member-row"><span class="li">❤️</span><div style="flex:1;min-width:0"><b>${them || you}</b>${them && you ? `<div class="muted sm">You reacted to theirs ${times(d.meOnTheirs)}</div>` : ""}</div></div>` : "";
+  const list = c == null ? `<p class="muted sm" style="padding:10px 14px;margin:0">Gathering comments…</p>` : c.length ? c.slice(0, fsShown(u, "cm")).map(x => `<div class="fs-cm dm-row" data-go="#/e/${x.evId}" role="button">${avatar(x.authorId, "sm")}<div style="flex:1;min-width:0"><div class="muted sm"><b>${esc(x.authorId === myUid() ? "You" : fn)}</b> on ${esc(x.evTitle)} · ${ago(x.createdAt)}</div><div class="fs-cm-t">${renderText(x.text || "", x.mentions)}</div></div></div>`).join("") + fsMoreBtn("cm", c.length - fsShown(u, "cm")) : `<p class="muted sm" style="padding:10px 14px;margin:0">No comments between you yet.</p>`;
+  return rx + list;
+}
+// Comments you two left on the plans you shared (latest 30, shown a few at a time), loaded when the page opens.
+async function fsLoadComments(u) {
+  const me = myUid(), d = fsData(u), evs = [...d.next, ...d.past].slice(0, 12), out = [];
+  await Promise.all(evs.map(async ev => { try { const snap = await getDocs(query(collection(db, "events", ev.id, "comments"), where("authorId", "in", [me, u]), limit(30)));
+    snap.docs.forEach(x => { const c = x.data(); if (!c.kind && c.text) out.push({ ...c, evId: ev.id, evTitle: ev.title }); }); } catch {} }));
+  S._fsComments = { u, list: out.sort((a, b) => b.createdAt - a.createdAt).slice(0, 30) };
+  fsPatch(u);
+}
+function fsPatch(u) {
+  const rest = el("fsRest"); if (!rest || S.route.name !== "friendship" || S.route.id !== u) return;
+  rest.innerHTML = fsRest(u, fsData(u)); wireFsRest(u);
+}
+function wireFsRest(u) {
+  const rest = el("fsRest"); if (!rest) return;
+  rest.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
+  rest.querySelectorAll("[data-fsmore]").forEach(b => b.onclick = () => { const k = b.dataset.fsmore; if (!S._fsMore || S._fsMore.u !== u) S._fsMore = { u }; S._fsMore[k] = fsShown(u, k) + (k === "money" || k === "groups" ? 10 : FS_STEP[k] * (k === "cm" ? 1.5 : 1)); fsPatch(u); });
+  rest.querySelectorAll("[data-fsp]").forEach(im => im.onclick = () => { const [eid, pid] = im.dataset.fsp.split("|"), ev = S.events.get(eid), p = (S.memories.get(eid) || []).find(x => x.id === pid); if (ev && p) openPhoto(ev, p); });
+}
+function wireFriendship(u) {
+  document.querySelectorAll(".fs-hero .fsp-l, .fs-hero .fsp-r").forEach(g => g.onclick = e => { e.stopPropagation(); openMascot(g.classList.contains("fsp-l") ? "dot" : "coral"); });
+  if (el("coralPop")) { el("coralPop").onclick = () => openMascot("coral"); setTimeout(() => { const c = el("coralPop"); if (c) c.remove(); }, 6500); }
+  if (el("fsPlan")) el("fsPlan").onclick = () => { resetCompose(); compose.invitees.add(u); go("#/new"); toast(`Planning with ${first(personName(u))}. Pick a theme and a time.`, null, null, "happy"); };
+  if (!S._fsMore || S._fsMore.u !== u) S._fsMore = { u };
+  wireFsRest(u);
+  if (!S._fsComments || S._fsComments.u !== u) fsLoadComments(u);
+  if (fsData(u).past.some(ev => !S.memories.has(ev.id)) && !S._memLoading) { S._memLoading = true; loadMemories(false).then(() => { S._memLoading = false; S._memFreshAt = Date.now(); fsPatch(u); }); }
+}
+
 function invitedRows() {
   const me = myUid(), t = todayStr(), out = [];
   for (const f of outgoingRequests()) out.push({ kind: "request", uid: otherIn(f), id: f.id });
@@ -5462,6 +5603,8 @@ function openNewMessageDialog() {
   el("nmAdd").onclick = () => { closeDialog(); openAddFriendsDialog(); };
 }
 function wireMessages() {
+  // a button inside a tappable row does its own thing (Message), not the row's (Our Friendlyship)
+  document.querySelectorAll("[data-stop][data-go]").forEach(b => b.onclick = e => { e.stopPropagation(); go(b.dataset.go); });
   document.querySelectorAll("#addFriendsBtn").forEach(b => b.onclick = openAddFriendsDialog);
   if (el("newMsgBtn")) el("newMsgBtn").onclick = openNewMessageDialog;
   if (el("msgSearch")) { el("msgSearch").oninput = filterMessages; filterMessages(); }

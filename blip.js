@@ -34,13 +34,14 @@
   const confetti = (cx, cy) => `<g class="conf">` + [[CORAL, -38, -30], ["#25A56A", 34, -34], ["#3B82F6", -30, 26], [SUN, 40, 22], [CORAL, 0, -46], ["#25A56A", 44, -6]]
     .map(([c, dx, dy]) => `<rect x="${cx - 3}" y="${cy - 4}" width="6" height="8" rx="1.5" fill="${c}" style="--dx:${dx}px;--dy:${dy}px"/>`).join("") + `</g>`;
 
-  function svg({ mood = "idle", size = 96, still = false, wave = false } = {}) {
-    const cx = 60, cy = 56, glow = (mood === "happy" || mood === "party") ? .78 : .6;
+  // coral = Coral, Dot's best friend (Friendlyship): a coral body with sunny cheeks.
+  function svg({ mood = "idle", size = 96, still = false, wave = false, coral = false } = {}) {
+    const cx = 60, cy = 56, glow = (mood === "happy" || mood === "party") ? .78 : .6, BODY = coral ? CORAL : SUN, CHK = coral ? SUN : CORAL;
     // a small raised hand on the right, only when asked for; it pivots from where it meets the body
-    const hand = wave ? `<path class="hand" d="M${cx + 34} ${cy + 4} L${cx + 47} ${cy - 16}" stroke="${SUN}" stroke-width="13" stroke-linecap="round" fill="none" style="transform-origin:${cx + 34}px ${cy + 4}px"/>` : "";
-    const body = `<path transform="translate(${cx} ${cy}) scale(4.2)" d="${SHAPES.pebble}" fill="${SUN}"/>
+    const hand = wave ? `<path class="hand" d="M${cx + 34} ${cy + 4} L${cx + 47} ${cy - 16}" stroke="${BODY}" stroke-width="13" stroke-linecap="round" fill="none" style="transform-origin:${cx + 34}px ${cy + 4}px"/>` : "";
+    const body = `<path transform="translate(${cx} ${cy}) scale(4.2)" d="${SHAPES.pebble}" fill="${BODY}"/>
       <ellipse cx="${cx - 17}" cy="${cy - 21}" rx="9" ry="5" fill="#fff" opacity=".45" transform="rotate(-35 ${cx - 17} ${cy - 21})"/>
-      <circle cx="${cx - 23}" cy="${cy + 8}" r="5.2" fill="${CORAL}" opacity="${glow}"/><circle cx="${cx + 23}" cy="${cy + 8}" r="5.2" fill="${CORAL}" opacity="${glow}"/>`;
+      <circle cx="${cx - 23}" cy="${cy + 8}" r="5.2" fill="${CHK}" opacity="${glow}"/><circle cx="${cx + 23}" cy="${cy + 8}" r="5.2" fill="${CHK}" opacity="${glow}"/>`;
     // Painter (the AI is making something): a coral beret, a brush in hand that dabs, and splashes of paint.
     const beret = mood === "painter" ? `<g class="beret"><ellipse cx="${cx - 4}" cy="${cy - 40}" rx="26" ry="9" fill="${CORAL}" transform="rotate(-12 ${cx - 4} ${cy - 40})"/><circle cx="${cx - 6}" cy="${cy - 50}" r="3.5" fill="${CORAL}"/></g>` : "";
     const brush = mood === "painter" ? `<g class="brush" style="transform-origin:${cx + 36}px ${cy + 10}px"><path d="M${cx + 36} ${cy + 10} L${cx + 52} ${cy - 18}" stroke="#8B5A2B" stroke-width="5" stroke-linecap="round"/><path d="M${cx + 50} ${cy - 15} L${cx + 56} ${cy - 26}" stroke="#E8DCC8" stroke-width="6" stroke-linecap="round"/><circle cx="${cx + 57}" cy="${cy - 28}" r="3.6" fill="#3B82F6"/></g>
@@ -238,5 +239,23 @@
     const f = n => (size * n).toFixed(1);
     return `<span class="blip-hat" style="position:relative;display:inline-block;width:${size}px;height:${size}px;flex:none">${svg({ mood, size })}<svg viewBox="0 0 40 40" style="position:absolute;left:${f(.36)}px;top:${f(-.16)}px;width:${f(.34)}px;height:${f(.34)}px;transform:rotate(14deg)" aria-hidden="true"><path d="M20 2 L34 34 L6 34 Z" fill="#FF6B57"/><path d="M13 20 L27 20 L30 27 L10 27 Z" fill="#FFF7EA" opacity=".8"/><circle cx="20" cy="3" r="4" fill="#FFC145"/></svg></span>`;
   }
-  window.Blip = { svg, hat, morph, play, SHAPES };
+  // Friendlyship: Dot and Coral, her best friend, leaning into each other (the logo's yellow dot and coral "l" as a pair).
+  // Animated (styles.css .fs-pair.play): each slides in from its side glancing at the other, they boop, both close
+  // their eyes happily, cheeks flush, a few sparkles pop, then they bob together. still = the small icon.
+  function pair({ size = 120, still = false } = {}) {
+    const H = Math.round(size * 104 / 144);
+    const looks = (x, dx) => [-11, 11].map(o => `<ellipse cx="${x + o + dx}" cy="55" rx="3.2" ry="5" fill="${INK}"/><circle cx="${x + o + dx + 1.1}" cy="52.9" r="1.1" fill="#fff"/>`).join("") + stroke(`M${x - 6} 64 Q${x} 68.5 ${x + 6} 64`, 2.6);
+    const happy = x => stroke(`M${x - 16} 56 Q${x - 11} 50.5 ${x - 6} 56`, 3.2) + stroke(`M${x + 6} 56 Q${x + 11} 50.5 ${x + 16} 56`, 3.2) + `<path d="M${x - 8} 63 Q${x} 73 ${x + 8} 63 Z" fill="${INK}"/>`;
+    // Coral has an arm (hidden until she waves hello); she's the lively one.
+    const one = (x, fill, cheek, tilt, look, cls, arm) => `<g class="${cls}">${arm ? `<g class="c-hop"><g class="c-wig"><g class="c-spin">` : ""}<g transform="rotate(${tilt} ${x} 58)">
+      ${arm ? `<path class="arm" d="M${x + 26} 52 L${x + 42} 27" stroke="${fill}" stroke-width="10.5" stroke-linecap="round" fill="none"/>` : ""}
+      <path transform="translate(${x} 58) scale(3.55)" d="${SHAPES.pebble}" fill="${fill}"/>
+      <ellipse cx="${x - 13}" cy="41" rx="6.5" ry="3.6" fill="#fff" opacity=".45" transform="rotate(-35 ${x - 13} 41)"/>
+      <circle class="ck" cx="${x - 19}" cy="64" r="4.4" fill="${cheek}" opacity=".75"/><circle class="ck" cx="${x + 19}" cy="64" r="4.4" fill="${cheek}" opacity=".75"/>
+      ${still ? happy(x) : `<g class="f1">${looks(x, look)}</g><g class="f2">${happy(x)}</g>`}</g>${arm ? `</g></g></g><g class="c-spk">${[[x + 30, 20, SUN], [x + 38, 34, "#fff"], [x + 22, 12, SUN]].map(([sx, sy, c]) => `<path d="M${sx} ${sy - 3.5} L${sx + 1} ${sy - 1} L${sx + 3.5} ${sy} L${sx + 1} ${sy + 1} L${sx} ${sy + 3.5} L${sx - 1} ${sy + 1} L${sx - 3.5} ${sy} L${sx - 1} ${sy - 1} Z" fill="${c}"/>`).join("")}</g>` : ""}</g>`;
+    const spk = still ? "" : `<g class="spks">${[[72, 14, "-14px", "-10px", SUN], [62, 10, "-22px", "-4px", CORAL], [83, 10, "18px", "-6px", CORAL], [72, 6, "2px", "-16px", SUN]].map(([x, y, dx, dy, c]) =>
+      `<path class="spk" style="--dx:${dx};--dy:${dy}" d="M${x} ${y - 4} L${x + 1.2} ${y - 1.2} L${x + 4} ${y} L${x + 1.2} ${y + 1.2} L${x} ${y + 4} L${x - 1.2} ${y + 1.2} L${x - 4} ${y} L${x - 1.2} ${y - 1.2} Z" fill="${c}"/>`).join("")}</g>`;
+    return `<svg viewBox="0 0 144 104" width="${size}" height="${H}" class="fs-pair-svg" role="img" aria-label="Dot and Coral">${spk}${one(46, SUN, CORAL, -8, 2.4, "fsp-l")}${one(98, CORAL, SUN, 8, -2.4, "fsp-r", !still)}</svg>`;
+  }
+  window.Blip = { svg, hat, morph, play, pair, SHAPES };
 })();
