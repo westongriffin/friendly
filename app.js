@@ -1800,10 +1800,11 @@ function homeBody() {
   const todayEvs = upcoming.filter(e => e.date === t && !hiddenToday.includes(e.id + "|" + e.date)).slice(0, 2);
   const todayCards = todayEvs.map(e => liveWindow(e).phase ? liveCard(e) : `<div class="card notif-card today-card" data-ev="${e.id}" role="button"><button type="button" class="today-x" data-hide-today="${e.id}|${e.date}" aria-label="Hide this">✕</button>${dotHat(56)}<div style="flex:1;min-width:0"><div class="eyebrow-sm">Today</div><b>${esc(e.title)}${e.time ? " · " + fmtTime(e.time) : ""}</b><div class="muted sm">${e.kind === "meeting" ? (e.invitedUids || []).filter(u => (e.rsvps || {})[u] === "going").length + " accepted" : goingCount(e) + " going"}${evStops(e).length ? " · " + evStops(e).length + " stops" : e.location ? " · " + esc(placeName(e.location)) : ""}</div></div><span class="chev">›</span></div>`).join("");
   if ((S.profile.city || "").trim()) ensureCurated();
-  const mine = upcoming.filter(e => !e._unjoined);
+  const mine = upcoming.filter(e => !e._unjoined), weekEnd = addDays(t, (7 - new Date().getDay()) % 7);
   const hero = mine.find(e => !todayEvs.includes(e)) || null;
-  const week = mine.filter(e => e !== hero && !todayEvs.includes(e)).slice(0, 3);
-  const weekCount = mine.filter(e => e.date <= addDays(t, 6)).length;
+  const rest = mine.filter(e => e !== hero && !todayEvs.includes(e));
+  const inWeek = rest.filter(e => e.date <= weekEnd), week = (inWeek.length ? inWeek : rest).slice(0, 3), weekLabel = inWeek.length ? "This week" : "Coming up";
+  const weekCount = mine.filter(e => e.date <= weekEnd).length;
   const hour = new Date().getHours(), dow = new Date().getDay(), weekend = dow >= 5 || dow === 0;
   const greet = hour < 4 ? "Up late" : hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   const dateLine = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
@@ -1819,7 +1820,7 @@ function homeBody() {
   ${needsYou()}
   ${moneyGlance()}
   ${curateTray(upcoming, false)}
-  ${week.length ? `<div class="hd-h"><h3>This week</h3><a class="hd-link" data-go="#/plans">All plans ›</a></div><div class="card hd-list">${week.map(ev => `<a class="hd-ev" data-ev="${ev.id}"><span class="hd-date"><b>${ev.date === t ? "Today" : evDate(ev).toLocaleDateString("en-US", { weekday: "short" })}</b><span>${evDate(ev).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span></span><span class="hd-evt"><b>${esc(ev.emoji || "")} ${esc(ev.title)}</b><span class="muted sm">${esc(fmtTime(ev.time))}${placeName(ev.location) ? " · " + esc(placeName(ev.location)) : ""}</span></span>${hdFaces(ev)}</a>`).join("")}</div>` : ""}
+  ${week.length ? `<div class="hd-h"><h3>${weekLabel}</h3><a class="hd-link" data-go="#/plans">All plans ›</a></div><div class="card hd-list">${week.map(ev => `<a class="hd-ev" data-ev="${ev.id}"><span class="hd-date"><b>${ev.date === t ? "Today" : evDate(ev).toLocaleDateString("en-US", { weekday: "short" })}</b><span>${evDate(ev).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span></span><span class="hd-evt"><b>${esc(ev.emoji || "")} ${esc(ev.title)}</b><span class="muted sm">${esc(fmtTime(ev.time))}${placeName(ev.location) ? " · " + esc(placeName(ev.location)) : ""}</span></span>${hdFaces(ev)}</a>`).join("")}</div>` : ""}
   ${memoriesStrip()}
   ${latestList()}
   ${crewsRow()}`;
@@ -4705,10 +4706,10 @@ function moneyBody() {
   const mine = settleList.filter(p => p.from === me || p.to === me);
   const rows = [...[...S.expenses.values()].map(x => ({ ...x, kind: "e" })), ...[...S.settlements.values()].map(s => ({ ...s, kind: "s" }))].sort((a, b) => b.createdAt - a.createdAt);
   return `
-  <div class="section-head"><h2>Money</h2><button class="btn primary small" id="addExpense">＋ Expense</button></div>
+  <div class="section-head"><h2>Money</h2><span class="btnrow" style="gap:6px"><button class="btn small" id="addPitch">🎁 Pitch in</button><button class="btn primary small" id="addExpense">＋ Expense</button></span></div>
   <div class="tiles"><div class="card tile owe"><span class="muted sm">You owe</span><div class="amt">${fmt$(iOwe)}</div></div>
     <div class="card tile owed"><span class="muted sm">Owed to you</span><div class="amt">${fmt$(owed)}</div></div></div>
-  ${pickCards()}
+  ${pickCards()}${pitchCards()}
   ${!mine.length && rows.length ? `<div class="card empty compact">${dot("party", 72)}<b>All squared up</b><p class="muted">Nobody owes anybody. Nice.</p></div>` : ""}
   ${mine.length ? `<div class="section-head"><h2>Settle up</h2>${pairs.length > 1 ? `<button class="btn small ${S.simplePay ? "primary" : ""}" id="simplePay" title="Combine debts into the fewest payments">${S.simplePay ? "✓ Fewest payments" : "Fewest payments"}</button>` : ""}</div><div class="stack" id="settleCard">${mine.map(p => {
     const other = payInfoOf(p.from === me ? p.to : p.from);
@@ -4722,11 +4723,14 @@ function moneyBody() {
   <div class="card">${rows.length ? rows.map(r => {
     if (r.kind === "s") return `<div class="ledger" data-srow="${esc(r.id)}"><div class="li pay">⤴</div><div style="flex:1;min-width:0"><b>${esc(nameOf(r.from))} paid ${esc(nameOf(r.to))}</b><div class="muted sm">${r.note ? esc(r.note) + " · " : ""}${new Date(r.createdAt).toLocaleDateString()}</div>${payReacts(r, false)}</div><span class="amt sm">${fmt$(r.amountCents)}</span>${r.addedBy === me ? `<button class="btn ghost small" data-dels="${r.id}">✕</button>` : ""}</div>`;
     const n = (r.split || []).length || 1;
+    if (r.kind === "e" && r.pitch) return `<div class="ledger" data-xrow="${r.id}"><div class="li">🎁</div><div style="flex:1"><b>${esc(r.desc)}</b><div class="muted sm">${esc(first(nameOf(r.paidBy)))} is collecting · ${fmt$(r.pitch.each)} each · ${pitchPaid(r).length} of ${(r.split || []).filter(u => u !== r.paidBy).length} in · ${new Date(r.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(pitchTotal(r))}</span><button class="btn ghost small" data-xopen="${r.id}">Open</button></div>`;
     return `<div class="ledger" data-xrow="${r.id}"><div class="li">🧾</div><div style="flex:1"><b>${esc(r.desc)}</b><div class="muted sm">${esc(nameOf(r.paidBy))} paid · ${r.shares ? "itemized, " + n + " people" : `split ${n} way${n > 1 ? "s" : ""}`} · ${new Date(r.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(r.amountCents)}</span><button class="btn ghost small" data-xopen="${r.id}" title="Details & discussion">💬</button>${r.addedBy === me ? `<button class="btn ghost small" data-dele="${r.id}" title="Delete" style="margin-left:6px">✕</button>` : ""}</div>`;
   }).join("") : emptyState("💸", "No shared costs yet", "Add an expense after your next hangout.", "happy")}</div>`;
 }
 function wireMoney() {
   el("addExpense").onclick = () => openExpense(null, null);
+  if (el("addPitch")) el("addPitch").onclick = () => openPitchIn();
+  wirePitch();
   if (el("simplePay")) el("simplePay").onclick = () => { S.simplePay = !S.simplePay; render(); };
   document.querySelectorAll("[data-xopen]").forEach(b => b.onclick = () => go("#/x/" + b.dataset.xopen));
   document.querySelectorAll("[data-xrow]").forEach(d => d.onclick = e => { if (e.target.closest("button,a")) return; go("#/x/" + d.dataset.xrow); });
@@ -4759,15 +4763,16 @@ function expenseBody(id) {
   const ev = x.eventId ? S.events.get(x.eventId) : null;
   return `
   <button class="link-back" data-go="#/money">‹ Money</button>
-  <div class="group-hero"><span class="li" style="width:52px;height:52px;font-size:24px">🧾</span>
-    <div><h1>${esc(x.desc || "Expense")}</h1><div class="muted">${fmt$(x.amountCents)} · ${esc(nameOf(x.paidBy))} paid${ev ? " · " + esc(ev.title) : ""} · ${new Date(x.createdAt).toLocaleDateString()}</div></div></div>
+  <div class="group-hero"><span class="li" style="width:52px;height:52px;font-size:24px">${x.pitch ? "🎁" : "🧾"}</span>
+    <div><h1>${esc(x.desc || "Expense")}</h1><div class="muted">${x.pitch ? `${esc(first(nameOf(x.paidBy)))} is collecting · ${fmt$(x.pitch.each)} each${x.pitch.closes ? " · " + (x.pitch.closes < todayStr() ? "closed " : "closes ") + esc(fmtDay({ date: x.pitch.closes })) : ""}` : `${fmt$(x.amountCents)} · ${esc(nameOf(x.paidBy))} paid`}${ev ? " · " + esc(ev.title) : ""} · ${new Date(x.createdAt).toLocaleDateString()}</div></div></div>
+  ${x.pitch ? pitchProgress(x) : ""}
   ${x.receipt ? `<div class="btnrow" style="margin-top:12px"><button class="btn small" id="viewReceipt">🧾 View receipt</button></div>` : ""}
-  ${x.addedBy !== myUid() ? "" : Object.keys(x.paid || {}).some(u => u !== x.paidBy) ? `<p class="muted sm" style="margin-top:10px">Someone has already paid, so this can't be changed. Mark their payment unpaid first if it needs fixing.</p>`
+  ${x.addedBy !== myUid() ? "" : x.pitch ? (Object.keys(x.paid || {}).length ? "" : `<div class="btnrow" style="margin-top:12px"><button class="btn small danger-ghost" id="xDelete">Delete</button></div>`) : Object.keys(x.paid || {}).some(u => u !== x.paidBy) ? `<p class="muted sm" style="margin-top:10px">Someone has already paid, so this can't be changed. Mark their payment unpaid first if it needs fixing.</p>`
     : `<div class="btnrow" style="margin-top:12px"><button class="btn small" id="xReopen">${(x.items || []).length ? "✏️ Reopen to make changes" : "✏️ Change who's splitting"}</button>${Object.keys(x.paid || {}).length ? "" : `<button class="btn small danger-ghost" id="xDelete">Delete</button>`}</div>`}
-  <div class="section-head"><h2>${x.shares ? "Who owes what" : `Split ${n} way${n > 1 ? "s" : ""}`}</h2></div>
+  <div class="section-head"><h2>${x.pitch ? "Who's in" : x.shares ? "Who owes what" : `Split ${n} way${n > 1 ? "s" : ""}`}</h2>${x.pitch && x.addedBy === myUid() && pitchLeft(x).length ? `<button class="btn small" id="pitchNudge">🔔 Nudge the ${pitchLeft(x).length} left</button>` : ""}</div>
   <div class="card">${(x.split || []).map(u => {
     const me = myUid(), cents = x.shares ? (x.shares[u] || 0) : share, paid = (x.paid || {})[u], payer = u === x.paidBy, canManage = me === x.paidBy || me === x.addedBy;
-    const status = payer ? `<span class="pill ok">Paid the bill</span>` : paid ? `<span class="pill ok">Paid${paid.at ? " · " + new Date(paid.at).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : ""}</span>` : `<span class="pill due">Unpaid</span>`;
+    const status = payer ? `<span class="pill ok">${x.pitch ? "Collecting" : "Paid the bill"}</span>` : paid ? `<span class="pill ok">Paid${paid.at ? " · " + new Date(paid.at).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : ""}</span>` : `<span class="pill due">Unpaid</span>`;
     const acts = payer || !cents ? "" : paid ? (canManage || paid.by === me ? `<button class="btn ghost small" data-munpaid="${esc(u)}">Mark unpaid</button>` : "")
       : `${canManage && u !== me ? `<button class="btn small" data-remind="${esc(u)}">${isGuest(u) ? "💬 Text" : "🔔 Remind"}</button>` : ""}${canManage && u !== me ? `<button class="btn small" data-mpaid="${esc(u)}">Mark paid</button>` : ""}`;
     return `<div class="member-row x-person" data-xperson="${esc(u)}">${avatar(u, "lg")}<div style="flex:1;min-width:0"><b>${esc(nameOf(u))}${u === me ? " (you)" : ""}</b><div class="x-status">${status}</div></div><div class="x-acts"><span class="amt sm">${fmt$(cents)}</span>${acts ? `<div class="btnrow" style="gap:6px;justify-content:flex-end">${acts}</div>` : ""}</div></div>${u === me && !payer && !paid && cents ? payBar(x.paidBy, cents) : ""}`; }).join("")}</div>
@@ -4809,6 +4814,8 @@ function wireExpensePage() {
   if (el("viewReceipt")) el("viewReceipt").onclick = () => lightbox(x.receipt);
   if (el("xReopen")) el("xReopen").onclick = () => (x.items || []).length ? reopenAsPick(x) : changeSplitPeople(x);
   if (el("xDelete")) el("xDelete").onclick = () => { if (!confirm(`Delete “${x.desc || "this expense"}”? Nobody has paid on it yet.`)) return; deleteWithUndo("expenses", x.id, x, "expense"); go("#/money"); };
+  if (el("pitchNudge")) el("pitchNudge").onclick = async () => { const b = el("pitchNudge"), left = pitchLeft(x).filter(u => !isGuest(u)); b.disabled = true;
+    try { await Promise.all(left.map(u => addDoc(collection(db, "nudges"), { expenseId: x.id, to: u, by: myUid(), createdAt: Date.now() }))); b.textContent = "Reminded ✓"; toast(`${left.length} ${left.length === 1 ? "person gets" : "people get"} a reminder.`, null, null, "coral:happy"); } catch (e) { toast(e.message); b.disabled = false; } };
   const share = u => x.shares ? (x.shares[u] || 0) : Math.round(x.amountCents / ((x.split || []).length || 1));
   const mine = share(myUid());
   document.querySelectorAll("[data-xvenmo]").forEach(b => b.onclick = () => payVenmo(x.paidBy, mine, "pay", x.id));
@@ -5515,6 +5522,56 @@ function changeSplitPeople(x) {
   el("xAddGuest").onclick = () => guestAdder(el("xGuests"), (gid, name) => { if (splitPicked().includes(gid)) return toast(`${first(name)} is already splitting it.`); added[gid] = name; sp.add(gid, name); });
 }
 // Open shared receipts on the Money tab.
+// ---------- PITCH IN (collect money up front: a gift, a deposit, tickets) ----------
+// A pitch-in is an expense with `pitch: { each, closes, goal }`: the collector is paidBy, everyone in is split with
+// shares of `each`, so paying, Mark paid, reminders, and Settle up all work exactly as they do for any expense.
+const pitchPaid = x => (x.split || []).filter(u => u !== x.paidBy && (x.paid || {})[u]);
+const pitchLeft = x => (x.split || []).filter(u => u !== x.paidBy && !(x.paid || {})[u]);
+const pitchTotal = x => (x.split || []).filter(u => u !== x.paidBy).length * x.pitch.each;
+const pitchOpen = x => x.pitch && (pitchLeft(x).length > 0) && (!x.pitch.closes || x.pitch.closes >= addDays(todayStr(), -14));
+function pitchProgress(x) {
+  const got = pitchPaid(x).length * x.pitch.each, goal = x.pitch.goal || pitchTotal(x), pct = goal ? Math.min(100, Math.round(got / goal * 100)) : 0, people = (x.split || []).filter(u => u !== x.paidBy);
+  return `<div class="card pi-card"><div class="pi-bar"><i style="width:${pct}%"></i></div><div class="pi-stats"><b>${fmt$(got)} of ${fmt$(goal)}</b><span class="muted sm">${pitchPaid(x).length} of ${people.length} have pitched in</span></div>
+    <div class="pi-people">${people.map(u => `<span class="pi-p ${(x.paid || {})[u] ? "paid" : ""}" title="${esc(nameOf(u))}">${avatar(u, "sm")}<i>${(x.paid || {})[u] ? "✓" : ""}</i></span>`).join("")}</div></div>`;
+}
+function pitchCards() {
+  const me = myUid(), list = [...S.expenses.values()].filter(x => x.pitch && pitchOpen(x) && (x.involved || []).includes(me)).sort((a, b) => b.createdAt - a.createdAt).slice(0, 4);
+  if (!list.length) return "";
+  return `<div class="section-head"><h2>Pitch in</h2></div><div class="stack" id="pitchCard">${list.map(x => {
+    const mine = x.paidBy === me, got = pitchPaid(x).length * x.pitch.each, goal = x.pitch.goal || pitchTotal(x), pct = goal ? Math.min(100, Math.round(got / goal * 100)) : 0, people = (x.split || []).filter(u => u !== x.paidBy), iPaid = !!(x.paid || {})[me], left = pitchLeft(x);
+    const when = x.pitch.closes ? (x.pitch.closes < todayStr() ? " · closed " : " · closes ") + esc(fmtDay({ date: x.pitch.closes })) : "";
+    return `<div class="card pi-card" data-pitch="${esc(x.id)}"><div class="pi-h">${avatar(x.paidBy, "lg")}<div style="flex:1;min-width:0"><b>${esc(x.desc)}</b><div class="muted sm">${mine ? "You're" : esc(first(nameOf(x.paidBy))) + " is"} collecting · ${fmt$(x.pitch.each)} each${when}</div></div></div>
+      <div class="pi-bar"><i style="width:${pct}%"></i></div><div class="pi-stats"><b>${fmt$(got)} of ${fmt$(goal)}</b><span class="muted sm">${pitchPaid(x).length} of ${people.length} have pitched in</span></div>
+      <div class="pi-people">${people.slice(0, 10).map(u => `<span class="pi-p ${(x.paid || {})[u] ? "paid" : ""}" title="${esc(nameOf(u))}">${avatar(u, "sm")}<i>${(x.paid || {})[u] ? "✓" : ""}</i></span>`).join("")}${people.length > 10 ? `<span class="muted sm">+${people.length - 10}</span>` : ""}</div>
+      <div class="settle-actions pi-acts">${mine ? `${left.length ? `<button class="btn small" data-pinudge="${esc(x.id)}">🔔 Nudge the ${left.length} left</button>` : `<span class="pill ok">Everyone's in 🎉</span>`}<button class="btn small" data-xopen="${esc(x.id)}">Open</button>`
+        : iPaid ? `<span class="pill ok">You pitched in ✓</span><button class="btn small" data-xopen="${esc(x.id)}">Open</button>` : `${payBtns(x.paidBy, x.pitch.each).replace(/>(Venmo|Cash App|Zelle)</g, (m, k) => `>${k} ${fmt$(x.pitch.each)}<`)}<button class="btn small" data-pipaid="${esc(x.id)}">Paid in cash</button>`}</div></div>`; }).join("")}</div>`;
+}
+function wirePitch() {
+  document.querySelectorAll("[data-pinudge]").forEach(b => b.onclick = async () => { const x = S.expenses.get(b.dataset.pinudge); if (!x) return; const left = pitchLeft(x).filter(u => !isGuest(u)); b.disabled = true;
+    try { await Promise.all(left.map(u => addDoc(collection(db, "nudges"), { expenseId: x.id, to: u, by: myUid(), createdAt: Date.now() }))); b.textContent = "Reminded ✓"; toast(`${left.length} ${left.length === 1 ? "person gets" : "people get"} a reminder.`, null, null, "coral:happy"); } catch (e) { toast(e.message); b.disabled = false; } });
+  document.querySelectorAll("[data-pipaid]").forEach(b => b.onclick = async () => { const x = S.expenses.get(b.dataset.pipaid); if (!x) return; if (!confirm(`Mark your ${fmt$(x.pitch.each)} as paid? ${first(nameOf(x.paidBy))} will see it.`)) return;
+    try { await updateDoc(doc(db, "expenses", x.id), { [`paid.${myUid()}`]: { at: Date.now(), by: myUid() } }); toast("You're in 🎉", null, null, "coral:party"); } catch (e) { toast(e.message); } });
+}
+function openPitchIn(groupId) {
+  const me = myUid(), groups = [...S.groups.values()], friends = myFriendUids();
+  let who = groupId && S.groups.get(groupId) ? groupId : groups[0] ? groups[0].id : "friends";
+  const people = () => who === "friends" ? friends : ((S.groups.get(who) || {}).memberUids || []).filter(u => u !== me);
+  const sum = () => { const n = people().length, each = parseAmount(el("piEach").value) || 0; el("piSum").textContent = n && each ? `${n} ${n === 1 ? "person" : "people"} · ${fmt$(each * n)} total` : n ? `${n} ${n === 1 ? "person" : "people"}` : ""; };
+  dialog(`<h3>Start a pitch-in</h3>
+    <label class="field"><span>What for</span><input id="piDesc" maxlength="80" placeholder="Gigi's birthday gift 🎁"></label>
+    <div class="two"><label class="field"><span>Each person pays ($)</span><input id="piEach" inputmode="decimal" placeholder="25"></label><label class="field"><span>Closes <span class="muted">(optional)</span></span><input type="date" id="piCloses" min="${todayStr()}"></label></div>
+    <div class="muted sm" style="margin:4px 0 6px">Who's in</div><div class="chiprow" id="piWho" style="flex-wrap:wrap;overflow:visible;padding-bottom:0">${groups.map(g => `<button type="button" class="fchip ${who === g.id ? "on" : ""}" data-piw="${esc(g.id)}">${groupMini(g)} ${esc(g.name)} (${((g.memberUids || []).filter(u => u !== me)).length})</button>`).join("")}<button type="button" class="fchip ${who === "friends" ? "on" : ""}" data-piw="friends">All friends (${friends.length})</button></div>
+    <div class="muted sm" id="piSum" style="margin-top:6px"></div>
+    <p class="muted sm" style="margin:10px 0 0">Everyone gets a nudge with your pay buttons. Money lands with you directly; you tick people off as it does, or they mark it themselves.</p>`,
+    "Send it", async () => {
+      const desc = el("piDesc").value.trim(), each = parseAmount(el("piEach").value), split = people();
+      if (!desc) return toast("Say what it's for."); if (!each) return toast("Enter what each person pays."); if (!split.length) return toast("Pick who's in.");
+      const rec = { desc, amountCents: each * split.length, paidBy: me, split: [...split], shares: Object.fromEntries(split.map(u => [u, each])), involved: [...new Set([me, ...split])], eventId: null, groupId: who === "friends" ? matchGroupId([me, ...split]) : who, addedBy: me, createdAt: Date.now(), guestNames: {}, pitch: { each, closes: el("piCloses").value || "", goal: each * split.length } };
+      try { const id = await saveExpense(rec); closeDialog(); toast("Sent. You'll see each one land.", null, null, "coral:happy"); go("#/x/" + id); } catch (e) { toast("Couldn't start that: " + e.message); }
+    });
+  document.querySelectorAll("[data-piw]").forEach(b => b.onclick = () => { document.querySelectorAll("[data-piw]").forEach(x => x.classList.remove("on")); b.classList.add("on"); who = b.dataset.piw; sum(); });
+  el("piEach").oninput = sum; sum();
+}
 function pickCards() {
   const me = myUid(), list = [...(S.splits || new Map()).values()].filter(t => t.status === "open").sort((a, b) => b.createdAt - a.createdAt);
   if (!list.length) return "";

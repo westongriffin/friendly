@@ -1582,6 +1582,12 @@ exports.onExpenseAdded = onDocumentCreated({ document: "expenses/{xid}", ...PUSH
   const split = (x.split || []).filter(Boolean), even = split.length ? Math.floor(x.amountCents / split.length) : 0;
   const shareOf = u => x.shares ? (x.shares[u] || 0) : (split.includes(u) ? even : 0);
   const url = "/#/x/" + e.params.xid, desc = x.desc || "an expense";
+  // A pitch-in: everyone in hears what's being collected and how much, with the collector's pay buttons a tap away.
+  if (x.pitch && x.pitch.each) {
+    const closes = x.pitch.closes ? ` · by ${new Date(x.pitch.closes + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}` : "";
+    await notify(people.filter(u => u !== adder), `${adderName} is collecting for ${desc}`, `${dollars(x.pitch.each)} each${closes} · pay ${adderName} from the Money tab.`, url, { type: "money", actorId: adder });
+    return;
+  }
   for (const u of people) {
     if (u === adder) continue;
     const share = shareOf(u);
