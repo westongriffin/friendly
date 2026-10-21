@@ -1367,7 +1367,7 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 
 /* Home: the dashboard */
 .hd-greet{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:4px 0 14px}.hd-greet h1{font-size:1.625rem;margin:0 0 2px}.hd-greet .blip{flex:none}
-.hd-hero{position:relative;display:flex;flex-direction:column;justify-content:space-between;min-height:236px;border-radius:20px;overflow:hidden;color:var(--th-ink,#fff);box-shadow:var(--shadow-lg);isolation:isolate;margin:0 0 6px;cursor:pointer}
+.hd-hero{position:relative;display:flex;flex-direction:column;justify-content:space-between;min-height:236px;border-radius:20px;overflow:hidden;color:var(--th-ink,#fff);box-shadow:var(--shadow-lg);isolation:isolate;margin:0 0 14px;cursor:pointer}
 .hd-hero .ev-card-bg,.hd-hero .cover-img{position:absolute;inset:0;z-index:-1}.hd-hero .cover-img{width:100%;height:100%;object-fit:cover}
 .hd-hero.has-cover{color:#fff}.hd-hero.has-cover::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.05),rgba(0,0,0,.6) 70%);z-index:-1}
 .hd-hero-top{display:flex;justify-content:space-between;align-items:center;padding:12px}.hd-chip{background:rgba(0,0,0,.22);backdrop-filter:blur(6px);border-radius:999px;padding:5px 11px;font-size:0.75rem;font-weight:700;color:#fff}
@@ -1428,7 +1428,7 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 .t-blacktie{--paint:radial-gradient(circle at 50% -5%,#3A3745,transparent 55%),linear-gradient(160deg,#0C0B0E,#1C1A22 55%,#2A2733)}
 
 /* Up for it? */
-.uf-ask{display:flex;align-items:center;gap:10px;width:100%;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:6px 8px 6px 6px;box-shadow:var(--shadow);margin:2px 0 6px;text-align:left}
+.uf-ask{display:flex;align-items:center;gap:10px;width:100%;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:6px 8px 6px 6px;box-shadow:var(--shadow);margin:0 0 14px;text-align:left}
 .uf-ask-av{flex:none;display:flex}.uf-ask-text{flex:1;color:var(--muted);font-size:.9rem;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.uf-ask-chips{display:flex;gap:4px}.uf-ask-chips .fchip{padding:4px 9px;font-size:.72rem;min-height:30px}
 .uf-list{padding:0}.uf-post{padding:12px 14px;border-top:1px solid var(--line)}.uf-post:first-child{border-top:0}.uf-post-h{display:flex;gap:10px;align-items:flex-start}.uf-post-h>.avatar,.uf-post-h>.blip{flex:none}.uf-post-h .btn{align-self:center}
 .uf-post-f{display:flex;align-items:center;gap:8px;margin-top:10px;padding-left:50px}.uf-post-f>.muted{flex:1;min-width:0}.uf-post-f .btn{margin-left:auto;flex:none;white-space:nowrap}.uf-post-h .muted{line-height:1.35}.uf-post.done{background:#FFF7F5;display:block}
