@@ -1920,7 +1920,7 @@ function weekDigest(mine) {
   for (const b of upcomingBirthdays(8).filter(b => b.date >= wk.mon && b.date <= wk.sun).slice(0, 2)) {
     rows.push({ date: b.date, html: `<div class="wk-row">${dateChip(b.date)}<div class="hd-evt"><b>🎂 ${esc(first(b.name))}'s birthday</b><span class="muted sm">Plan something?</span></div><a class="btn small" data-go="#/new">Plan</a></div>` });
   }
-  for (const a of [...(S.asks || new Map()).values()].filter(a => a.status === "open" && (a.expiresAt || 0) > Date.now() && a.by !== me && a.date >= wk.mon && a.date <= wk.sun).slice(0, 2)) {
+  for (const a of [...(S.asks || new Map()).values()].filter(a => !a.kind && a.status === "open" && (a.expiresAt || 0) > Date.now() && a.by !== me && a.date >= wk.mon && a.date <= wk.sun).slice(0, 2)) {
     const ins = (a.ins || []).filter(u => u !== a.by), im = ins.includes(me);
     rows.push({ date: a.date, html: `<div class="wk-row">${dateChip(a.date)}<div class="hd-evt"><b>${esc(first(nameOf(a.by)))} is free ${esc(a.whenLabel || "")}</b><span class="muted sm">${a.text ? esc(a.text) + " · " : ""}Up for it${ins.length ? ", " + ins.length + " in" : ""}</span></div>${im ? `<span class="pill ok">You're in</span>` : `<button type="button" class="btn small" data-askin="${esc(a.id)}">I'm in</button>`}</div>` });
   }
@@ -2022,7 +2022,7 @@ const askPart = { morning: "morning", afternoon: "afternoon", evening: "night", 
 function askBox() {
   if (isDemo() && !myFriendUids().length && !S.groups.size) return "";
   if (!myFriendUids().length && !S.groups.size) return "";
-  return `<button type="button" class="uf-ask" id="askBox"><span class="uf-ask-av">${avatar(myUid(), "sm")}</span><span class="uf-ask-text">Free sometime? Ask the crew…</span><span class="uf-ask-chips"><span class="fchip">Tonight</span><span class="fchip">Weekend</span></span></button>`;
+  return `<button type="button" class="uf-ask" id="askBox"><span class="uf-ask-av">${avatar(myUid(), "sm")}</span><span class="uf-ask-text">Free sometime? Ask the crew…</span><span class="uf-ask-chips"><span class="fchip">Tonight</span><span class="fchip" data-whenask>When works?</span></span></button>`;
 }
 function asksSection() {
   const me = myUid(), all = [...(S.asks || new Map()).values()];
@@ -2033,11 +2033,44 @@ function asksSection() {
 }
 const andNames = ns => ns.length <= 1 ? (ns[0] || "") : ns.length === 2 ? ns.join(" and ") : ns.length === 3 ? `${ns[0]}, ${ns[1]}, and ${ns[2]}` : `${ns[0]}, ${ns[1]}, and ${ns.length - 2} others`;
 function askCard(a) {
+  if (a.kind === "when") return whenAskCard(a);
   const me = myUid(), mine = a.by === me, ins = (a.ins || []).filter(u => u !== a.by), im = ins.includes(me);
   const left = Math.max(1, Math.round(((a.expiresAt || 0) - Date.now()) / 3600e3)), ends = left >= 24 ? `ends ${a.date === addDays(todayStr(), 1) ? "tomorrow" : "in " + Math.round(left / 24) + "d"}` : `ends in ${left}h`;
   return `<div class="uf-post" data-ask="${esc(a.id)}"><div class="uf-post-h">${avatar(a.by, "lg")}<div style="flex:1;min-width:0"><b>${mine ? "You're" : esc(first(nameOf(a.by))) + " is"} free ${esc(a.whenLabel || "")}</b><div class="muted sm">${a.text ? "“" + esc(a.text) + "” · " : ""}${ends}</div></div>${mine ? `<button type="button" class="btn ghost small" data-askdel="${esc(a.id)}" aria-label="Take this down">✕</button>` : ""}</div>
     <div class="uf-post-f">${ins.length ? `<span class="hd-faces">${ins.slice(0, 4).map(u => avatar(u, "xs")).join("")}</span><span class="muted sm">${esc(andNames(ins.map(u => u === me ? "you" : first(nameOf(u)))))} ${ins.length === 1 && !im ? "is" : "are"} in</span>` : `<span class="muted sm">${mine ? "Waiting for the first yes." : "Nobody's in yet. Be the first."}</span>`}
       ${mine ? (ins.length ? `<button type="button" class="btn primary small" data-askplan="${esc(a.id)}">Make it a plan</button>` : "") : `<button type="button" class="btn ${im ? "" : "primary"} small" data-askin="${esc(a.id)}">${im ? "✓ You're in" : "I'm in"}</button>`}</div></div>`;
+}
+// "When works?" before there's an event: a few dates go out to friends or a group, everyone ticks the ones they can
+// make, and when the poster locks one in Dot creates the plan with everyone who said yes going.
+function whenAskCard(a) {
+  const me = myUid(), mine = a.by === me, votes = a.votes || {}, people = (a.uids || []).filter(u => u !== a.by), voted = Object.keys(votes).filter(u => u !== a.by).length;
+  const count = id => Object.entries(votes).filter(([u, v]) => u !== a.by && (v || []).includes(id)).length;
+  const best = [...(a.options || [])].sort((x, y) => count(y.id) - count(x.id))[0];
+  return `<div class="uf-post" data-ask="${esc(a.id)}"><div class="uf-post-h">${avatar(a.by, "lg")}<div style="flex:1;min-width:0"><b>${mine ? "You're" : esc(first(nameOf(a.by))) + " is"} finding a time for ${esc(a.text)}</b><div class="muted sm">${voted} of ${people.length} answered · ${mine ? "lock one in when you're ready" : "tap the ones that work"}</div></div>${mine ? `<button type="button" class="btn ghost small" data-askdel="${esc(a.id)}" aria-label="Take this down">✕</button>` : ""}</div>
+    <div class="wa-opts">${(a.options || []).map(o => { const n = count(o.id), my = (votes[me] || []).includes(o.id); return `<button type="button" class="wa-opt ${best && o.id === best.id && n ? "best" : ""} ${my ? "mine" : ""}" data-wvote="${esc(a.id)}|${esc(o.id)}" ${mine ? "disabled" : ""}><span class="ww-tick">${my ? "✓" : ""}</span><span class="ww-mid"><b>${esc(twWhen(o))}</b><span class="ww-bar"><i style="width:${people.length ? n / people.length * 100 : 0}%"></i></span><small>${n} of ${people.length} can make it${best && o.id === best.id && n ? " · best so far" : ""}</small></span></button>`; }).join("")}</div>
+    ${mine && best && count(best.id) ? `<div class="uf-post-f" style="padding-left:0;justify-content:flex-end"><button type="button" class="btn primary small" data-wlock="${esc(a.id)}|${esc(best.id)}">Lock in ${esc(twWhen(best).split(" · ")[0])}</button></div>` : ""}</div>`;
+}
+function openWhenAsk() {
+  const t = todayStr(), groups = [...S.groups.values()], friends = myFriendUids(); let aud = "friends", waPk = { picked: new Set(), show() {} };
+  const row = i => `<div class="two"><label class="field"><span>Option ${i + 1}</span><input type="date" class="wa-d" min="${t}" ${i === 0 ? `value="${addDays(t, 2)}"` : ""}></label><label class="field"><span>Time</span><input type="time" class="wa-t" ${i === 0 ? 'value="19:00"' : ""}></label></div>`;
+  dialog(`<h3>When works?</h3><p class="muted" style="margin-top:-6px">Ask before you plan. Offer a few times, see who can make what, then lock one in and Dot makes it a plan.</p>
+    <label class="field"><span>What's the plan?</span><input id="waText" maxlength="80" placeholder="Dinner at Sixty Vines"></label>
+    ${[0, 1, 2, 3].map(row).join("")}
+    <div class="muted sm" style="margin:6px 0 6px">Who to ask</div><div class="chiprow" id="waAud" style="flex-wrap:wrap;overflow:visible;padding-bottom:0"><button type="button" class="fchip on" data-waa="friends">All friends (${friends.length})</button>${groups.map(g => `<button type="button" class="fchip" data-waa="${esc(g.id)}">${groupMini(g)} ${esc(g.name)} (${(g.memberUids || []).filter(u => u !== myUid()).length})</button>`).join("")}<button type="button" class="fchip" data-waa="pick">Pick people</button></div>
+    ${pickPeopleField("wa")}`,
+    "Ask everyone", async () => {
+      const text = el("waText").value.trim(); if (!text) return toast("Say what the plan is.");
+      const ds = [...document.querySelectorAll(".wa-d")], ts = [...document.querySelectorAll(".wa-t")];
+      const options = ds.map((d, i) => d.value ? { id: "o" + i + Math.random().toString(36).slice(2, 6), date: d.value, time: ts[i].value || "" } : null).filter(Boolean).sort((x, y) => (x.date + x.time).localeCompare(y.date + y.time));
+      if (options.length < 2) return toast("Give people at least two options.");
+      const uids = aud === "pick" ? [...waPk.picked] : aud === "friends" ? friends : ((S.groups.get(aud) || {}).memberUids || []).filter(u => u !== myUid());
+      if (!uids.length) return toast(aud === "pick" ? "Pick at least one person." : "Nobody to ask yet. Add friends or a group first.");
+      const last = new Date(evDate({ date: options[options.length - 1].date })); last.setHours(23, 59, 0, 0);
+      try { await setDoc(doc(db, "asks", newId()), { kind: "when", by: myUid(), byName: S.profile.name, text, options, votes: {}, date: options[0].date, part: "any", whenLabel: "finding a time", audience: aud, audienceName: aud === "friends" ? "friends" : (S.groups.get(aud) || {}).name || "", uids: [...new Set([myUid(), ...uids])], ins: [], status: "open", expiresAt: last.getTime(), createdAt: Date.now() }); closeDialog(); toast("Asked. Lock one in once the answers come.", null, null, "coral:happy"); }
+      catch (e) { toast(e.message); }
+    });
+  waPk = wirePickPeople("wa");
+  document.querySelectorAll("[data-waa]").forEach(b => b.onclick = () => { document.querySelectorAll("[data-waa]").forEach(x => x.classList.remove("on")); b.classList.add("on"); aud = b.dataset.waa; waPk.show(aud === "pick"); });
 }
 function openAskSheet() {
   const t = todayStr(), dow = new Date().getDay();
@@ -2045,18 +2078,19 @@ function openAskSheet() {
   const sat = addDays(t, (6 - dow + 7) % 7 || 7), days = [1, 2, 3, 4].map(n => addDays(t, n));
   const when = [["Tonight", t], ["Tomorrow", addDays(t, 1)], ...days.slice(1).map(d => [dayName(d).slice(0, 3), d]), ["This weekend", sat]];
   const groups = [...S.groups.values()];
-  let pick = { date: t, label: "Tonight", part: "evening", aud: "friends" };
+  let pick = { date: t, label: "Tonight", part: "evening", aud: "friends" }, askPk = { picked: new Set(), show() {} };
   dialog(`<h3>Up for it?</h3>
     <div class="muted sm" style="margin:0 0 6px">When</div><div class="chiprow" id="askWhen">${when.map(([l, d]) => `<button type="button" class="fchip ${d === t ? "on" : ""}" data-askd="${d}" data-askl="${esc(l)}">${esc(l)}</button>`).join("")}<button type="button" class="fchip" id="askPickDay">Pick a day</button></div>
     <input type="date" id="askDate" class="hidden" min="${t}" style="margin-top:6px">
     <div class="chiprow" id="askPart" style="margin-top:8px">${[["morning", "Morning"], ["afternoon", "Afternoon"], ["evening", "Evening"], ["any", "Any time"]].map(([k, l]) => `<button type="button" class="fchip ${k === "evening" ? "on" : ""}" data-askp="${k}">${l}</button>`).join("")}</div>
-    <div class="muted sm" style="margin:12px 0 6px">Who sees it</div><div class="chiprow" id="askAud"><button type="button" class="fchip on" data-aska="friends">All friends (${myFriendUids().length})</button>${groups.map(g => `<button type="button" class="fchip" data-aska="${esc(g.id)}">${groupMini(g)} ${esc(g.name)} (${(g.memberUids || []).length})</button>`).join("")}</div>
+    <div class="muted sm" style="margin:12px 0 6px">Who sees it</div><div class="chiprow" id="askAud"><button type="button" class="fchip on" data-aska="friends">All friends (${myFriendUids().length})</button>${groups.map(g => `<button type="button" class="fchip" data-aska="${esc(g.id)}">${groupMini(g)} ${esc(g.name)} (${(g.memberUids || []).length})</button>`).join("")}<button type="button" class="fchip" data-aska="pick">Pick people</button></div>
+    ${pickPeopleField("ask")}
     <label class="field" style="margin-top:12px"><span>What are you thinking? (optional)</span><input id="askText" maxlength="140" placeholder="Tacos and a margarita somewhere? Low key."></label>
     <p class="muted sm" style="margin:10px 0 0">It disappears after that day. Two “I'm in” taps and Dot turns it into a plan with everyone who's in.</p>`,
     "Post it", async () => {
       const text = el("askText").value.trim();
-      const uids = pick.aud === "friends" ? myFriendUids() : ((S.groups.get(pick.aud) || {}).memberUids || []).filter(u => u !== myUid());
-      if (!uids.length) return toast("Nobody to ask yet. Add friends or a group first.");
+      const uids = pick.aud === "pick" ? [...askPk.picked] : pick.aud === "friends" ? myFriendUids() : ((S.groups.get(pick.aud) || {}).memberUids || []).filter(u => u !== myUid());
+      if (!uids.length) return toast(pick.aud === "pick" ? "Pick at least one person." : "Nobody to ask yet. Add friends or a group first.");
       const end = new Date(evDate({ date: pick.date })); end.setHours(23, 59, 0, 0); if (pick.label === "This weekend") end.setDate(end.getDate() + 1);
       const label = pick.label === "This weekend" ? "this weekend" : `${pick.date === t ? "tonight" : pick.date === addDays(t, 1) ? "tomorrow" : dayName(pick.date)}${pick.date === t && pick.part === "evening" ? "" : askPart[pick.part] ? " " + askPart[pick.part] : ""}`;
       try { await setDoc(doc(db, "asks", newId()), { by: myUid(), byName: S.profile.name, text, date: pick.date, part: pick.part, whenLabel: label, audience: pick.aud, audienceName: pick.aud === "friends" ? "friends" : (S.groups.get(pick.aud) || {}).name || "", uids: [...new Set([myUid(), ...uids])], ins: [], status: "open", expiresAt: end.getTime(), createdAt: Date.now() }); closeDialog(); toast("Posted. You'll hear when someone's in.", null, null, "coral:happy"); }
@@ -2066,10 +2100,17 @@ function openAskSheet() {
   el("askPickDay").onclick = () => { document.querySelectorAll("#askWhen .fchip").forEach(x => x.classList.remove("on")); el("askPickDay").classList.add("on"); el("askDate").classList.remove("hidden"); el("askDate").focus(); };
   el("askDate").onchange = () => { if (el("askDate").value) { pick.date = el("askDate").value; pick.label = dayName(pick.date); } };
   document.querySelectorAll("[data-askp]").forEach(b => b.onclick = () => { document.querySelectorAll("[data-askp]").forEach(x => x.classList.remove("on")); b.classList.add("on"); pick.part = b.dataset.askp; });
-  document.querySelectorAll("[data-aska]").forEach(b => b.onclick = () => { document.querySelectorAll("[data-aska]").forEach(x => x.classList.remove("on")); b.classList.add("on"); pick.aud = b.dataset.aska; });
+  askPk = wirePickPeople("ask");
+  document.querySelectorAll("[data-aska]").forEach(b => b.onclick = () => { document.querySelectorAll("[data-aska]").forEach(x => x.classList.remove("on")); b.classList.add("on"); pick.aud = b.dataset.aska; askPk.show(pick.aud === "pick"); });
 }
 function wireAsks() {
-  if (el("askBox")) el("askBox").onclick = openAskSheet;
+  if (el("askBox")) el("askBox").onclick = e => e.target.closest("[data-whenask]") ? openWhenAsk() : openAskSheet();
+  if (el("composeWhen")) el("composeWhen").onclick = openWhenAsk;
+  document.querySelectorAll("[data-wvote]").forEach(b => b.onclick = async () => { const [id, oid] = b.dataset.wvote.split("|"), a = S.asks.get(id); if (!a) return; const me = myUid(), cur = ((a.votes || {})[me]) || [], next = cur.includes(oid) ? cur.filter(x => x !== oid) : [...cur, oid];
+    try { await updateDoc(doc(db, "asks", id), { [`votes.${me}`]: next }); } catch (e) { toast(e.message); } });
+  document.querySelectorAll("[data-wlock]").forEach(b => b.onclick = async () => { const [id, oid] = b.dataset.wlock.split("|"), a = S.asks.get(id); if (!a) return; const o = (a.options || []).find(x => x.id === oid); if (!o) return;
+    if (!confirm(`Lock in ${twWhen(o)}? Dot makes it a plan and invites everyone you asked.`)) return; b.disabled = true;
+    try { await updateDoc(doc(db, "asks", id), { force: true, lockId: oid }); toast("Dot's setting it up…", null, null, "thinking"); } catch (e) { toast(e.message); b.disabled = false; } });
   document.querySelectorAll("[data-askin]").forEach(b => b.onclick = async () => { const a = S.asks.get(b.dataset.askin); if (!a) return; const me = myUid(), im = (a.ins || []).includes(me); b.disabled = true;
     try { await updateDoc(doc(db, "asks", a.id), { ins: im ? arrayRemove(me) : arrayUnion(me) }); if (!im) toast("You're in. " + first(nameOf(a.by)) + " will see.", null, null, "coral:happy"); } catch (e) { toast(e.message); b.disabled = false; } });
   document.querySelectorAll("[data-askdel]").forEach(b => b.onclick = () => { if (!confirm("Take this down?")) return; deleteDoc(doc(db, "asks", b.dataset.askdel)).catch(e => toast(e.message)); });
@@ -3442,7 +3483,7 @@ function composeBody() {
     <div class="form-card card">
       <label class="field"><span>${compose.kind === "meeting" ? "Meeting title" : "What's the plan?"}</span><input id="cTitle" maxlength="80" value="${esc(compose.title)}" placeholder="Rooftop taco night"></label>
       <div class="two">
-        <label class="field"><span>${compose.kind === "trip" ? "First day" : "Date"}</span><input id="cDate" type="date" value="${compose.date || todayStr()}"></label>
+        <label class="field"><span>${compose.kind === "trip" ? "First day" : "Date"}</span><input id="cDate" type="date" value="${compose.date || todayStr()}">${compose.kind !== "meeting" && compose.kind !== "trip" && !compose._plan ? `<button type="button" class="link-btn when-hint" id="composeWhen">Not sure when? Ask first ›</button>` : ""}</label>
         ${compose.kind === "trip" ? `<label class="field"><span>Last day</span><input id="cEndDate" type="date" value="${compose.endDate || addDays(compose.date || todayStr(), 2)}" min="${compose.date || todayStr()}"></label>` : ""}
         <label class="field stops-hide ${(compose.stops || []).length >= 2 ? "hidden" : ""}"><span>Start</span><input id="cTime" type="time" value="${compose.time}"></label>
       </div>
@@ -3627,6 +3668,7 @@ function wireCompose() {
   if (el("saveDraftBtn")) el("saveDraftBtn").onclick = () => saveDraftToAccount();
   wirePlusFields("c"); wireComposeDay();
   document.querySelectorAll("[data-kind]").forEach(b => b.onclick = () => { syncCompose(); compose.kind = b.dataset.kind; render(); });
+  if (el("composeWhen")) el("composeWhen").onclick = openWhenAsk;
   if (el("discardDraft")) el("discardDraft").onclick = () => { try { LS.remove("friendlyDraft"); } catch {} resetCompose(); compose._restored = true; render(); };
 }
 function refreshCoverUI() {
@@ -5730,19 +5772,32 @@ function wirePitch() {
   document.querySelectorAll("[data-pipaid]").forEach(b => b.onclick = async () => { const x = S.expenses.get(b.dataset.pipaid); if (!x) return; if (!confirm(`Mark your ${fmt$(x.pitch.each)} as paid? ${first(nameOf(x.paidBy))} will see it.`)) return;
     try { await updateDoc(doc(db, "expenses", x.id), { [`paid.${myUid()}`]: { at: Date.now(), by: myUid() } }); toast("You're in 🎉", null, null, "coral:party"); } catch (e) { toast(e.message); } });
 }
+function pickablePeople() {
+  const me = myUid(), groups = [...S.groups.values()];
+  return [...new Set([...myFriendUids(), ...groups.flatMap(g => g.memberUids || []), ...S.contacts.keys()])].filter(u => u && u !== me && !isGuest(u)).map(u => [u, nameOf(u)]).sort((a, b) => a[1].localeCompare(b[1]));
+}
+// pickPeopleField("pi") renders the hidden list; wirePickPeople("pi", onChange) returns { show(on), picked: Set }.
+function pickPeopleField(pre) {
+  return `<div id="${pre}Pick" class="pi-pick" hidden><input type="search" id="${pre}Search" placeholder="Search people" autocomplete="off" aria-label="Search people">
+      <div class="pi-pick-list">${pickablePeople().map(([u, n]) => `<label class="pi-pick-row" data-pname="${esc(n.toLowerCase())}"><input type="checkbox" data-pip="${pre}|${esc(u)}">${avatar(u, "sm")}<span>${esc(n)}</span></label>`).join("") || `<p class="muted sm">Nobody to pick yet. Add friends or a group first.</p>`}</div></div>`;
+}
+function wirePickPeople(pre, onChange) {
+  const picked = new Set(), box = el(pre + "Pick");
+  box.querySelectorAll("[data-pip]").forEach(cb => cb.onchange = () => { const u = cb.dataset.pip.split("|")[1]; cb.checked ? picked.add(u) : picked.delete(u); onChange && onChange(); });
+  el(pre + "Search").oninput = () => { const q = el(pre + "Search").value.trim().toLowerCase(); box.querySelectorAll(".pi-pick-row").forEach(r => { r.hidden = !!q && !r.dataset.pname.includes(q); }); };
+  return { picked, show(on) { box.hidden = !on; if (on) el(pre + "Search").focus(); } };
+}
 function openPitchIn(groupId) {
   const me = myUid(), groups = [...S.groups.values()], friends = myFriendUids();
   let who = groupId && S.groups.get(groupId) ? groupId : groups[0] ? groups[0].id : "friends";
-  const picked = new Set();
-  const people = () => who === "pick" ? [...picked] : who === "friends" ? friends : ((S.groups.get(who) || {}).memberUids || []).filter(u => u !== me);
-  const everyone = [...new Set([...friends, ...groups.flatMap(g => g.memberUids || []), ...S.contacts.keys()])].filter(u => u && u !== me && !isGuest(u)).map(u => [u, nameOf(u)]).sort((a, b) => a[1].localeCompare(b[1]));
+  let pk = { picked: new Set(), show() {} };
+  const people = () => who === "pick" ? [...pk.picked] : who === "friends" ? friends : ((S.groups.get(who) || {}).memberUids || []).filter(u => u !== me);
   const sum = () => { const n = people().length, each = parseAmount(el("piEach").value) || 0; el("piSum").textContent = n && each ? `${n} ${n === 1 ? "person" : "people"} · ${fmt$(each * n)} total` : n ? `${n} ${n === 1 ? "person" : "people"}` : ""; };
   dialog(`<h3>Start a pitch-in</h3>
     <label class="field"><span>What for</span><input id="piDesc" maxlength="80" placeholder="Gigi's birthday gift 🎁"></label>
     <div class="two"><label class="field"><span>Each person pays ($)</span><input id="piEach" inputmode="decimal" placeholder="25"></label><label class="field"><span>Closes <span class="muted">(optional)</span></span><input type="date" id="piCloses" min="${todayStr()}"></label></div>
     <div class="muted sm" style="margin:4px 0 6px">Who's in</div><div class="chiprow" id="piWho" style="flex-wrap:wrap;overflow:visible;padding-bottom:0">${groups.map(g => `<button type="button" class="fchip ${who === g.id ? "on" : ""}" data-piw="${esc(g.id)}">${groupMini(g)} ${esc(g.name)} (${((g.memberUids || []).filter(u => u !== me)).length})</button>`).join("")}<button type="button" class="fchip ${who === "friends" ? "on" : ""}" data-piw="friends">All friends (${friends.length})</button><button type="button" class="fchip" data-piw="pick">Pick people</button></div>
-    <div id="piPick" class="pi-pick" hidden><input type="search" id="piSearch" placeholder="Search people" autocomplete="off" aria-label="Search people">
-      <div class="pi-pick-list">${everyone.map(([u, n]) => `<label class="pi-pick-row" data-pname="${esc(n.toLowerCase())}"><input type="checkbox" data-pip="${esc(u)}">${avatar(u, "sm")}<span>${esc(n)}</span></label>`).join("") || `<p class="muted sm">Nobody to pick yet. Add friends or a group first.</p>`}</div></div>
+    ${pickPeopleField("pi")}
     <div class="muted sm" id="piSum" style="margin-top:6px"></div>
     <p class="muted sm" style="margin:10px 0 0">Everyone gets a nudge with your pay buttons. Money lands with you directly; you tick people off as it does, or they mark it themselves.</p>`,
     "Send it", async () => {
@@ -5751,9 +5806,8 @@ function openPitchIn(groupId) {
       const rec = { desc, amountCents: each * split.length, paidBy: me, split: [...split], shares: Object.fromEntries(split.map(u => [u, each])), involved: [...new Set([me, ...split])], eventId: null, groupId: who === "friends" ? matchGroupId([me, ...split]) : who, addedBy: me, createdAt: Date.now(), guestNames: {}, pitch: { each, closes: el("piCloses").value || "", goal: each * split.length } };
       try { const id = await saveExpense(rec); closeDialog(); toast("Sent. You'll see each one land.", null, null, "coral:happy"); go("#/x/" + id); } catch (e) { toast("Couldn't start that: " + e.message); }
     });
-  document.querySelectorAll("[data-piw]").forEach(b => b.onclick = () => { document.querySelectorAll("[data-piw]").forEach(x => x.classList.remove("on")); b.classList.add("on"); who = b.dataset.piw; el("piPick").hidden = who !== "pick"; if (who === "pick") el("piSearch").focus(); sum(); });
-  document.querySelectorAll("[data-pip]").forEach(cb => cb.onchange = () => { cb.checked ? picked.add(cb.dataset.pip) : picked.delete(cb.dataset.pip); sum(); });
-  el("piSearch").oninput = () => { const q = el("piSearch").value.trim().toLowerCase(); document.querySelectorAll(".pi-pick-row").forEach(r => { r.hidden = !!q && !r.dataset.pname.includes(q); }); };
+  pk = wirePickPeople("pi", sum);
+  document.querySelectorAll("[data-piw]").forEach(b => b.onclick = () => { document.querySelectorAll("[data-piw]").forEach(x => x.classList.remove("on")); b.classList.add("on"); who = b.dataset.piw; pk.show(who === "pick"); sum(); });
   el("piEach").oninput = sum; sum();
 }
 function pickCards() {

@@ -1299,6 +1299,10 @@ exports.onEventCreated = onDocumentCreated({ document: "events/{id}", ...MAIL },
   const kind = ev.kind === "meeting" ? "meeting" : "event";
   if (ev.fromAsk) {
     const when = niceWhen(ev.date, ev.time);
+    if (ev.fromWhen) { const nm2 = await names([ev.hostId]); const going = u => (ev.rsvps || {})[u] === "going";
+      await notify((ev.invitedUids || []).filter(u => u !== ev.hostId && going(u)), "It's a plan 🎉", `${ev.emoji || "📅"} ${ev.title} · ${when}. ${firstName(nm2[ev.hostId])} locked it in and you said that works.`, "/#/e/" + e.params.id, { type: kind, actorId: ev.hostId });
+      await notify((ev.invitedUids || []).filter(u => u !== ev.hostId && !going(u)), `${firstName(nm2[ev.hostId])} locked in ${ev.title}`, `${ev.emoji || "📅"} ${when}. You're invited if you can swing it.`, "/#/e/" + e.params.id + "?to=rsvpCard", { type: kind, actorId: ev.hostId });
+      await writePreview(e.params.id, ev); return; }
     await notify(ev.invitedUids || [], "It's a plan 🎉", `${ev.emoji || "🙌"} ${ev.title}${when ? " · " + when : ""}. Dot set it up with everyone who's in.`, "/#/e/" + e.params.id, { type: kind, actorId: ev.hostId });
     await writePreview(e.params.id, ev); return;
   }
@@ -1716,10 +1720,29 @@ exports.onAskWritten = onDocumentWritten({ document: "asks/{id}", ...PUSH }, asy
   const id = e.params.id, by = after.by, byName = firstName(after.byName);
   if (!before) {
     const to = (after.uids || []).filter(u => isRealUid(u) && u !== by);
-    await notify(to, `${byName} is free ${after.whenLabel || "soon"}. Up for it?`, after.text ? `“${String(after.text).slice(0, 100)}”` : "Tap I'm in and it becomes a plan.", "/#/?to=asksCard", { type: "ask", actorId: by });
+    if (after.kind === "when") await notify(to, `${byName} is finding a time for ${String(after.text || "a plan").slice(0, 60)}`, `${(after.options || []).length} options. Tap the ones that work for you.`, "/#/?to=asksCard", { type: "ask", actorId: by });
+    else await notify(to, `${byName} is free ${after.whenLabel || "soon"}. Up for it?`, after.text ? `“${String(after.text).slice(0, 100)}”` : "Tap I'm in and it becomes a plan.", "/#/?to=asksCard", { type: "ask", actorId: by });
     return;
   }
   if (after.status !== "open") return;
+  // When works: the poster locked an option in. Everyone asked is invited; whoever ticked that option is going.
+  if (after.kind === "when") {
+    const o = (after.options || []).find(x => x.id === after.lockId); if (!after.force || !o) return;
+    const asked = [...new Set((after.uids || []).filter(u => isRealUid(u) && u !== by))];
+    const yes = asked.filter(u => ((after.votes || {})[u] || []).includes(o.id));
+    const snaps = await db.getAll(...[by, ...asked].map(u => db.doc("users/" + u)));
+    const names = {}; snaps.forEach(sn => { names[sn.id] = (sn.exists && sn.get("name")) || "Friend"; });
+    const title = String(after.text || "Plan").trim().slice(0, 60).replace(/^./, c => c.toUpperCase()), emoji = (ASK_EMOJI.find(([re]) => re.test(title)) || [null, "📅"])[1], h = [...id].reduce((n, ch) => n + ch.charCodeAt(0), 0);
+    const ev = { hostId: by, hostName: after.byName || "Friend", cohostUids: [], groupId: after.audience && after.audience !== "friends" ? after.audience : "", invitedUids: [by, ...asked], names, title, emoji,
+      theme: ASK_THEMES[h % ASK_THEMES.length], customTheme: null, cover: "", date: o.date, time: o.time || "", endTime: "", location: "", stops: [], food: "", notes: "",
+      capacity: 0, approval: false, tz: "", allowPlus: false, plusMax: 0, dayBring: true, dayCarpool: true, questions: [], rsvps: Object.fromEntries([by, ...yes].map(u => [u, "going"])), plusOnes: {}, hypes: {}, answers: {},
+      openLink: true, kind: "event", invitedPhones: [], invitedPhoneNames: {}, guestEmails: [], sequence: 0, fromAsk: id, fromWhen: true, createdAt: Date.now() };
+    const ref = db.collection("events").doc();
+    await ref.set(ev);
+    await e.data.after.ref.update({ status: "planned", planId: ref.id, planTitle: title, plannedAt: Date.now() });
+    logger.info(`when-ask ${id} became event ${ref.id} (${yes.length} yes of ${asked.length})`);
+    return;
+  }
   const ins = [...new Set((after.ins || []).filter(u => isRealUid(u) && u !== by))];
   if (!(ins.length >= 2 || (after.force && ins.length >= 1))) return;
   // Build the plan

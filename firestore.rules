@@ -442,7 +442,9 @@ service cloud.firestore {
         && request.resource.data.uids.size() <= 400
         && (!isDemoUser() || request.resource.data.uids.hasOnly(demoUids()));
       allow update: if signedIn() && (uid() == resource.data.by
-        || (uid() in resource.data.uids && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ins'])));
+        || (uid() in resource.data.uids && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ins']))
+        || (uid() in resource.data.uids && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes'])
+            && request.resource.data.votes.diff(resource.data.get('votes', {})).affectedKeys().hasOnly([uid()])));
       allow delete: if signedIn() && uid() == resource.data.by;
     }
     match /settlements/{settlementId} {
