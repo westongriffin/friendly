@@ -1892,13 +1892,14 @@ exports.onGroupDeleted = onDocumentDeleted({ document: "groups/{gid}" }, async e
   await ungroupFriends(e.params.gid, g.memberUids || [], g.memberUids || []);
 });
 // The reverse of groupFriends: someone leaves (or is removed, or the group goes away) and the friendships that
-// existed only because of that group go too. A friendship stays when the two still share another group, when
-// either of them asked for it, or when they've messaged each other.
+// existed only because of that group go too. A friendship stays when the two still share another group, have
+// been on an event together, when either of them asked for it, or when they've messaged each other.
 async function ungroupFriends(gid, leavers, others) {
   let n = 0;
   for (const a of leavers) {
-    const mine = await db.collection("groups").where("memberUids", "array-contains", a).get();
+    const [mine, evs] = await Promise.all([db.collection("groups").where("memberUids", "array-contains", a).get(), db.collection("events").where("invitedUids", "array-contains", a).get()]);
     const stillWith = new Set(); mine.docs.forEach(d => { if (d.id !== gid) (d.get("memberUids") || []).forEach(u => stillWith.add(u)); });
+    evs.docs.forEach(d => (d.get("invitedUids") || []).forEach(u => stillWith.add(u)));
     for (const b of others) {
       if (a === b || stillWith.has(b)) continue;
       const id = pairId(a, b), ref = db.doc("friendships/" + id), f = await ref.get();
