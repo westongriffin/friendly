@@ -1054,7 +1054,7 @@ function startPast() {
 // them without auth and logs a burst of permission-denied errors.
 function stopListening() { S.subs.forEach(fn => fn()); S.subs = []; cleanupEvent(); }
 // Remember the guest names an event carries, for guests outside my groups.
-function noteNames(ev) { S.nameHints = S.nameHints || new Map(); for (const [uid, n] of Object.entries(ev.names || {})) if (n) S.nameHints.set(uid, n); }
+function noteNames(ev) { S.nameHints = S.nameHints || new Map(); for (const [uid, n] of Object.entries(ev.names || {})) if (n) S.nameHints.set(uid, n); if (ev.hostId && ev.hostName && !S.nameHints.get(ev.hostId)) S.nameHints.set(ev.hostId, ev.hostName); }
 
 // events tied to any of my groups (re-subscribed when the group set changes, or when past events switch on)
 function resubscribeEvents(u) {
@@ -1119,7 +1119,9 @@ function payInfoOf(uid) {
 }
 // Names come from shared groups (contacts); guests who joined an event by link
 // are only known by the names the event carries (see noteNames).
-const nameHint = uid => (S.nameHints && S.nameHints.get(uid)) || "";
+const nameHint = uid => (S.nameHints && S.nameHints.get(uid)) || hostNameHint(uid) || "";
+// Last resort for a host you don't know: any loaded event they host carries their name.
+function hostNameHint(uid) { if (!uid || !S.events) return ""; for (const ev of S.events.values()) { if (ev.hostId === uid && ev.hostName) { (S.nameHints = S.nameHints || new Map()).set(uid, ev.hostName); return ev.hostName; } if (ev.names && ev.names[uid]) { (S.nameHints = S.nameHints || new Map()).set(uid, ev.names[uid]); return ev.names[uid]; } } return ""; }
 const nameOf = uid => (S.contacts.get(uid) || {}).name || nameHint(uid) || "Someone";
 // data-pf: tapping anyone's picture opens their profile (see the capture listener below).
 function avatar(uid, cls = "") { const info = S.contacts.get(uid) || {}; const name = info.name || nameHint(uid); const pf = uid ? ` data-pf="${esc(uid)}"` : ""; if (info.photo) return `<span class="avatar ${cls} has-img"${pf}><img src="${esc(info.photo)}" alt=""></span>`; return `<span class="avatar ${cls}" style="background:${colorFor(uid)}"${pf}>${esc(/\bxs\b/.test(cls) ? initials(name || "?").slice(0, 1) : initials(name || "?"))}</span>`; }
@@ -3764,6 +3766,7 @@ function renderEventPage(root, id) {
   // wall, photos, polls and playlist current).
   if (S._bgRender && ev && S._evShown && S._evShown.id === id && S._evShown.ev === ev && S._evShown.profile === S.profile && el("evPage")) return;
   cleanupEvent();
+  if (ev) noteNames(ev);   // the host's and guests' names ride on the event, for guests who don't know them
   S._evShown = ev ? { id, ev, profile: S.profile } : null;
   if (!ev) startPast();
   if (!ev) { root.innerHTML = shell(`<div class="card empty">${dot("thinking", 72)}<b>Loading event…</b><p class="muted">If this stays, you may not have access.</p><button class="btn" data-go="#/">Home</button></div>`); wireShell(); getDoc(doc(db, "events", id)).then(d => { if (d.exists()) { S.events.set(id, { id, ...d.data() }); render(); } }).catch(() => {}); return; }
