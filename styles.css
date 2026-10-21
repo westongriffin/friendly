@@ -1388,3 +1388,4 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 .hd-greet+.cur-tray,.hd-money+.cur-tray{margin-top:16px}
 /* Five tabs on a narrow phone: a touch smaller, and the Curate picks stack tightens up */
 @media (max-width:389px){.tabs .tab{font-size:13.5px;padding:9px 0}.tabs .tab.tab-curate.has-picks{flex:1.35;gap:2px}.tabs .tab-curate .cur-stack{transform:scale(.85);margin-right:-4px}}
+.settle-who{display:flex;align-items:center;gap:8px;margin:4px 0 14px;font-size:15px}

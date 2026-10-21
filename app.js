@@ -5307,17 +5307,16 @@ function pickCards() {
     return `<div class="member-row dm-row" role="button" data-go="#/pick/${esc(t.id)}"><span class="li">🧾</span><div style="flex:1;min-width:0"><b>${esc(t.desc)}</b><div class="muted sm">${sub} · ${fmt$(splitTotal(t))}</div></div><span class="chev">›</span></div>`; }).join("")}</div>`;
 }
 
+// Mark as paid / received from a settle-up row: the pair is already known, so only the amount can change
+// (for a partial payment). Undo is offered right after.
 function openSettle(from, to, amount) {
-  const people = moneyPeople(from, to);
-  const opts = sel => people.map(([u, i]) => `<option value="${u}" ${u === sel ? "selected" : ""}>${esc(first(i.name))}</option>`).join("");
-  dialog(`<h3>Mark as paid</h3><p class="muted" style="margin-top:-6px">Log a payback so balances update. You can undo it right after.</p>
-    <div class="two"><label class="field"><span>From</span><select id="sFrom">${opts(from || myUid())}</select></label>
-    <label class="field"><span>To</span><select id="sTo">${opts(to)}</select></label></div>
-    <label class="field"><span>Amount ($)</span><input id="sAmt" inputmode="decimal" value="${amount ? (amount / 100).toFixed(2) : ""}"></label>`,
-    "Mark paid", async () => {
+  const me = myUid(), received = to === me, nm = u => u === me ? "You" : first(nameOf(u));
+  dialog(`<h3>${received ? "Mark as received" : "Mark as paid"}</h3><p class="muted" style="margin-top:-6px">${received ? `${esc(nm(from))} paid you back outside Friendly?` : `You paid ${esc(nm(to))} outside Friendly?`} Log it here and the balances update. You can undo it right after.</p>
+    <div class="settle-who">${avatar(from, "sm")}<b>${esc(nm(from))}</b><span class="muted">→</span>${avatar(to, "sm")}<b>${esc(nm(to))}</b></div>
+    <label class="field"><span>Amount ($)</span><input id="sAmt" inputmode="decimal" value="${amount ? (amount / 100).toFixed(2) : ""}"></label><p class="muted sm" style="margin-top:-4px">Only part of it? Change the amount.</p>`,
+    received ? "Mark received" : "Mark paid", async () => {
       const amt = parseAmount(el("sAmt").value); if (!amt) return toast("Enter a valid amount.");
-      const f = el("sFrom").value, t = el("sTo").value; if (f === t) return toast("Pick two people.");
-      closeDialog(); markPaid(f, t, amt, "");
+      closeDialog(); markPaid(from, to, amt, "");
     });
 }
 
