@@ -1856,8 +1856,11 @@ function wireHomeDash() {
   document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
   document.querySelectorAll("[data-act]").forEach(a => a.onclick = e => { e.preventDefault(); location.hash = routeTail(a.dataset.act); });
   document.querySelectorAll("[data-hdmem]").forEach(im => im.onclick = () => { const [eid, pid] = im.dataset.hdmem.split("|"), ev = S.events.get(eid), p = (S.memories.get(eid) || []).find(x => x.id === pid); if (ev && p) openPhoto(ev, p); });
-  // Photos load once for the strip; the Memories page keeps them fresh after that.
-  if (!S._hdMemTried && S.events.size && ![...S.memories.values()].flat().length) { S._hdMemTried = true; loadMemories(false).then(() => { if (S.route.name === "home") render(); }).catch(() => {}); }
+  // Memories come mostly from past plans, which load on request: ask for them, then gather photos for any plan we
+  // haven't looked at yet (past plans arrive a moment after the first paint, so this runs again on that redraw).
+  if (!S.pastOn) startPast();
+  const unseen = [...S.events.keys()].filter(id => !S.memories.has(id));
+  if (unseen.length && !S._hdMemLoading) { S._hdMemLoading = true; loadMemories(false).catch(() => {}).then(() => { S._hdMemLoading = false; if (S.route.name === "home") render(); }); }
 }
 function plansBody() {
   const evs = [...myEvents(), ...unjoinedEvents()];
