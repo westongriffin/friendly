@@ -1802,10 +1802,11 @@ function homeBody() {
   const upcoming = evs.filter(e => e.date >= t).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
   let hiddenToday = []; try { hiddenToday = JSON.parse(LS.get("friendlyTodayHidden") || "[]"); } catch {}
   const todayEvs = upcoming.filter(e => e.date === t && !hiddenToday.includes(e.id + "|" + e.date)).slice(0, 2);
-  const todayCards = todayEvs.map(e => liveWindow(e).phase ? liveCard(e) : `<div class="card notif-card today-card" data-ev="${e.id}" role="button"><button type="button" class="today-x" data-hide-today="${e.id}|${e.date}" aria-label="Hide this">✕</button>${dotHat(56)}<div style="flex:1;min-width:0"><div class="eyebrow-sm">Today</div><b>${esc(e.title)}${e.time ? " · " + fmtTime(e.time) : ""}</b><div class="muted sm">${e.kind === "meeting" ? (e.invitedUids || []).filter(u => (e.rsvps || {})[u] === "going").length + " accepted" : goingCount(e) + " going"}${evStops(e).length ? " · " + evStops(e).length + " stops" : e.location ? " · " + esc(placeName(e.location)) : ""}</div></div><span class="chev">›</span></div>`).join("");
+  const todayHero = todayEvs.find(e => !liveWindow(e).phase) || null;
+  const todayCards = todayEvs.filter(e => e !== todayHero).map(e => liveWindow(e).phase ? liveCard(e) : `<div class="card notif-card today-card" data-ev="${e.id}" role="button"><button type="button" class="today-x" data-hide-today="${e.id}|${e.date}" aria-label="Hide this">✕</button>${dotHat(56)}<div style="flex:1;min-width:0"><div class="eyebrow-sm">Today</div><b>${esc(e.title)}${e.time ? " · " + fmtTime(e.time) : ""}</b><div class="muted sm">${e.kind === "meeting" ? (e.invitedUids || []).filter(u => (e.rsvps || {})[u] === "going").length + " accepted" : goingCount(e) + " going"}${evStops(e).length ? " · " + evStops(e).length + " stops" : e.location ? " · " + esc(placeName(e.location)) : ""}</div></div><span class="chev">›</span></div>`).join("");
   if ((S.profile.city || "").trim()) ensureCurated();
   const mine = upcoming.filter(e => !e._unjoined), weekEnd = addDays(t, (7 - new Date().getDay()) % 7);
-  const hero = mine.find(e => !todayEvs.includes(e)) || null;
+  const hero = todayHero || mine.find(e => !todayEvs.includes(e) && !hiddenToday.includes(e.id + "|" + e.date)) || null;
   const rest = mine.filter(e => e !== hero && !todayEvs.includes(e));
   const inWeek = rest.filter(e => e.date <= weekEnd), week = (inWeek.length ? inWeek : rest).slice(0, 3), weekLabel = inWeek.length ? "This week" : "Coming up";
   const weekCount = mine.filter(e => e.date <= weekEnd).length;
@@ -1819,9 +1820,9 @@ function homeBody() {
   return `
   <header class="hd-greet">${head}</header>
   ${weekDigest(mine)}
-  ${notifCard()}${todayCards}${afterCard()}${birthdayCard()}
+  ${notifCard()}${hero && hero.date === t ? heroCard(hero) : ""}${todayCards}${afterCard()}${birthdayCard()}
   ${askBox()}${asksSection()}
-  ${hero ? heroCard(hero) : mine.length || todayEvs.length ? "" : `<div class="card empty">${dot("sleepy", 84)}<b>No plans yet</b><p class="muted">Tell Dot what you're thinking, or start one from scratch.</p><div class="btnrow" style="justify-content:center"><button class="btn primary" id="homeTell">Tell Dot</button><button class="btn" data-go="#/new">New event</button></div></div>`}
+  ${hero && hero.date !== t ? heroCard(hero) : hero || mine.length || todayEvs.length ? "" : `<div class="card empty">${dot("sleepy", 84)}<b>No plans yet</b><p class="muted">Tell Dot what you're thinking, or start one from scratch.</p><div class="btnrow" style="justify-content:center"><button class="btn primary" id="homeTell">Tell Dot</button><button class="btn" data-go="#/new">New event</button></div></div>`}
   ${needsYou()}
   ${moneyGlance()}
   ${curateTray(upcoming, false)}
@@ -2075,9 +2076,10 @@ function wireAsks() {
 function heroCard(ev) {
   const th = themeOf(ev.theme, ev.customTheme), myR = (ev.rsvps || {})[myUid()], tf = tileFaces(ev);
   const pill = myR ? `<span class="you-pill ${myR}">${{ going: "You're going", maybe: "Maybe", no: "Can't go", waitlist: "Waitlisted", pending: "Pending" }[myR] || ""}</span>` : (ev.invitedUids || []).includes(myUid()) && ev.hostId !== myUid() ? `<span class="you-pill rsvp">RSVP</span>` : "";
-  return `<a class="hd-hero t-${esc(th.id)} ${ev.cover ? "has-cover" : ""}" data-ev="${ev.id}" style="--th-accent:${esc(th.accent)};--th-ink:${esc(th.ink)};--th-on-accent:${esc(th.onAccent)}">
+  const today = ev.date === todayStr();
+  return `<a class="hd-hero t-${esc(th.id)} ${ev.cover ? "has-cover" : ""} ${today ? "today" : ""}" data-ev="${ev.id}" style="--th-accent:${esc(th.accent)};--th-ink:${esc(th.ink)};--th-on-accent:${esc(th.onAccent)}">
     ${ev.cover ? `<img class="cover-img" src="${esc(ev.cover)}" alt="">` : `<div class="ev-card-bg"></div>`}
-    <div class="hd-hero-top"><span class="hd-chip">Up next · ${inDaysWord(ev)}</span>${pill}</div>
+    <div class="hd-hero-top">${today ? `<span class="hd-chip today">${dotHat(22)} Today${ev.time ? " · " + esc(fmtTime(ev.time)) : ""}</span>` : `<span class="hd-chip">Up next · ${inDaysWord(ev)}</span>`}${pill}</div>
     <div class="hd-hero-body"><div class="hd-emoji">${esc(ev.emoji || "📍")}</div><h2>${esc(ev.title)}</h2><div class="hd-sub">${esc(fmtWhen(ev))}${placeName(ev.location) ? " · " + esc(placeName(ev.location)) : ""}</div>
       <div class="hd-row"><span class="hd-faces">${tf.faces}</span><span class="hd-going">${esc(tf.label)}</span><span class="btn primary small">Open</span></div></div></a>`;
 }
