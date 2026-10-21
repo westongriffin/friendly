@@ -2145,6 +2145,7 @@ function plansBody() {
   </div>` : "";
 
   return `
+  ${askBox()}${asksSection()}
   <div class="section-head"><h2>${homeView === "calendar" ? "Calendar" : "Upcoming"}</h2><span class="btnrow head-tools"><button class="icon-btn" id="viewToggle" title="${homeView === "calendar" ? "Show as cards" : "Show as a calendar"}" aria-label="${homeView === "calendar" ? "Show as cards" : "Show as a calendar"}">${homeView === "calendar" ? "🗂" : "📅"}</button><button class="icon-btn" data-go="#/drafts" title="Drafts" aria-label="Drafts${(S.drafts || []).length ? ", " + S.drafts.length + " saved" : ""}">📝${(S.drafts || []).length ? `<span class="badge">${S.drafts.length}</span>` : ""}</button><button class="btn primary small" data-go="#/new">＋ New event</button></span></div>
   ${filterBar}
   ${homeView === "calendar" ? calendarBody([...upcoming, ...past]) : `<div class="ev-grid">${upcoming.length ? upcoming.map(eventCard).join("") : emptyState("🗓️", "No plans yet", "Create your first event: pick a theme and invite the crew.", "sleepy") + (window.Blip && !isDemo() ? `<div style="text-align:center;margin:-6px 0 14px"><button type="button" class="btn tell-dot inline" id="homeTell">${dot("happy", 26)} Or just tell Dot the plan</button></div>` : "")}</div>
@@ -2191,7 +2192,7 @@ function wireBanners() {
   if (el("pushLater")) el("pushLater").onclick = () => { try { LS.set("friendlyPushDismissed", "1"); } catch {} render(); };
 }
 function wirePlans() {
-  wireBanners();
+  wireBanners(); wireAsks();
   document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
   document.querySelectorAll("[data-filter]").forEach(b => b.onclick = () => { homeFilter = b.dataset.filter; calDay = null; render(); });
   if (el("pastToggle")) el("pastToggle").onclick = () => { S.pastOpen = !S.pastOpen; if (S.pastOpen) startPast(); render(); };
@@ -5732,12 +5733,16 @@ function wirePitch() {
 function openPitchIn(groupId) {
   const me = myUid(), groups = [...S.groups.values()], friends = myFriendUids();
   let who = groupId && S.groups.get(groupId) ? groupId : groups[0] ? groups[0].id : "friends";
-  const people = () => who === "friends" ? friends : ((S.groups.get(who) || {}).memberUids || []).filter(u => u !== me);
+  const picked = new Set();
+  const people = () => who === "pick" ? [...picked] : who === "friends" ? friends : ((S.groups.get(who) || {}).memberUids || []).filter(u => u !== me);
+  const everyone = [...new Set([...friends, ...groups.flatMap(g => g.memberUids || []), ...S.contacts.keys()])].filter(u => u && u !== me && !isGuest(u)).map(u => [u, nameOf(u)]).sort((a, b) => a[1].localeCompare(b[1]));
   const sum = () => { const n = people().length, each = parseAmount(el("piEach").value) || 0; el("piSum").textContent = n && each ? `${n} ${n === 1 ? "person" : "people"} · ${fmt$(each * n)} total` : n ? `${n} ${n === 1 ? "person" : "people"}` : ""; };
   dialog(`<h3>Start a pitch-in</h3>
     <label class="field"><span>What for</span><input id="piDesc" maxlength="80" placeholder="Gigi's birthday gift 🎁"></label>
     <div class="two"><label class="field"><span>Each person pays ($)</span><input id="piEach" inputmode="decimal" placeholder="25"></label><label class="field"><span>Closes <span class="muted">(optional)</span></span><input type="date" id="piCloses" min="${todayStr()}"></label></div>
-    <div class="muted sm" style="margin:4px 0 6px">Who's in</div><div class="chiprow" id="piWho" style="flex-wrap:wrap;overflow:visible;padding-bottom:0">${groups.map(g => `<button type="button" class="fchip ${who === g.id ? "on" : ""}" data-piw="${esc(g.id)}">${groupMini(g)} ${esc(g.name)} (${((g.memberUids || []).filter(u => u !== me)).length})</button>`).join("")}<button type="button" class="fchip ${who === "friends" ? "on" : ""}" data-piw="friends">All friends (${friends.length})</button></div>
+    <div class="muted sm" style="margin:4px 0 6px">Who's in</div><div class="chiprow" id="piWho" style="flex-wrap:wrap;overflow:visible;padding-bottom:0">${groups.map(g => `<button type="button" class="fchip ${who === g.id ? "on" : ""}" data-piw="${esc(g.id)}">${groupMini(g)} ${esc(g.name)} (${((g.memberUids || []).filter(u => u !== me)).length})</button>`).join("")}<button type="button" class="fchip ${who === "friends" ? "on" : ""}" data-piw="friends">All friends (${friends.length})</button><button type="button" class="fchip" data-piw="pick">Pick people</button></div>
+    <div id="piPick" class="pi-pick" hidden><input type="search" id="piSearch" placeholder="Search people" autocomplete="off" aria-label="Search people">
+      <div class="pi-pick-list">${everyone.map(([u, n]) => `<label class="pi-pick-row" data-pname="${esc(n.toLowerCase())}"><input type="checkbox" data-pip="${esc(u)}">${avatar(u, "sm")}<span>${esc(n)}</span></label>`).join("") || `<p class="muted sm">Nobody to pick yet. Add friends or a group first.</p>`}</div></div>
     <div class="muted sm" id="piSum" style="margin-top:6px"></div>
     <p class="muted sm" style="margin:10px 0 0">Everyone gets a nudge with your pay buttons. Money lands with you directly; you tick people off as it does, or they mark it themselves.</p>`,
     "Send it", async () => {
@@ -5746,7 +5751,9 @@ function openPitchIn(groupId) {
       const rec = { desc, amountCents: each * split.length, paidBy: me, split: [...split], shares: Object.fromEntries(split.map(u => [u, each])), involved: [...new Set([me, ...split])], eventId: null, groupId: who === "friends" ? matchGroupId([me, ...split]) : who, addedBy: me, createdAt: Date.now(), guestNames: {}, pitch: { each, closes: el("piCloses").value || "", goal: each * split.length } };
       try { const id = await saveExpense(rec); closeDialog(); toast("Sent. You'll see each one land.", null, null, "coral:happy"); go("#/x/" + id); } catch (e) { toast("Couldn't start that: " + e.message); }
     });
-  document.querySelectorAll("[data-piw]").forEach(b => b.onclick = () => { document.querySelectorAll("[data-piw]").forEach(x => x.classList.remove("on")); b.classList.add("on"); who = b.dataset.piw; sum(); });
+  document.querySelectorAll("[data-piw]").forEach(b => b.onclick = () => { document.querySelectorAll("[data-piw]").forEach(x => x.classList.remove("on")); b.classList.add("on"); who = b.dataset.piw; el("piPick").hidden = who !== "pick"; if (who === "pick") el("piSearch").focus(); sum(); });
+  document.querySelectorAll("[data-pip]").forEach(cb => cb.onchange = () => { cb.checked ? picked.add(cb.dataset.pip) : picked.delete(cb.dataset.pip); sum(); });
+  el("piSearch").oninput = () => { const q = el("piSearch").value.trim().toLowerCase(); document.querySelectorAll(".pi-pick-row").forEach(r => { r.hidden = !!q && !r.dataset.pname.includes(q); }); };
   el("piEach").oninput = sum; sum();
 }
 function pickCards() {

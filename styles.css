@@ -1489,3 +1489,6 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 /* Today's plan as the hero */
 .hd-hero.today{box-shadow:0 0 0 2.5px var(--sun),0 10px 28px rgba(255,193,69,.35)}
 .hd-chip.today{background:var(--sun);color:var(--ink);display:inline-flex;align-items:center;gap:6px;padding:4px 12px 4px 6px;font-size:.85rem}.hd-chip.today svg,.hd-chip.today .blip{display:block}
+
+.pi-pick{margin-top:8px}.pi-pick input[type=search]{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:12px;padding:9px 12px;font:inherit;background:var(--surface)}
+.pi-pick-list{max-height:220px;overflow:auto;margin-top:6px;border:1px solid var(--line);border-radius:12px;padding:4px 10px}.pi-pick-row{display:flex;align-items:center;gap:10px;padding:7px 0;min-height:40px;cursor:pointer}.pi-pick-row input{width:20px;height:20px;accent-color:var(--accent)}.pi-pick-row span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
