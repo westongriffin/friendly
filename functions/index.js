@@ -448,7 +448,7 @@ ${q}`;
 // ---- Curate: Dot finds real things happening nearby (Gemini with Google Search grounding), pairs each
 //      with a place to eat and the logistics, and the app turns a pick into a plan, a poll, tickets or a table.
 //      curated/{cityKey} is rebuilt nightly for every city someone has set; "night" mode builds three on demand.
-const TAGS = ["weekend", "tonight", "date", "group", "cheap", "family"];
+const TAGS = ["weekend", "tonight", "date", "group", "cheap", "family", "late"];
 // The search tool sometimes loops on a broken call (empty answer) or apologizes instead of searching.
 // Try fast first, then with a little thinking, then once more with a bit more variety; each try has its own time limit.
 async function askGroundedReliably(prompt, maxTokens, onPhase, label) {
@@ -516,7 +516,9 @@ const CURATE_KINDS = {
   date: () => `as date nights for two in the next 9 days: a good table and something to do before or after`,
   group: () => `for groups of 6 to 12 in the next 9 days: places that take big groups (bar tables, counter service, group tickets, bays or lanes)`,
   cheap: () => `under $40 a person all in, in the next 9 days: free events, cheap eats, happy hours`,
-  family: () => `family-friendly with kids in the next 9 days: daytime or early evening, kid-easy food`
+  family: () => `family-friendly with kids in the next 9 days: daytime or early evening, kid-easy food`,
+  // Coral's picks: the late ones
+  late: () => `for late nights in the next 9 days: things that start at 9 PM or later or run past midnight (late-night food, live music, karaoke, comedy, dancing, a late show); nothing family-oriented`
 };
 async function curateCity(d, onPhase) {
   const city = sv(d.city, 60); if (city.length < 2) throw new Error("no city");

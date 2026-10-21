@@ -279,11 +279,23 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 // Dot, the mascot (blip.js). Small helpers so call sites stay short; both degrade to nothing/emoji if blip.js failed to load.
 const dot = (mood, size = 72) => window.Blip ? window.Blip.svg({ mood, size }) : "";
 const dotHat = (size = 52) => window.Blip ? window.Blip.hat(size) : "🎂";
+// Coral, Dot's best friend and the fun one: she shows up for the good moments (everyone paid, a birthday, a milestone).
+const coral = (mood = "happy", size = 72) => window.Blip ? window.Blip.svg({ mood, size, coral: true }) : "";
+const mascot = (mood, size) => /^coral:/.test(mood || "") ? coral(mood.slice(6), size) : dot(mood, size);
+// A celebration: Coral bursts in with confetti and a line, then gets out of the way (tap, or 4.5 seconds).
+function coralCheer(title, sub, onTap) {
+  const old = el("cheer"); if (old) old.remove();
+  const c = document.createElement("div"); c.id = "cheer"; c.className = "cheer";
+  c.innerHTML = `<div class="cheer-card" role="status">${coral("party", 112)}<b>${esc(title)}</b>${sub ? `<p>${esc(sub)}</p>` : ""}</div>`;
+  document.body.appendChild(c); requestAnimationFrame(() => c.classList.add("in"));
+  const gone = () => { c.classList.remove("in"); setTimeout(() => c.remove(), 350); };
+  c.onclick = () => { gone(); if (onTap) onTap(); }; setTimeout(gone, 4500);
+}
 // Toasts carry Dot with a mood: pass one explicitly, or errors are detected from the wording.
 function toast(msg, action, onAction, mood) {
   const t = el("toast"); t.textContent = "";
   const m = mood || (/couldn|can['’]t|fail|error|invalid|unable|permission|denied|network|offline|too many|try again|not allowed|wrong/i.test(msg) ? "oops" : "idle");
-  if (window.Blip) { const w = document.createElement("span"); w.className = "toast-dot"; w.innerHTML = dot(m, 30); t.appendChild(w); }
+  if (window.Blip) { const w = document.createElement("span"); w.className = "toast-dot"; w.innerHTML = mascot(m, 30); t.appendChild(w); }
   t.appendChild(document.createTextNode(msg));
   if (action) { const b = document.createElement("button"); b.type = "button"; b.className = "toast-act"; b.textContent = action; b.onclick = () => { t.classList.remove("show"); onAction(); }; t.appendChild(b); }
   t.classList.add("show"); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), action ? 7000 : 3400);
@@ -447,11 +459,14 @@ function dotWatch() {
 // Shown once to accounts under two weeks old on their first home view; "Take the tour" on the profile replays it.
 const TOUR = [
   { target: null, title: "Hi, I'm Dot!", text: "I'm the little helper in Friendly. Want a 30-second tour?", ok: "Show me", skip: "Maybe later" },
+  { target: ".hd-greet", title: "Home base", text: "Your next plan, what needs you, who owes who, and my picks for the week, all in one place.", tab: "#/" },
   { target: '[data-go="#/new"]', title: "Make a plan", text: "Tap here to plan something. Pick a date, invite people, and the invites go out for you.", tab: "#/plans" },
   { target: "#edgeDot", title: "I'm always right here", text: "Tap me on any page and just tell me the plan, like “tacos Friday at 7 with the crew.” I'll fill it all in.", tab: "#/" },
+  { target: ".topbar-right", title: "Up top", text: "Search, everyone's photos, your friends and messages, and your alerts.", tab: "#/" },
   { target: '.tabs [data-go="#/curate"]', title: "Need an idea?", text: "Curate finds real things to do near you, paired with a place to eat.", tab: "#/" },
   { target: '.tabs [data-go="#/groups"]', title: "Your crews", text: "Groups keep your regulars together, with chat, polls, and photos.", tab: "#/" },
-  { target: '.tabs [data-go="#/money"]', title: "Settle up", text: "Split a bill here. I'll keep track of who owes who, and you can pay by Venmo, Zelle, or Cash App.", tab: "#/" },
+  { target: '.tabs [data-go="#/money"]', title: "Settle up", text: "Split a bill here. I'll keep track of who owes who, and you can pay by Venmo, Zelle, Cash App, or Apple Cash.", tab: "#/" },
+  { target: null, coral: true, title: "Meet Coral", text: "My best friend, and the fun one. She shows up when there's something to celebrate: everyone paid, a birthday, a milestone.", ok: "Hi, Coral!", tab: "#/" },
   { target: "#brandDot", title: "One more thing", text: "Tap my little dot up here anytime for a tip.", ok: "Let's go", tab: "#/" }
 ];
 let tourStep = -1;
@@ -468,7 +483,7 @@ function showTourStep() {
   let o = el("tourLayer");
   if (!o) { o = document.createElement("div"); o.id = "tourLayer"; o.innerHTML = `<div class="tour-hole" id="tourHole"></div><div class="tour-card" id="tourCard" role="dialog" aria-live="polite"></div>`; document.body.appendChild(o); window.addEventListener("resize", placeTour); }
   const last = tourStep === TOUR.length - 1, first = tourStep === 0;
-  el("tourCard").innerHTML = `<div class="tour-top">${window.Blip.svg({ mood: first || last ? "happy" : "idle", size: 56, wave: first || last })}<div><b>${esc(st.title)}</b><p>${esc(st.text)}</p></div></div>
+  el("tourCard").innerHTML = `<div class="tour-top">${window.Blip.svg({ mood: first || last || st.coral ? "happy" : "idle", size: 56, wave: first || last || st.coral, coral: !!st.coral })}<div><b>${esc(st.title)}</b><p>${esc(st.text)}</p></div></div>
     <div class="tour-foot"><span class="tour-dots">${TOUR.slice(1).map((_, i) => `<i class="${i + 1 === tourStep ? "on" : ""}"></i>`).join("")}</span>
     <span class="btnrow" style="gap:6px">${last ? "" : `<button type="button" class="btn ghost small" id="tourSkip">${st.skip || "Skip"}</button>`}<button type="button" class="btn primary small" id="tourNext">${st.ok || "Next"}</button></span></div>`;
   el("tourNext").onclick = () => { tourStep++; if (tourStep >= TOUR.length) endTour(); else showTourStep(); };
@@ -700,7 +715,8 @@ function planBirthday(b) { resetCompose(); compose.date = b.date; compose.groupI
 function birthdayCard() {
   const list = upcomingBirthdays(30); let dismissed = []; try { dismissed = JSON.parse(LS.get("friendlyBdayDismissed") || "[]"); } catch {}
   const b = list.find(x => !dismissed.includes(x.uid + ":" + x.date)); if (!b) return "";
-  return `<div class="card notif-card"><span class="notif-ico dot-ico">${dotHat(52)}</span><div class="nc-text" style="flex:1"><b>${esc(first(b.name))}'s birthday is ${b.days === 0 ? "today" : b.days === 1 ? "tomorrow" : "in " + b.days + " days"}</b><div class="muted sm">${esc(fmtDay({ date: b.date }))}. A month out is the sweet spot to plan something.</div></div><span class="btnrow nc-btns" style="gap:6px"><button class="btn primary small" data-bplan="${b.uid}">Plan something</button><button class="btn ghost small" data-bdismiss="${b.uid}:${b.date}">Later</button></span></div>`;
+  const today = b.days === 0;
+  return `<div class="card notif-card ${today ? "bday-today" : ""}"><span class="notif-ico dot-ico">${window.Blip ? window.Blip.hat(52, "party", today) : "🎂"}</span><div class="nc-text" style="flex:1"><b>${today ? `It's ${esc(first(b.name))}'s birthday today! 🎉` : `${esc(first(b.name))}'s birthday is ${b.days === 1 ? "tomorrow" : "in " + b.days + " days"}`}</b><div class="muted sm">${esc(fmtDay({ date: b.date }))}. A month out is the sweet spot to plan something.</div></div><span class="btnrow nc-btns" style="gap:6px"><button class="btn primary small" data-bplan="${b.uid}">Plan something</button><button class="btn ghost small" data-bdismiss="${b.uid}:${b.date}">Later</button></span></div>`;
 }
 // +12145551234 -> (214) 555-1234 for US numbers; anything else is shown as stored.
 const fmtPhone = p => { const m = String(p || "").match(/^\+1(\d{3})(\d{3})(\d{4})$/); return m ? `(${m[1]}) ${m[2]}-${m[3]}` : String(p || ""); };
@@ -937,12 +953,19 @@ function subscribeAll(u) {
   }));
 
   add(on("expenses", query(collection(db, "expenses"), where("involved", "array-contains", u.uid)), snap => {
+    const before = S._expInit ? S.expenses : null;
     S.expenses = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }]));
+    if (before) for (const x of S.expenses.values()) { const was = before.get(x.id); if (was && x.paidBy === u.uid && !allPaidBack(was) && allPaidBack(x)) coralCheer("Everyone paid you back!", `${x.desc || "That one"} is all settled.`, () => go("#/x/" + x.id)); }
+    S._expInit = true;
     S.nameHints = S.nameHints || new Map(); for (const x of S.expenses.values()) for (const [k, n] of Object.entries(x.guestNames || {})) if (n) S.nameHints.set(k, n);
     refreshEvMoney(); renderSoon();
   }));
   add(on("settlements", query(collection(db, "settlements"), where("involved", "array-contains", u.uid)), snap => {
-    S.settlements = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); renderSoon();
+    const before = S._setInit ? S.settlements : null;
+    S.settlements = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); S._setInit = true; renderSoon();
+    // Money just arrived: Coral says so, with a tap to react.
+    if (before) for (const x of S.settlements.values()) if (!before.has(x.id) && x.to === u.uid && x.addedBy !== u.uid && Date.now() - (x.createdAt || 0) < 120e3)
+      toast(`${first(nameOf(x.from))} paid you ${fmt$(x.amountCents)}`, "React", () => go("#/money?pay=" + x.id), "coral:party");
   }));
 
   // saved event drafts (users/{uid}/drafts), newest first
@@ -965,7 +988,8 @@ function subscribeAll(u) {
   // Shared receipts I'm on (Pick your items): the list on Money and the live pick page. While the pick page is
   // open, a change redraws only that page so taps from everyone show up without the screen jumping.
   add(on("receiptSplits", query(collection(db, "receiptSplits"), where("uids", "array-contains", u.uid)), snap => {
-    const was = S._splitsKey; S.splits = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); S.splitsReady = true;
+    const was = S._splitsKey, beforeSplits = S.splitsReady ? S.splits : null; S.splits = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); S.splitsReady = true;
+    if (beforeSplits) for (const t of S.splits.values()) { const b = beforeSplits.get(t.id); if (b && t.createdBy === u.uid && t.status === "open" && !allPicked(b) && allPicked(t)) coralCheer("Everyone picked their items!", `${t.desc || "The receipt"}: hand out anything left, then tap Finish.`, () => go("#/pick/" + t.id)); }
     S._splitsKey = [...S.splits.values()].map(t => t.id + ":" + t.status).sort().join(); refreshEvMoney();
     if (S.route.name === "pick" && el("pickRoot")) patchPick(); else if (S.route.name === "pick" || S.route.name === "money" || was !== S._splitsKey) renderSoon();
   }));
@@ -1766,10 +1790,15 @@ function homeBody() {
   const hero = mine.find(e => !todayEvs.includes(e)) || null;
   const week = mine.filter(e => e !== hero && !todayEvs.includes(e)).slice(0, 3);
   const weekCount = mine.filter(e => e.date <= addDays(t, 6)).length;
-  const hour = new Date().getHours(), greet = hour < 4 ? "Up late" : hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  const hour = new Date().getHours(), dow = new Date().getDay(), weekend = dow >= 5 || dow === 0;
+  const greet = hour < 4 ? "Up late" : hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   const dateLine = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+  const plansLine = weekCount ? `${weekCount} plan${weekCount === 1 ? "" : "s"} this week` : "nothing on the calendar this week";
+  // Weekends are Coral's: she takes the greeting.
+  const head = weekend ? `<div><h1>It's ${new Date().toLocaleDateString("en-US", { weekday: "long" })}, ${esc(first(S.profile.name))}.</h1><p class="muted sm">What are we doing? · ${plansLine}</p></div>${coral("happy", 54)}`
+    : `<div><h1>${greet}, ${esc(first(S.profile.name))}</h1><p class="muted sm">${dateLine} · ${plansLine}</p></div>${dot("happy", 54)}`;
   return `
-  <header class="hd-greet"><div><h1>${greet}, ${esc(first(S.profile.name))}</h1><p class="muted sm">${dateLine} · ${weekCount ? `${weekCount} plan${weekCount === 1 ? "" : "s"} this week` : "nothing on the calendar this week"}</p></div>${dot("happy", 54)}</header>
+  <header class="hd-greet">${head}</header>
   ${notifCard()}${todayCards}${birthdayCard()}
   ${hero ? heroCard(hero) : mine.length || todayEvs.length ? "" : `<div class="card empty">${dot("sleepy", 84)}<b>No plans yet</b><p class="muted">Tell Dot what you're thinking, or start one from scratch.</p><div class="btnrow" style="justify-content:center"><button class="btn primary" id="homeTell">Tell Dot</button><button class="btn" data-go="#/new">New event</button></div></div>`}
   ${needsYou()}
@@ -1852,7 +1881,7 @@ function plansBody() {
   ${past.length || !S.pastLoaded ? `<button type="button" class="section-head past-head" id="pastToggle" aria-expanded="${!!S.pastOpen}"><h2>Past</h2><span class="muted sm">${S.pastLoaded ? past.length + (past.length === 1 ? " event" : " events") : ""}</span><span class="past-chev" aria-hidden="true">›</span></button>
   ${S.pastOpen ? (S.pastLoaded ? `<div class="ev-grid dim">${past.map(eventCard).join("")}</div>` : `<p class="muted sm" style="margin:6px 2px">Loading past events…</p>`) : ""}` : ""}`}`;
 }
-function emptyState(emoji, title, sub, mood) { const art = mood && window.Blip ? window.Blip.svg({ mood, size: 84 }) : `<div class="big">${emoji}</div>`; return `<div class="card empty">${art}<b>${esc(title)}</b><p class="muted">${esc(sub)}</p></div>`; }
+function emptyState(emoji, title, sub, mood) { const art = mood && window.Blip ? mascot(mood, 84) : `<div class="big">${emoji}</div>`; return `<div class="card empty">${art}<b>${esc(title)}</b><p class="muted">${esc(sub)}</p></div>`; }
 
 function eventCard(ev) {
   if (ev.kind === "meeting") return meetingCard(ev);
@@ -1910,7 +1939,7 @@ function groupsBody() {
   return `
   <div class="section-head"><h2>Your groups</h2><button class="btn primary small" id="newGroupBtn">＋ New group</button></div>
   <p class="muted" style="margin:0 0 14px">Groups are your circles. Invite people once, then plan with them again and again. Everything in a group stays private to its members.</p>
-  <div class="stack">${groups.length ? groups.map(groupRow).join("") : emptyState("👥", "No groups yet", "Create a group and invite friends by phone.", "idle")}</div>`;
+  <div class="stack">${groups.length ? groups.map(groupRow).join("") : emptyState("👥", "No groups yet", "Where is everybody? Make a group and get the crew in here.", "coral:happy")}</div>`;
 }
 // ---------- a group's look: icon (emoji or picture) on its color, and a cover (photo, Dot's painting, or the color) ----------
 const GROUP_COLORS = ["#FFE0B2", "#FFC2B3", "#FFE48A", "#BDEBD0", "#BFE0FF", "#D9CCFF", "#FFC9DE", "#E8DCCB"];
@@ -2463,7 +2492,7 @@ function matchFriends(names, extra) {
 // ---- Curate: Dot finds real nights out near your city (server-side, web-grounded, cached nightly per city),
 //      pairs each with a place to eat, and turns a pick into a plan, a poll, tickets or a table.
 const CURATE_LABEL = "Curate";
-const CURATE_FILTERS = [["weekend", "This weekend"], ["tonight", "Tonight"], ["date", "Date night"], ["group", "Group of 6+"], ["cheap", "Under $40"], ["family", "Family"]];
+const CURATE_FILTERS = [["weekend", "This weekend"], ["tonight", "Tonight"], ["late", "Late night"], ["date", "Date night"], ["group", "Group of 6+"], ["cheap", "Under $40"], ["family", "Family"]];
 const CURATE_LEADS = { weekend: "A few nights worth leaving the house for this weekend. Tap one and I'll set it up.", tonight: "Short notice, still good.", date: "For just the two of you.", group: "Big group? These places handle it.", cheap: "Good nights that won't hurt.", family: "Kid-friendly, and you'll like it too." };
 let curFilter = "weekend", curSub = null, curCoverSub = null, curKey = "";
 const cityKeyOf = c => String(c || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
@@ -2629,7 +2658,7 @@ function curateBody() {
   const phaseText = { starting: "Warming up", searching: "Searching what's on and pairing places to eat", sorting: "Sorting the good ones" }[S._curPhase] || "Looking around";
   const lead = !d && !S._curError ? `Give me a minute. ${phaseText} within ${myMiles()} miles of ${city}…` : S._curError ? "I couldn't look around just now (" + S._curError + "). Try again in a bit." : shown.length ? (filtered.length ? CURATE_LEADS[curFilter] : "Nothing tagged for that yet, so here's everything I found.") : "Nothing yet. Build your own and I'll go looking.";
   return `<div class="section-head cur-head"><h2>${CURATE_LABEL}</h2><span class="cur-loc"><button type="button" class="cur-loc-city" id="curCityBtn" aria-label="Change city">📍 <span>${esc(city)}</span></button>${milesSelect("curMiles")}</span></div>${S.profile.cityGuess ? `<p class="muted sm cur-guess">Dot guessed your city from your phone number. Tap 📍 to change it.</p>` : ""}
-  <div class="dot-say cur-dot">${dot(d ? "happy" : "thinking", 48)}<div class="say-bubble">${esc(lead)}<div class="cur-acts"><button type="button" class="btn small primary" id="curBuild">✨ Build me a night</button><button type="button" class="btn small" id="curBrowse">🔎 Browse ideas</button></div></div></div>
+  <div class="dot-say cur-dot ${curFilter === "late" ? "coral-say" : ""}">${curFilter === "late" && d ? coral("party", 48) : dot(d ? "happy" : "thinking", 48)}<div class="say-bubble">${curFilter === "late" && d ? "Coral's picks. The night doesn't have to end at 10. Tap one and Dot will set it up." : esc(lead)}<div class="cur-acts"><button type="button" class="btn small primary" id="curBuild">✨ Build me a night</button><button type="button" class="btn small" id="curBrowse">🔎 Browse ideas</button></div></div></div>
   <div class="chiprow">${CURATE_FILTERS.map(([k, l]) => `<button type="button" class="fchip ${curFilter === k ? "on" : ""}" data-cf="${k}">${l}</button>`).join("")}</div>
   ${!d && !S._curError ? `<div class="card empty compact">${dot("thinking", 64)}<p class="muted" style="margin:6px 0 0">Searching what's on, pairing dinners, checking the times. About half a minute the first time.</p></div>` : ""}
   ${S._curError ? `<div style="text-align:center;margin-bottom:12px"><button type="button" class="btn" id="curRetry">Try again</button></div>` : ""}
@@ -3482,7 +3511,10 @@ function renderEventPage(root, id) {
   S.comments = []; S.photos = []; S.polls = []; S.songs = [];
   const sub = (name, fn) => S.evSubs.push(onSnapshot(collection(db, "events", id, name), snap => fn(snap.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.warn("listener event/" + name + ":", err.code || err.message)));
   sub("comments", rows => { S.comments = rows.sort((a, b) => a.createdAt - b.createdAt); withInputKept(() => { const b = el("wall"); if (b) { b.innerHTML = wallInner(ev); wireWall(ev); } const dc = el("dayCard"); if (dc) { dc.innerHTML = dayInner(ev); wireDay(ev); } }); });
-  sub("photos", rows => { S.photos = rows.sort((a, b) => b.createdAt - a.createdAt); S.memories.set(id, S.photos.filter(visibleContent)); const b = el("photosCard"); if (b) { b.innerHTML = photosInner(ev); wirePhotos(ev); } });
+  sub("photos", rows => { const seen = S._photoIds && S._photoIds.get(id); const fresh = seen ? rows.filter(p => !seen.has(p.id) && p.addedBy !== myUid() && Date.now() - (p.createdAt || 0) < 300e3) : [];
+    (S._photoIds = S._photoIds || new Map()).set(id, new Set(rows.map(p => p.id)));
+    if (fresh.length) { const who = first(nameOf(fresh[0].addedBy)); toast(`Ooh, ${who} just added ${fresh.length === 1 ? "a photo" : fresh.length + " photos"}!`, null, null, "coral:party"); }
+    S.photos = rows.sort((a, b) => b.createdAt - a.createdAt); S.memories.set(id, S.photos.filter(visibleContent)); const b = el("photosCard"); if (b) { b.innerHTML = photosInner(ev); wirePhotos(ev); } });
   sub("polls", rows => { S.polls = rows.sort((a, b) => a.createdAt - b.createdAt); const b = el("pollsCard"); if (b) { b.innerHTML = pollsInner(ev); wirePolls(ev); } });
   sub("songs", rows => { S.songs = rows.sort((a, b) => (Object.keys(b.votes || {}).length - Object.keys(a.votes || {}).length) || a.createdAt - b.createdAt); const b = el("playlistCard"); if (b) { b.innerHTML = playlistInner(ev); wirePlaylist(ev); } });
 }
@@ -4463,6 +4495,10 @@ function editEvent(ev) {
 }
 
 // ---------- MONEY ----------
+// Everyone who owes on an expense has paid (the payer doesn't owe themselves).
+const allPaidBack = x => { const owe = (x.split || []).filter(u => u !== x.paidBy && (!x.shares || x.shares[u] > 0)); return owe.length > 0 && owe.every(u => (x.paid || {})[u]); };
+// Everyone on a shared receipt has tapped I'm done (the creator finishes it, so they don't count).
+const allPicked = t => { const others = (t.uids || []).filter(u => u !== t.createdBy); return others.length > 0 && others.every(u => (t.done || {})[u]); };
 function pairwise() {
   // owes[d][c]: what d owes c; why[d][c]: the expenses (and paybacks) behind it, for the settle-up rows.
   const owes = {}, why = {};
@@ -5582,7 +5618,7 @@ function messagesBody(tab = "messages") {
     return head + reqs + (all.length ? `${search("Search your friends…")}
   <div class="section-head" style="margin-top:18px"><h2>All friends</h2><span class="muted sm">${all.length}</span></div>
   <div class="card">${all.map(u => row(u, `<b>${esc(personName(u))}</b><div class="muted sm">Our Friendlyship ›</div>`, `<button class="btn small" data-go="#/m/${pairOf(u)}" data-stop="1">Message</button>`, "#/fs/" + u)).join("")}</div>`
-      : inc.length ? "" : emptyState("👥", "No friends yet", "Add friends to message them one-on-one, even if you're not in a group together.", "happy"));
+      : inc.length ? "" : emptyState("👥", "No friends yet", "Add friends to message them one-on-one, even if you're not in a group together.", "coral:happy"));
   }
   const reqLink = inc.length ? `<button type="button" class="req-link" data-go="#/friends">👋 ${inc.length === 1 ? "1 friend request" : inc.length + " friend requests"} waiting <span>›</span></button>` : "";
   return head + reqLink + (threads.length || pinned.length ? `${search("Search messages…")}
@@ -5674,11 +5710,27 @@ function openMascot(k) {
   const top = () => { const d = el("appDialog"); if (d) d.scrollTop = 0; if (document.activeElement && document.activeElement.id === "mascotOther") document.activeElement.blur(); };
   top(); requestAnimationFrame(top); setTimeout(top, 60);
 }
+// What counts as a milestone between two people: plans, photos, money split, and years of plans together.
+function fsMilestones(d) {
+  const plans = d.evs.length, photos = d.photos.length, dollars = Math.round((d.split || 0) / 100), years = isFinite(d.since) ? Math.floor((Date.now() - d.since) / (365.25 * 864e5)) : 0;
+  const out = [];
+  [1, 5, 10, 25, 50, 100].forEach(n => out.push({ id: "p" + n, done: plans >= n, title: n === 1 ? "First plan together" : `${n} plans together`, sub: n === 1 ? "It all started somewhere." : "That's a lot of good nights.", left: `${n - plans} more plan${n - plans === 1 ? "" : "s"} to go` }));
+  [1, 10, 50].forEach(n => out.push({ id: "f" + n, done: photos >= n, title: n === 1 ? "First photo together" : `${n} photos together`, sub: "Memories, made.", left: `${n - photos} more photo${n - photos === 1 ? "" : "s"} to go` }));
+  [100, 500, 1000, 5000].forEach(n => out.push({ id: "d" + n, done: dollars >= n, title: `$${n.toLocaleString()} split together`, sub: "And nobody argued about the bill.", left: `$${(n - dollars).toLocaleString()} more to go` }));
+  [1, 2, 3, 5, 10].forEach(n => out.push({ id: "y" + n, done: years >= n, title: `${n} year${n === 1 ? "" : "s"} of plans`, sub: "Still making plans. That's the good stuff.", left: "" }));
+  const order = x => ({ p: 0, f: 1, d: 2, y: 3 })[x.id[0]] * 1000 + parseInt(x.id.slice(1), 10);
+  return out.sort((a, b) => order(a) - order(b)).filter(x => x.done || x.left);
+}
 function fsRest(u, d) {
   const me = myUid(), fn = first(personName(u)), n = k => fsShown(u, k);
   const when = ev => { const x = evDate(ev); return `${MONTHS[x.getMonth()]} ${x.getDate()}${x.getFullYear() !== new Date().getFullYear() ? ", " + x.getFullYear() : ""}`; };
   const first1 = d.past[d.past.length - 1];
   const hl = [first1 && ["🥇", "First plan together", `${esc(first1.title)} · ${when(first1)}`, first1.id], d.top && d.top[1] > 1 && ["📍", "Your spot", `${d.top[0]} · ${d.top[1]} times`], d.next[0] && ["🔜", "Next up", `${esc(d.next[0].title)} · ${when(d.next[0])}`, d.next[0].id]].filter(Boolean);
+  const ms = fsMilestones(d), reached = ms.filter(x => x.done), nextUp = ms.find(x => !x.done);
+  const milestones = reached.length || nextUp ? `<div class="section-head"><h2>Milestones</h2><span class="muted sm">Coral keeps count</span></div><div class="card">${reached.slice(-3).reverse().map(x => `<div class="member-row"><span class="li ms-li">${coral("party", 28)}</span><div style="flex:1;min-width:0"><b>${esc(x.title)}</b><div class="muted sm">${esc(x.sub)}</div></div></div>`).join("")}${nextUp ? `<div class="member-row ms-next"><span class="li ms-li">${coral("idle", 28)}</span><div style="flex:1;min-width:0"><div class="muted sm">Next up</div><b>${esc(nextUp.title)}</b><div class="muted sm">${esc(nextUp.left)}</div></div></div>` : ""}</div>` : "";
+  { const key = "friendlyFsMs:" + u, had = (LS.get(key) || "").split(",").filter(Boolean), now = reached.map(x => x.id); const fresh = had.length ? now.filter(id => !had.includes(id)) : [];
+    if (now.join(",") !== had.join(",")) LS.set(key, now.join(","));
+    if (fresh.length) { const x = reached.find(y => y.id === fresh[fresh.length - 1]); setTimeout(() => coralCheer(x.title + " with " + fn + "!", x.sub), 900); } }
   const highlights = hl.length ? `<div class="section-head"><h2>Highlights</h2></div><div class="card">${hl.map(([i, k, v, id]) => `<div class="member-row ${id ? "dm-row" : ""}" ${id ? `data-go="#/e/${id}" role="button"` : ""}><span class="li">${i}</span><div style="flex:1;min-width:0"><div class="muted sm">${k}</div><b>${v}</b></div>${id ? `<span class="chev">›</span>` : ""}</div>`).join("")}</div>` : "";
   const mem = d.photos.length ? `<div class="section-head"><h2>Memories</h2><span class="muted sm">${d.photos.length} from your plans</span></div><div class="photo-grid mem-grid fs-mem">${d.photos.slice(0, n("mem")).map(({ p, ev }) => `<div class="photo-tile"><img src="${esc(p.img)}" data-fsp="${esc(ev.id)}|${esc(p.id)}" alt="" loading="lazy">${photoBadges(p)}</div>`).join("")}</div>${fsMoreBtn("mem", d.photos.length - n("mem"))}` : "";
   const evRow = ev => { const k = (S.memories.get(ev.id) || []).length, host = ev.hostId === u ? `${esc(fn)} hosted` : ev.hostId === me ? "You hosted" : "";
@@ -5692,7 +5744,7 @@ function fsRest(u, d) {
   const back = `<div class="section-head"><h2>Back and forth</h2></div><div class="card" id="fsBack">${fsBackInner(u, d)}</div>`;
   const gs = d.groups, groups = gs.length ? `<div class="section-head"><h2>Groups you share</h2></div><div class="fs-groups">${gs.slice(0, n("groups")).map(g => `<button class="fchip" data-go="#/g/${g.id}">${groupMini(g)} ${esc(g.name)}</button>`).join("")}${gs.length > n("groups") ? `<button class="fchip" data-fsmore="groups">+${gs.length - n("groups")} more</button>` : ""}</div>` : "";
   const empty = !d.evs.length && !d.xs.length ? `<div class="card empty" style="margin-top:14px">${dot("happy", 64)}<b>Your story starts here</b><p class="muted">Plans you go to together, photos, and money between you will show up here.</p></div>` : "";
-  return empty + highlights + mem + plans + money + back + groups;
+  return empty + highlights + milestones + mem + plans + money + back + groups;
 }
 function fsBackInner(u, d) {
   const fn = first(personName(u)), c = S._fsComments && S._fsComments.u === u ? S._fsComments.list : null;
@@ -6166,7 +6218,7 @@ const isPeeked = a => { const tail = tailOf(a.url); if (tail === "#/" || tail ==
 const unreadCount = () => (S.activity || []).filter(a => a.createdAt > seenAt() && !isPeeked(a)).length;
 const newCountFor = urlTail => (S.activity || []).filter(a => a.createdAt > seenAt() && !isPeeked(a) && tailOf(a.url) === urlTail).length;
 const isNewEvent = ev => (S.activity || []).some(a => a.createdAt > seenAt() && !isPeeked(a) && tailOf(a.url) === "#/e/" + ev.id);
-const actIcon = a => a.sid || /paid you|as paid/.test(a.title) ? "💸" : a.type === "photo" ? "📸" : /pick your items|picked their items/.test(a.title) ? "🧾" : /joined via your link/.test(a.title) ? "🔗" : /waiting on your RSVP/.test(a.title) ? "📣" : /mentioned you/.test(a.title) ? "＠" : /to a meeting/.test(a.title) ? "📅" : /You're in!/.test(a.title) ? "🎟️" : /still owe/.test(a.title) ? "💸" : /invited you/.test(a.title) ? "🎟️" : /^Today:/.test(a.title) ? "⏰" : /reported/i.test(a.title) ? "⚑" : /is going|might come|can't make|joined the waitlist|requested/.test(a.title) ? "✅" : "💬";
+const actIcon = a => a.sid || /paid you|as paid/.test(a.title) || a.type === "photo" ? coral(a.type === "photo" ? "happy" : "party", 30) : /pick your items|picked their items/.test(a.title) ? "🧾" : /joined via your link/.test(a.title) ? "🔗" : /waiting on your RSVP/.test(a.title) ? "📣" : /mentioned you/.test(a.title) ? "＠" : /to a meeting/.test(a.title) ? "📅" : /You're in!/.test(a.title) ? "🎟️" : /still owe/.test(a.title) ? "💸" : /invited you/.test(a.title) ? "🎟️" : /^Today:/.test(a.title) ? "⏰" : /reported/i.test(a.title) ? "⚑" : /is going|might come|can't make|joined the waitlist|requested/.test(a.title) ? "✅" : "💬";
 function notifCard() {
   let pushDismissed = false; try { pushDismissed = !!LS.get("friendlyPushDismissed"); } catch {}
   if (NATIVE || pushDismissed) return "";
@@ -6325,7 +6377,7 @@ function photosPageBody() {
   <div class="section-head"><h2>Memories</h2><span class="muted sm">${(n => n + (n === 1 ? " photo" : " photos"))(evs.reduce((t, ev) => t + S.memories.get(ev.id).length, 0))}</span></div>
   ${S._memLoading ? `<p class="muted">Gathering photos…</p>` : ""}
   ${ago1.map(ev => section(ev, "🕰️ One year ago")).join("")}
-  ${evs.length ? evs.map(ev => section(ev)).join("") : (S._memLoading ? "" : emptyState("📸", "No photos yet", "Photos added to your events' photo walls show up here, newest first.", "sleepy"))}`;
+  ${evs.length ? evs.map(ev => section(ev)).join("") : (S._memLoading ? "" : emptyState("📸", "No photos yet", "Photos from your plans land here, newest first. Coral is ready for them.", "coral:idle"))}`;
 }
 function wirePhotosPage() {
   document.querySelectorAll("[data-mem]").forEach(im => im.onclick = () => { const ev = S.events.get(im.dataset.mev), p = (S.memories.get(im.dataset.mev) || []).find(x => x.id === im.dataset.mem); if (ev && p) openPhoto(ev, p); });
