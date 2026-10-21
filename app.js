@@ -816,6 +816,7 @@ function routeFromPath(h) {
   if (p[0] === "m") return { name: "dm", id: p[1] };
   if (p[0] === "fs") return { name: "friendship", id: p[1] };
   if (p[0] === "photos") return { name: "photos" };
+  if (p[0] === "year") return { name: "year", y: p[1] };
   if (p[0] === "search") return { name: "search" };
   if (p[0] === "new") return { name: "new" };
   if (p[0] === "money") return { name: "money" };
@@ -1657,6 +1658,7 @@ function wireShell() {
   if (S.route.name === "dm" && S.msgsReady) wireDm(S.route.id);
   if (S.route.name === "friendship") wireFriendship(S.route.id);
   if (S.route.name === "photos") wirePhotosPage();
+  if (S.route.name === "year") wireYear();
   if (S.route.name === "search") wireSearch();
   if (S.route.name !== "activity") S._actOpenSeen = null;
   if (S.route.name === "profile") wireProfile();
@@ -1698,6 +1700,7 @@ function routeBody(r) {
   if (r.name === "dm" && S.msgsReady) return dmBody(r.id);
   if (r.name === "friendship") return friendshipBody(r.id);
   if (r.name === "photos") return photosPageBody();
+  if (r.name === "year") return yearBody(r.y);
   if (r.name === "search") return searchBody();
   if (r.name === "profile") return profileBody();
   return homeBody();
@@ -1822,9 +1825,76 @@ function homeBody() {
   ${moneyGlance()}
   ${curateTray(upcoming, false)}
   ${week.length ? `<div class="hd-h"><h3>${weekLabel}</h3><a class="hd-link" data-go="#/plans">All plans ›</a></div><div class="card hd-list">${week.map(ev => `<a class="hd-ev" data-ev="${ev.id}"><span class="hd-date"><b>${ev.date === t ? "Today" : evDate(ev).toLocaleDateString("en-US", { weekday: "short" })}</b><span>${evDate(ev).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span></span><span class="hd-evt"><b>${esc(ev.emoji || "")} ${esc(ev.title)}</b><span class="muted sm">${esc(fmtTime(ev.time))}${placeName(ev.location) ? " · " + esc(placeName(ev.location)) : ""}</span></span>${hdFaces(ev)}</a>`).join("")}</div>` : ""}
-  ${memoriesStrip()}
+  ${memoriesStrip()}${yearCard()}
   ${latestList()}
   ${crewsRow()}`;
+}
+// ---------- A YEAR WITH THE CREW (the recap page: #/year or #/year/2025) ----------
+function yearData(y) {
+  const me = myUid(), t = todayStr(), year = String(y || new Date().getFullYear());
+  const mine = ev => ev.kind !== "meeting" && ev.date && ev.date.startsWith(year) && ev.date <= t && (ev.invitedUids || []).includes(me) && (ev.hostId === me || (ev.rsvps || {})[me] === "going");
+  const plans = [...S.events.values()].filter(mine).sort((a, b) => a.date.localeCompare(b.date));
+  const going = ev => [...new Set([ev.hostId, ...(ev.invitedUids || []).filter(u => (ev.rsvps || {})[u] === "going")])].filter(u => u && u !== me);
+  const count = (list, key) => { const m = new Map(); list.forEach(x => { const k = key(x); if (k) m.set(k, (m.get(k) || 0) + 1); }); return [...m.entries()].sort((a, b) => b[1] - a[1]); };
+  const people = count(plans.flatMap(going), u => u), spots = count(plans, ev => evStops(ev).length ? (evStops(ev)[0].name || evStops(ev)[0].place) : placeName(ev.location)), months = count(plans, ev => ev.date.slice(5, 7)), crews = count(plans, ev => ev.groupId);
+  const photos = plans.flatMap(ev => (S.memories.get(ev.id) || []).filter(p => p.img).map(p => ({ p, ev }))), shooters = count(photos, x => x.p.addedBy);
+  const xs = [...S.expenses.values()].filter(x => (x.involved || []).includes(me) && x.createdAt && new Date(x.createdAt).getFullYear() === +year), spent = xs.reduce((n, x) => n + (x.amountCents || 0), 0);
+  const biggest = plans.slice().sort((a, b) => goingCount(b) - goingCount(a))[0], hosted = plans.filter(ev => ev.hostId === me).length;
+  return { year, plans, photos, spent, friends: people.length, people, spots, months, crews, shooters, biggest, hosted, xs };
+}
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+function yearBody(y) {
+  const d = yearData(y), me = myUid();
+  if (!d.plans.length) return `<button class="link-back" data-go="#/">‹ Back</button><div class="card empty">${dot("sleepy", 84)}<b>Nothing to recap yet</b><p class="muted">Plans you went to in ${esc(d.year)} will show up here.</p></div>`;
+  if (!S._yearMem) { S._yearMem = true; loadMemories(false).then(() => { if (S.route.name === "year") render(); }); }
+  const top = d.people[0], spot = d.spots[0], month = d.months[0], crew = d.crews[0] && S.groups.get(d.crews[0][0]), shooter = d.shooters[0];
+  const stat = (n, l) => `<div class="yr-stat"><b>${n}</b><span>${l}</span></div>`;
+  const tile = (k, v, s, go) => `<${go ? "a" : "div"} class="card yr-tile" ${go ? `data-go="${esc(go)}"` : ""}><span class="muted sm">${k}</span><b>${v}</b><span class="muted sm">${s}</span></${go ? "a" : "div"}>`;
+  const when = ev => evDate(ev).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const firsts = [["🥇", "First plan of the year", `${esc(d.plans[0].title)} · ${when(d.plans[0])}`, d.plans[0].id]];
+  if (d.biggest && goingCount(d.biggest) >= 3) firsts.push(["🎉", "Biggest crowd", `${esc(d.biggest.title)} · ${goingCount(d.biggest)} people`, d.biggest.id]);
+  const hostedFirst = d.plans.find(ev => ev.hostId === me); if (hostedFirst) firsts.push(["🏠", "First one you hosted", `${esc(hostedFirst.title)} · ${when(hostedFirst)}`, hostedFirst.id]);
+  const priciest = d.xs.slice().sort((a, b) => (b.amountCents || 0) - (a.amountCents || 0))[0]; if (priciest) firsts.push(["🧾", "Biggest tab", `${esc(priciest.desc || "Expense")} · ${fmt$(priciest.amountCents)}`, "x:" + priciest.id]);
+  const latest = d.plans[d.plans.length - 1]; if (latest !== d.plans[0]) firsts.push(["🗓️", "Most recent", `${esc(latest.title)} · ${when(latest)}`, latest.id]);
+  const pics = d.photos.slice().sort(() => 0.5 - Math.random()).slice(0, 9);
+  return `<button class="link-back" data-go="#/">‹ Back</button>
+  <div class="yr-hero"><div class="yr-k">YOUR ${esc(d.year)}</div><h1>A year with the crew</h1><div class="yr-pair">${dot("party", 64)}${coral("party", 64)}</div><p>${d.plans.length} plan${d.plans.length === 1 ? "" : "s"}. ${d.photos.length} photo${d.photos.length === 1 ? "" : "s"}. ${d.friends ? `${d.friends} friend${d.friends === 1 ? "" : "s"} along for the ride.` : "Just getting started."}</p></div>
+  <div class="yr-stats">${stat(d.plans.length, "plans")}${stat(d.photos.length, "photos")}${stat(d.spent ? fmt$(d.spent).replace(/\.00$/, "") : "$0", "split, zero fights")}${stat(d.friends, "friends along")}</div>
+  ${top ? `<a class="card yr-top" data-go="#/fs/${esc(top[0])}">${avatar(top[0], "lg")}<div style="flex:1;min-width:0"><span class="muted sm">Most plans with</span><b>${esc(nameOf(top[0]))} · ${top[1]} together</b><span class="hd-link">Our Friendlyship ›</span></div></a>` : ""}
+  <div class="yr-two">${spot ? tile("Your spot", esc(spot[0]), spot[1] === 1 ? "Once. So far." : `${spot[1]} times. They know your order.`) : ""}${month ? tile("Busiest month", MONTH_NAMES[+month[0] - 1], `${month[1]} plan${month[1] === 1 ? "" : "s"}.`) : ""}</div>
+  <div class="yr-two">${crew ? tile("Top crew", `${groupMini(crew)} ${esc(crew.name)}`, `${d.crews[0][1]} plan${d.crews[0][1] === 1 ? "" : "s"}`, "#/g/" + crew.id) : ""}${shooter ? tile("Camera roll MVP", esc(shooter[0] === me ? "You" : first(nameOf(shooter[0]))), `${shooter[1]} photo${shooter[1] === 1 ? "" : "s"} added`) : d.hosted ? tile("You hosted", d.hosted + (d.hosted === 1 ? " plan" : " plans"), "The crew owes you one.") : ""}</div>
+  <div class="hd-h"><h3>Firsts and bests</h3></div><div class="card hd-list">${firsts.map(([i, k, v, id]) => `<a class="member-row" data-go="${id.startsWith("x:") ? "#/x/" + esc(id.slice(2)) : "#/e/" + esc(id)}"><span class="li">${i}</span><div style="flex:1;min-width:0"><div class="muted sm">${k}</div><b>${v}</b></div><span class="chev">›</span></a>`).join("")}</div>
+  ${pics.length ? `<div class="hd-h"><h3>The year in pictures</h3><a class="hd-link" data-go="#/photos">All memories ›</a></div><div class="yr-grid">${pics.map(x => `<img src="${esc(x.p.img)}" data-ymem="${esc(x.ev.id)}|${esc(x.p.id)}" alt="" loading="lazy">`).join("")}</div>` : S._memLoading ? `<p class="muted sm">Gathering photos…</p>` : ""}
+  <div class="btnrow" style="margin-top:18px;justify-content:center"><button class="btn primary" id="yrShare">Share the recap</button></div>
+  <p class="muted sm" style="text-align:center;margin-top:10px">Counts plans you went to, photos on their walls, and tabs you were on.</p>`;
+}
+function wireYear() {
+  document.querySelectorAll("[data-ymem]").forEach(im => im.onclick = () => { const [eid, pid] = im.dataset.ymem.split("|"); const ev = S.events.get(eid), p = (S.memories.get(eid) || []).find(x => x.id === pid); if (ev && p) openPhoto(ev, p); });
+  if (el("yrShare")) el("yrShare").onclick = () => shareYearCard(S.route.y);
+}
+// Draws a share card (stats on cream, with a strip of the year's photos) and hands it to the share sheet.
+async function shareYearCard(y) {
+  const d = yearData(y), W = 1080, H = 1350, c = document.createElement("canvas"); c.width = W; c.height = H; const g = c.getContext("2d");
+  g.fillStyle = "#FFFEFC"; g.fillRect(0, 0, W, H); g.fillStyle = "#7CC79B"; g.fillRect(0, 0, W, 300);
+  g.fillStyle = "#2A2019"; g.font = "700 34px -apple-system, Instrument Sans, sans-serif"; g.fillText("YOUR " + d.year + " ON FRIENDLY", 72, 110);
+  g.font = "800 88px -apple-system, Bricolage Grotesque, sans-serif"; g.fillText("A year with the crew", 72, 215);
+  const stats = [[d.plans.length, "plans"], [d.photos.length, "photos"], [d.spent ? fmt$(d.spent).replace(/\.00$/, "") : "$0", "split, zero fights"], [d.friends, "friends along"]];
+  stats.forEach(([n, l], i) => { const x = 72 + (i % 2) * 480, yy = 400 + Math.floor(i / 2) * 210; g.fillStyle = "#FFFFFF"; g.beginPath(); g.roundRect(x, yy, 440, 170, 28); g.fill(); g.fillStyle = "#2A2019"; g.font = "800 72px -apple-system, Bricolage Grotesque, sans-serif"; g.fillText(String(n), x + 32, yy + 92); g.fillStyle = "#7A6B5F"; g.font = "600 30px -apple-system, Instrument Sans, sans-serif"; g.fillText(l, x + 32, yy + 140); });
+  const lines = []; if (d.people[0]) lines.push(`Most plans with ${first(nameOf(d.people[0][0]))} · ${d.people[0][1]} together`); if (d.spots[0]) lines.push(`Your spot: ${d.spots[0][0]}`); if (d.months[0]) lines.push(`Busiest month: ${MONTH_NAMES[+d.months[0][0] - 1]}`);
+  g.fillStyle = "#2A2019"; g.font = "600 36px -apple-system, Instrument Sans, sans-serif"; lines.forEach((l, i) => g.fillText(l, 72, 880 + i * 56));
+  const pics = d.photos.slice(0, 4); let x = 72; for (const { p } of pics) { try { const im = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = p.img; }); const s = 220, r = Math.max(s / im.width, s / im.height); g.save(); g.beginPath(); g.roundRect(x, 1070, s, s, 24); g.clip(); g.drawImage(im, x + (s - im.width * r) / 2, 1070 + (s - im.height * r) / 2, im.width * r, im.height * r); g.restore(); x += s + 24; } catch {} }
+  g.fillStyle = "#FF6B57"; g.font = "800 30px -apple-system, Instrument Sans, sans-serif"; g.fillText("officialfriendly.com", 72, 1318);
+  const blob = await new Promise(ok => c.toBlob(ok, "image/jpeg", 0.9)); if (!blob) return toast("Couldn't make the card.");
+  const file = new File([blob], `friendly-${d.year}.jpg`, { type: "image/jpeg" });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: `My ${d.year} with the crew` }); return; } catch (e) { if (e.name === "AbortError") return; } }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = file.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000); toast("Saved the recap card.");
+}
+// A nudge toward the recap in December and the first two weeks of January.
+function yearCard() {
+  const m = new Date().getMonth(), day = new Date().getDate(); if (!(m === 11 || (m === 0 && day <= 15))) return "";
+  const y = m === 0 ? new Date().getFullYear() - 1 : new Date().getFullYear(); let hidden = ""; try { hidden = LS.get("friendlyYearHidden") || ""; } catch {}
+  if (hidden === String(y)) return ""; const d = yearData(y); if (d.plans.length < 3) return "";
+  return `<a class="card yr-link" data-go="#/year/${y}"><button type="button" class="today-x" data-hide-year="${y}" aria-label="Hide this">✕</button>${dot("party", 34)}${coral("party", 34)}<span style="flex:1;min-width:0"><b>Your ${y} with the crew</b><span class="muted sm">${d.plans.length} plans, ${d.photos.length} photos. See the recap.</span></span><span class="chev">›</span></a>`;
 }
 // ---------- YOUR WEEK (the Sunday-night rundown; Dot also sends one push at 6 PM) ----------
 // Shows from Sunday 6 PM through Monday for the week starting Monday. ✕ hides that week's digest on this phone.
@@ -1864,6 +1934,7 @@ function weekDigest(mine) {
     <p class="muted sm wk-foot">Dot sends this every Sunday at 6 PM. <a class="hd-link" data-go="#/profile?to=notifPrefs">Change</a></p></div>`;
 }
 function wireDigest() {
+  document.querySelectorAll("[data-hide-year]").forEach(b => b.onclick = e => { e.stopPropagation(); e.preventDefault(); try { LS.set("friendlyYearHidden", b.dataset.hideYear); } catch {} render(); });
   document.querySelectorAll("[data-hide-digest]").forEach(b => b.onclick = e => { e.stopPropagation(); try { LS.set("friendlyDigestHidden", b.dataset.hideDigest); } catch {} render(); });
 }
 // ---------- LIVE LAYER (the hours around a plan: statuses, who's where, the morning after) ----------
@@ -6655,6 +6726,7 @@ function photosPageBody() {
     <div class="photo-grid mem-grid">${(S.memories.get(ev.id) || []).map(p => `<div class="photo-tile"><img src="${esc(p.img)}" data-mem="${p.id}" data-mev="${ev.id}" alt="" loading="lazy">${photoBadges(p)}</div>`).join("")}</div>`;
   return `<button class="link-back" data-go="#/">‹ Back</button>
   <div class="section-head"><h2>Memories</h2><span class="muted sm">${(n => n + (n === 1 ? " photo" : " photos"))(evs.reduce((t, ev) => t + S.memories.get(ev.id).length, 0))}</span></div>
+  ${yearData().plans.length >= 2 ? `<a class="card yr-link" data-go="#/year">${dot("party", 34)}${coral("party", 34)}<span style="flex:1;min-width:0"><b>A year with the crew</b><span class="muted sm">${yearData().plans.length} plans so far in ${new Date().getFullYear()}</span></span><span class="chev">›</span></a>` : ""}
   ${S._memLoading ? `<p class="muted">Gathering photos…</p>` : ""}
   ${ago1.map(ev => section(ev, "🕰️ One year ago")).join("")}
   ${evs.length ? evs.map(ev => section(ev)).join("") : (S._memLoading ? "" : emptyState("📸", "No photos yet", "Photos from your plans land here, newest first. Coral is ready for them.", "coral:idle"))}`;
