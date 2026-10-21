@@ -4142,7 +4142,7 @@ function wireEventPage(ev) {
   if (el("guestToggle")) el("guestToggle").onclick = () => { const c = el("guestCard"); const open = !c.classList.contains("open"); c.classList.toggle("open", open); el("guestToggle").setAttribute("aria-expanded", open); try { LS.set("friendlyGuestOpen:" + ev.id, open ? "1" : "0"); } catch {} };
   document.querySelectorAll("[data-uninvitephone]").forEach(b => b.onclick = () => uninviteEventPhone(ev, b.dataset.uninvitephone));
   const join = $("[data-join]"); if (join) join.onclick = () => joinViaLink(ev, join);
-  const cal = $("[data-cal]"); if (cal) cal.onclick = () => downloadIcs(ev);
+  const cal = $("[data-cal]"); if (cal) cal.onclick = () => openCalendarDialog(ev);
   wireEvMoney(ev);
   const edit = $("[data-edit]"); if (edit) edit.onclick = () => editEvent(ev);
   const del = $("[data-del]"); if (del) del.onclick = () => delEvent(ev);
@@ -6290,7 +6290,7 @@ function wireMeeting(ev) {
   document.querySelectorAll("[data-setrsvp]").forEach(b => b.onclick = e => { e.stopPropagation(); openSetRsvpDialog(ev, b.dataset.setrsvp); });
   document.querySelectorAll("[data-setphone]").forEach(b => b.onclick = e => { e.stopPropagation(); openSetRsvpDialog(ev, null, b.dataset.setphone); });
   const j = $("[data-join]"); if (j) j.onclick = () => joinViaLink(ev, j);
-  const cal = $("[data-cal]"); if (cal) cal.onclick = () => downloadIcs(ev);
+  const cal = $("[data-cal]"); if (cal) cal.onclick = () => openCalendarDialog(ev);
   if (el("addPeopleBtn")) el("addPeopleBtn").onclick = () => openEventInviteDialog(ev);
   document.querySelectorAll("[data-textinvite]").forEach(b => b.onclick = () => { location.href = smsLink([b.dataset.textinvite], eventInviteText({ ...ev, openLink: true })); });
   if (el("invToggle")) el("invToggle").onclick = () => { const c = el("invCard"); const open = !c.classList.contains("open"); c.classList.toggle("open", open); el("invToggle").setAttribute("aria-expanded", open); try { LS.set("friendlyInvOpen:" + ev.id, open ? "1" : "0"); } catch {} };
