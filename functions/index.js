@@ -1222,7 +1222,7 @@ const mentionNotify = (c, url, where) => (c.mentions && c.mentions.length) ? not
 // Which notifCategory toggle (profile > Notifications) a push type falls under.
 // Types with no entry here (money reminders, admin content reports) always send --
 // only the four categories the person can actually see and turn off are gated.
-const NOTIF_CATEGORY = { event: "invites", meeting: "invites", rsvp: "invites", nudge: "reminders", reminder: "reminders", mention: "chat", comment: "chat", dm: "chat", friend: "invites", birthday: "birthdays", money: "money", photo: "photos" };
+const NOTIF_CATEGORY = { event: "invites", meeting: "invites", rsvp: "invites", nudge: "reminders", reminder: "reminders", mention: "chat", comment: "chat", dm: "chat", friend: "invites", birthday: "birthdays", money: "money", photo: "photos", ask: "invites" };
 // Every device for a set of users (native FCM tokens + web push subscriptions):
 // send, prune anything dead, and log the item to the Activity feed so it shows
 // in-app even for people who keep notifications (or this category) off.
@@ -1297,6 +1297,11 @@ exports.onEventCreated = onDocumentCreated({ document: "events/{id}", ...MAIL },
   const ev = e.data && e.data.data(); if (!ev) return;
   const nm = await names([ev.hostId]);
   const kind = ev.kind === "meeting" ? "meeting" : "event";
+  if (ev.fromAsk) {
+    const when = niceWhen(ev.date, ev.time);
+    await notify(ev.invitedUids || [], "It's a plan 🎉", `${ev.emoji || "🙌"} ${ev.title}${when ? " · " + when : ""}. Dot set it up with everyone who's in.`, "/#/e/" + e.params.id, { type: kind, actorId: ev.hostId });
+    await writePreview(e.params.id, ev); return;
+  }
   await notify((ev.invitedUids || []).filter(u => u !== ev.hostId),
     firstName(nm[ev.hostId]) + " invited you" + (kind === "meeting" ? " to a meeting" : ""), (kind === "meeting" ? "📅 " : (ev.emoji || "🎉") + " ") + ev.title,
     "/#/e/" + e.params.id + "?to=rsvpCard", { type: kind, actorId: ev.hostId });
@@ -1463,6 +1468,7 @@ async function seedDemoData() {
     for (const d of snap.docs) if (!(id === "demo-evt-3" && sub === "comments" && d.get("seed"))) await d.ref.delete().catch(() => {});
   }
   for (const sub of ["comments", "polls"]) { const snap = await db.collection("groups/" + DEMO_GROUP + "/" + sub).get(); for (const d of snap.docs) await d.ref.delete().catch(() => {}); }
+  { const snap = await db.collection("asks").where("by", "in", demoUids).get(); for (const d of snap.docs) await d.ref.delete().catch(() => {}); }
   const seedWall = db.collection("events/demo-evt-3/comments");
   if ((await seedWall.where("seed", "==", true).limit(1).get()).empty) {
     await seedWall.add({ seed: true, authorId: DEMO_CASEY, authorName: "Casey", text: "This place is so much bigger than the old one 😍", createdAt: Date.now() - 3600000 });
@@ -1683,6 +1689,47 @@ exports.onExpensePay = onDocumentWritten({ document: "expenses/{id}" }, async e 
 });
 // A payback recorded from the Money tab (no expense named) is applied to that pair's unpaid expenses, oldest
 // first, so each expense's Paid marks agree with the balances. Removing a payback takes its marks back.
+// ---- Up for it? ----
+// A new post tells the people it was posted to. Once two others are in (or the poster taps Make it a plan), the
+// post becomes a real event with everyone who's in, and the standard invite goes out from there.
+const ASK_TIME = { morning: "09:00", afternoon: "14:00", evening: "19:00", any: "" };
+const ASK_EMOJI = [[/taco|burrito|mexican/i, "🌮"], [/pizza/i, "🍕"], [/sushi|ramen/i, "🍣"], [/coffee|brunch|breakfast/i, "☕"], [/drink|beer|bar|wine|margarita|happy hour/i, "🍻"], [/run|hike|walk|bike/i, "🏃"], [/basketball|pickup|soccer|volleyball|golf|tennis|pickleball/i, "🏀"], [/movie|film|show|theater/i, "🎬"], [/game|trivia|board/i, "🎲"], [/dinner|food|eat/i, "🍽️"], [/music|concert|karaoke/i, "🎤"]];
+const ASK_THEMES = ["confetti", "citrus", "garden", "midnight", "coastal", "campfire", "lavender"];
+exports.onAskWritten = onDocumentWritten({ document: "asks/{id}", ...PUSH }, async e => {
+  const before = e.data.before.exists ? e.data.before.data() : null, after = e.data.after.exists ? e.data.after.data() : null;
+  if (!after) return;
+  const id = e.params.id, by = after.by, byName = firstName(after.byName);
+  if (!before) {
+    const to = (after.uids || []).filter(u => isRealUid(u) && u !== by);
+    await notify(to, `${byName} is free ${after.whenLabel || "soon"}. Up for it?`, after.text ? `“${String(after.text).slice(0, 100)}”` : "Tap I'm in and it becomes a plan.", "/#/?to=asksCard", { type: "ask", actorId: by });
+    return;
+  }
+  if (after.status !== "open") return;
+  const ins = [...new Set((after.ins || []).filter(u => isRealUid(u) && u !== by))];
+  if (!(ins.length >= 2 || (after.force && ins.length >= 1))) return;
+  // Build the plan
+  const snaps = await db.getAll(...[by, ...ins].map(u => db.doc("users/" + u)));
+  const names = {}; snaps.forEach(sn => { names[sn.id] = (sn.exists && sn.get("name")) || "Friend"; });
+  const text = String(after.text || "").trim();
+  const clause = (text.split(/[?!.]/)[0] || "").trim();
+  const title = (clause.length >= 3 ? clause : text ? text.replace(/[?!.]+$/, "") : `${byName}'s ${after.whenLabel || "plan"}`).slice(0, 60).replace(/^./, c => c.toUpperCase());
+  const emoji = (ASK_EMOJI.find(([re]) => re.test(text)) || [null, "🙌"])[1];
+  const h = [...id].reduce((n, ch) => n + ch.charCodeAt(0), 0);
+  const ev = { hostId: by, hostName: after.byName || "Friend", cohostUids: [], groupId: after.audience && after.audience !== "friends" ? after.audience : "", invitedUids: [by, ...ins], names, title, emoji,
+    theme: ASK_THEMES[h % ASK_THEMES.length], customTheme: null, cover: "", date: after.date, time: ASK_TIME[after.part] || "", endTime: "", location: "", stops: [], food: "", notes: text && text.length > 60 ? text : "",
+    capacity: 0, approval: false, tz: "", allowPlus: false, plusMax: 0, dayBring: true, dayCarpool: true, questions: [], rsvps: Object.fromEntries([by, ...ins].map(u => [u, "going"])), plusOnes: {}, hypes: {}, answers: {},
+    openLink: true, kind: "event", invitedPhones: [], invitedPhoneNames: {}, guestEmails: [], sequence: 0, fromAsk: id, createdAt: Date.now() };
+  const ref = db.collection("events").doc();
+  await ref.set(ev);
+  await e.data.after.ref.update({ status: "planned", planId: ref.id, planTitle: title, plannedAt: Date.now() });
+  logger.info(`ask ${id} became event ${ref.id} (${ins.length} in)`);
+});
+// Posts older than two days past their day are swept out.
+exports.askSweep = onSchedule({ schedule: "20 4 * * *", timeZone: "America/Chicago" }, async () => {
+  const q = await db.collection("asks").where("expiresAt", "<", Date.now() - 2 * 864e5).limit(300).get();
+  await Promise.all(q.docs.map(d => d.ref.delete().catch(() => {})));
+  if (q.size) logger.info(`askSweep: removed ${q.size}`);
+});
 exports.onSettlementWritten = onDocumentWritten({ document: "settlements/{id}", ...PUSH }, async e => {
   const before = e.data.before.exists ? e.data.before.data() : null, after = e.data.after.exists ? e.data.after.data() : null;
   const s = after || before; if (!s || !s.from || !s.to) return;

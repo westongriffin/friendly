@@ -971,6 +971,8 @@ function subscribeAll(u) {
     S.nameHints = S.nameHints || new Map(); for (const x of S.expenses.values()) for (const [k, n] of Object.entries(x.guestNames || {})) if (n) S.nameHints.set(k, n);
     refreshEvMoney(); renderSoon();
   }));
+  // "Up for it?" posts I can see (my friends' and my groups')
+  add(on("asks", query(collection(db, "asks"), where("uids", "array-contains", u.uid)), snap => { S.asks = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); renderSoon(); }));
   add(on("settlements", query(collection(db, "settlements"), where("involved", "array-contains", u.uid)), snap => {
     const before = S._setInit ? S.settlements : null;
     S.settlements = new Map(snap.docs.map(d => [d.id, { id: d.id, ...d.data() }])); S._setInit = true; renderSoon();
@@ -1812,6 +1814,7 @@ function homeBody() {
   return `
   <header class="hd-greet">${head}</header>
   ${notifCard()}${todayCards}${birthdayCard()}
+  ${askBox()}${asksSection()}
   ${hero ? heroCard(hero) : mine.length || todayEvs.length ? "" : `<div class="card empty">${dot("sleepy", 84)}<b>No plans yet</b><p class="muted">Tell Dot what you're thinking, or start one from scratch.</p><div class="btnrow" style="justify-content:center"><button class="btn primary" id="homeTell">Tell Dot</button><button class="btn" data-go="#/new">New event</button></div></div>`}
   ${needsYou()}
   ${moneyGlance()}
@@ -1820,6 +1823,68 @@ function homeBody() {
   ${memoriesStrip()}
   ${latestList()}
   ${crewsRow()}`;
+}
+// ---------- UP FOR IT? (low-stakes "I'm free Thursday, who's in?" posts) ----------
+// asks/{id}: by, text, date, part (morning|afternoon|evening|any), whenLabel, audience ("friends" or a group id),
+// uids (who can see it), ins (who's in), expiresAt. Two "I'm in" taps and the server turns it into a plan.
+const myFriendUids = () => [...S.friends.values()].filter(f => f.status === "accepted").map(otherIn).filter(Boolean);
+const askOpen = a => a.status === "open" && (a.expiresAt || 0) > Date.now();
+const askPart = { morning: "morning", afternoon: "afternoon", evening: "night", any: "" };
+function askBox() {
+  if (isDemo() && !myFriendUids().length && !S.groups.size) return "";
+  if (!myFriendUids().length && !S.groups.size) return "";
+  return `<button type="button" class="uf-ask" id="askBox"><span class="uf-ask-av">${avatar(myUid(), "sm")}</span><span class="uf-ask-text">Free sometime? Ask the crew…</span><span class="uf-ask-chips"><span class="fchip">Tonight</span><span class="fchip">Weekend</span></span></button>`;
+}
+function asksSection() {
+  const me = myUid(), all = [...(S.asks || new Map()).values()];
+  const open = all.filter(askOpen).sort((a, b) => (a.date || "").localeCompare(b.date || "") || b.createdAt - a.createdAt);
+  const planned = all.filter(a => a.status === "planned" && Date.now() - (a.plannedAt || 0) < 36 * 3600e3);
+  if (!open.length && !planned.length) return "";
+  return `<div class="hd-h" id="asksCard"><h3>Up for it?</h3><span class="hd-count">${open.length}</span></div><div class="card hd-list uf-list">${open.map(askCard).join("")}${planned.map(a => `<a class="uf-post done" data-go="#/e/${esc(a.planId)}"><div class="uf-post-h">${coral("party", 36)}<div><b>${esc(a.planTitle || a.text)}</b> became a plan 🎉<div class="muted sm">${esc(andNames((a.ins || []).map(u => u === me ? "you" : first(nameOf(u)))))} ${(a.ins || []).length === 1 ? "is" : "are"} in. Dot set it up.</div></div><span class="btn small">Open</span></div></a>`).join("")}</div>`;
+}
+const andNames = ns => ns.length <= 1 ? (ns[0] || "") : ns.length === 2 ? ns.join(" and ") : ns.length === 3 ? `${ns[0]}, ${ns[1]}, and ${ns[2]}` : `${ns[0]}, ${ns[1]}, and ${ns.length - 2} others`;
+function askCard(a) {
+  const me = myUid(), mine = a.by === me, ins = (a.ins || []).filter(u => u !== a.by), im = ins.includes(me);
+  const left = Math.max(1, Math.round(((a.expiresAt || 0) - Date.now()) / 3600e3)), ends = left >= 24 ? `ends ${a.date === addDays(todayStr(), 1) ? "tomorrow" : "in " + Math.round(left / 24) + "d"}` : `ends in ${left}h`;
+  return `<div class="uf-post" data-ask="${esc(a.id)}"><div class="uf-post-h">${avatar(a.by, "lg")}<div style="flex:1;min-width:0"><b>${mine ? "You're" : esc(first(nameOf(a.by))) + " is"} free ${esc(a.whenLabel || "")}</b><div class="muted sm">${a.text ? "“" + esc(a.text) + "” · " : ""}${ends}</div></div>${mine ? `<button type="button" class="btn ghost small" data-askdel="${esc(a.id)}" aria-label="Take this down">✕</button>` : ""}</div>
+    <div class="uf-post-f">${ins.length ? `<span class="hd-faces">${ins.slice(0, 4).map(u => avatar(u, "xs")).join("")}</span><span class="muted sm">${esc(andNames(ins.map(u => u === me ? "you" : first(nameOf(u)))))} ${ins.length === 1 && !im ? "is" : "are"} in</span>` : `<span class="muted sm">${mine ? "Waiting for the first yes." : "Nobody's in yet. Be the first."}</span>`}
+      ${mine ? (ins.length ? `<button type="button" class="btn primary small" data-askplan="${esc(a.id)}">Make it a plan</button>` : "") : `<button type="button" class="btn ${im ? "" : "primary"} small" data-askin="${esc(a.id)}">${im ? "✓ You're in" : "I'm in"}</button>`}</div></div>`;
+}
+function openAskSheet() {
+  const t = todayStr(), dow = new Date().getDay();
+  const dayName = d => evDate({ date: d }).toLocaleDateString("en-US", { weekday: "long" });
+  const sat = addDays(t, (6 - dow + 7) % 7 || 7), days = [1, 2, 3, 4].map(n => addDays(t, n));
+  const when = [["Tonight", t], ["Tomorrow", addDays(t, 1)], ...days.slice(1).map(d => [dayName(d).slice(0, 3), d]), ["This weekend", sat]];
+  const groups = [...S.groups.values()];
+  let pick = { date: t, label: "Tonight", part: "evening", aud: "friends" };
+  dialog(`<h3>Up for it?</h3>
+    <div class="muted sm" style="margin:0 0 6px">When</div><div class="chiprow" id="askWhen">${when.map(([l, d]) => `<button type="button" class="fchip ${d === t ? "on" : ""}" data-askd="${d}" data-askl="${esc(l)}">${esc(l)}</button>`).join("")}<button type="button" class="fchip" id="askPickDay">Pick a day</button></div>
+    <input type="date" id="askDate" class="hidden" min="${t}" style="margin-top:6px">
+    <div class="chiprow" id="askPart" style="margin-top:8px">${[["morning", "Morning"], ["afternoon", "Afternoon"], ["evening", "Evening"], ["any", "Any time"]].map(([k, l]) => `<button type="button" class="fchip ${k === "evening" ? "on" : ""}" data-askp="${k}">${l}</button>`).join("")}</div>
+    <div class="muted sm" style="margin:12px 0 6px">Who sees it</div><div class="chiprow" id="askAud"><button type="button" class="fchip on" data-aska="friends">All friends (${myFriendUids().length})</button>${groups.map(g => `<button type="button" class="fchip" data-aska="${esc(g.id)}">${groupMini(g)} ${esc(g.name)} (${(g.memberUids || []).length})</button>`).join("")}</div>
+    <label class="field" style="margin-top:12px"><span>What are you thinking? (optional)</span><input id="askText" maxlength="140" placeholder="Tacos and a margarita somewhere? Low key."></label>
+    <p class="muted sm" style="margin:10px 0 0">It disappears after that day. Two “I'm in” taps and Dot turns it into a plan with everyone who's in.</p>`,
+    "Post it", async () => {
+      const text = el("askText").value.trim();
+      const uids = pick.aud === "friends" ? myFriendUids() : ((S.groups.get(pick.aud) || {}).memberUids || []).filter(u => u !== myUid());
+      if (!uids.length) return toast("Nobody to ask yet. Add friends or a group first.");
+      const end = new Date(evDate({ date: pick.date })); end.setHours(23, 59, 0, 0); if (pick.label === "This weekend") end.setDate(end.getDate() + 1);
+      const label = pick.label === "This weekend" ? "this weekend" : `${pick.date === t ? "tonight" : pick.date === addDays(t, 1) ? "tomorrow" : dayName(pick.date)}${pick.date === t && pick.part === "evening" ? "" : askPart[pick.part] ? " " + askPart[pick.part] : ""}`;
+      try { await setDoc(doc(db, "asks", newId()), { by: myUid(), byName: S.profile.name, text, date: pick.date, part: pick.part, whenLabel: label, audience: pick.aud, audienceName: pick.aud === "friends" ? "friends" : (S.groups.get(pick.aud) || {}).name || "", uids: [...new Set([myUid(), ...uids])], ins: [], status: "open", expiresAt: end.getTime(), createdAt: Date.now() }); closeDialog(); toast("Posted. You'll hear when someone's in.", null, null, "coral:happy"); }
+      catch (e) { toast(e.message); }
+    });
+  document.querySelectorAll("#askWhen [data-askd]").forEach(b => b.onclick = () => { document.querySelectorAll("#askWhen .fchip").forEach(x => x.classList.remove("on")); b.classList.add("on"); el("askDate").classList.add("hidden"); pick.date = b.dataset.askd; pick.label = b.dataset.askl; });
+  el("askPickDay").onclick = () => { document.querySelectorAll("#askWhen .fchip").forEach(x => x.classList.remove("on")); el("askPickDay").classList.add("on"); el("askDate").classList.remove("hidden"); el("askDate").focus(); };
+  el("askDate").onchange = () => { if (el("askDate").value) { pick.date = el("askDate").value; pick.label = dayName(pick.date); } };
+  document.querySelectorAll("[data-askp]").forEach(b => b.onclick = () => { document.querySelectorAll("[data-askp]").forEach(x => x.classList.remove("on")); b.classList.add("on"); pick.part = b.dataset.askp; });
+  document.querySelectorAll("[data-aska]").forEach(b => b.onclick = () => { document.querySelectorAll("[data-aska]").forEach(x => x.classList.remove("on")); b.classList.add("on"); pick.aud = b.dataset.aska; });
+}
+function wireAsks() {
+  if (el("askBox")) el("askBox").onclick = openAskSheet;
+  document.querySelectorAll("[data-askin]").forEach(b => b.onclick = async () => { const a = S.asks.get(b.dataset.askin); if (!a) return; const me = myUid(), im = (a.ins || []).includes(me); b.disabled = true;
+    try { await updateDoc(doc(db, "asks", a.id), { ins: im ? arrayRemove(me) : arrayUnion(me) }); if (!im) toast("You're in. " + first(nameOf(a.by)) + " will see.", null, null, "coral:happy"); } catch (e) { toast(e.message); b.disabled = false; } });
+  document.querySelectorAll("[data-askdel]").forEach(b => b.onclick = () => { if (!confirm("Take this down?")) return; deleteDoc(doc(db, "asks", b.dataset.askdel)).catch(e => toast(e.message)); });
+  document.querySelectorAll("[data-askplan]").forEach(b => b.onclick = async () => { b.disabled = true; try { await updateDoc(doc(db, "asks", b.dataset.askplan), { force: true }); toast("Dot's setting it up…", null, null, "thinking"); } catch (e) { toast(e.message); b.disabled = false; } });
 }
 function heroCard(ev) {
   const th = themeOf(ev.theme, ev.customTheme), myR = (ev.rsvps || {})[myUid()], tf = tileFaces(ev);
@@ -1864,7 +1929,7 @@ function crewsRow() {
   return `<div class="hd-h"><h3>Your crews</h3><a class="hd-link" data-go="#/groups">Groups ›</a></div><div class="hd-scroll hd-crews">${groups.map((g, i) => `<a class="hd-crew" data-go="#/g/${g.id}"><span class="hd-crew-ic" style="background:${esc(g.color || GROUP_COLORS[i % GROUP_COLORS.length])}">${groupMini(g)}</span><span>${esc(g.name)}</span></a>`).join("")}</div>`;
 }
 function wireHomeDash() {
-  wireBanners();
+  wireBanners(); wireAsks();
   document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
   document.querySelectorAll("[data-act]").forEach(a => a.onclick = e => { e.preventDefault(); location.hash = routeTail(a.dataset.act); });
   document.querySelectorAll("[data-hdmem]").forEach(im => im.onclick = () => { const [eid, pid] = im.dataset.hdmem.split("|"), ev = S.events.get(eid), p = (S.memories.get(eid) || []).find(x => x.id === pid); if (ev && p) openPhoto(ev, p); });
@@ -3627,6 +3692,7 @@ function eventInner(ev) {
   ${ev.notes ? `<div class="ev-card-glass ev-notes">${esc(ev.notes).replace(/\n/g, "<br>")}</div>` : ""}
 
   <div class="ev-card-glass" id="rsvpCard">${rsvpBtns}</div>
+  ${ev.timePoll ? `<div class="ev-card-glass" id="whenCard">${whenInner(ev)}</div>` : ""}
 
   ${!canSeeGuests(ev) ? `<div class="ev-card-glass" id="guestCard"><div class="glass-head">Guest list <span>${going} going</span></div><p class="muted-th sm" style="margin:0">🔒 RSVP above to see who's coming.</p></div>` : (() => { const gOpen = collapsedOpen("friendlyGuestOpen:" + ev.id, true); return `<div class="ev-card-glass inv-card ${gOpen ? "open" : ""}" id="guestCard">
     <button type="button" class="glass-head inv-toggle" id="guestToggle" aria-expanded="${gOpen}"><span>Guest list <span class="muted-th sm">· ${(ev.invitedUids || []).length + (ev.invitedPhones || []).length} invited</span></span><span class="inv-chev">›</span></button>
@@ -4104,6 +4170,7 @@ function openCalendarDialog(ev) {
   document.querySelectorAll("#appDialog [data-go]").forEach(b => b.onclick = () => { closeDialog(); go(b.dataset.go); });
 }
 function wireEventPage(ev) {
+  wireWhen(ev);
   if (ev.coverFull) fullCoverOf(ev).then(c => { const img = document.querySelector(".event-cover img"); if (img && c && img.getAttribute("src") !== c) img.src = c; });
   const id = ev.id;
   markPeeked("#/e/" + ev.id);
@@ -4162,6 +4229,34 @@ function wireEventPage(ev) {
 }
 
 // ----- Polls -----
+// ---------- WHEN WORKS? (the host offers a few times; everyone taps the ones that work) ----------
+// events/{id}.timePoll: { options: [{id, date, time}], votes: {uid: [optionIds]}, lockedId }
+const twWhen = o => `${evDate({ date: o.date }).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}${o.time ? " · " + fmtTime(o.time) : ""}`;
+function whenInner(ev) {
+  const tp = ev.timePoll, me = myUid(), votes = tp.votes || {}, people = (ev.invitedUids || []), manage = canManage(ev);
+  const count = id => Object.values(votes).filter(v => (v || []).includes(id)).length, voted = Object.keys(votes).length;
+  const best = [...tp.options].sort((a, b) => count(b.id) - count(a.id))[0];
+  if (tp.lockedId) { const o = tp.options.find(x => x.id === tp.lockedId); return `<div class="glass-head">When works?</div><p class="muted-th">Locked in: <b>${o ? esc(twWhen(o)) : "set"}</b>. ${voted} of ${people.length} answered.</p>`; }
+  return `<div class="glass-head">When works? <span>${voted} of ${people.length} answered</span></div>
+    ${tp.options.map(o => { const n = count(o.id), mine = (votes[me] || []).includes(o.id); return `<button type="button" class="ww-opt ${o.id === best.id && n ? "best" : ""} ${mine ? "mine" : ""}" data-tw="${esc(o.id)}"><span class="ww-tick">${mine ? "✓" : ""}</span><span class="ww-mid"><b>${esc(twWhen(o))}</b><span class="ww-bar"><i style="width:${people.length ? n / people.length * 100 : 0}%"></i></span><small>${n} of ${people.length} can make it${o.id === best.id && n ? " · best so far" : ""}</small></span></button>`; }).join("")}
+    <div class="ww-foot"><span class="muted-th">Tap the times that work for you.</span>${manage && best && count(best.id) ? `<button type="button" class="btn-th accent small" id="lockWhen" data-lock="${esc(best.id)}">Lock in ${esc(twWhen(best).split(" · ")[0])}</button>` : ""}</div>`;
+}
+function openWhenDialog(ev) {
+  const row = i => `<div class="two"><label class="field"><span>Option ${i + 1}</span><input type="date" class="tw-d" min="${todayStr()}"></label><label class="field"><span>Time</span><input type="time" class="tw-t"></label></div>`;
+  dialog(`<h3>When works?</h3><p class="muted" style="margin-top:-6px">Offer a few times. Everyone taps the ones they can make, and you lock in the winner.</p>${[0, 1, 2, 3].map(row).join("")}`, "Ask everyone", async () => {
+    const ds = [...document.querySelectorAll(".tw-d")], ts = [...document.querySelectorAll(".tw-t")];
+    const options = ds.map((d, i) => d.value ? { id: "o" + i + Math.random().toString(36).slice(2, 6), date: d.value, time: ts[i].value || "" } : null).filter(Boolean);
+    if (options.length < 2) return toast("Give people at least two options.");
+    try { await updateDoc(doc(db, "events", ev.id), { timePoll: { options, votes: {}, lockedId: "" } }); closeDialog(); toast("Asked. You'll see the answers come in.", null, null, "happy"); } catch (e) { toast(e.message); }
+  });
+}
+function wireWhen(ev) {
+  if (el("addWhen")) el("addWhen").onclick = () => openWhenDialog(ev);
+  document.querySelectorAll("[data-tw]").forEach(b => b.onclick = async () => { const me = myUid(), cur = ((ev.timePoll || {}).votes || {})[me] || [], id = b.dataset.tw, next = cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id];
+    try { await updateDoc(doc(db, "events", ev.id), { [`timePoll.votes.${me}`]: next }); } catch (e) { toast(e.message); } });
+  if (el("lockWhen")) el("lockWhen").onclick = async () => { const o = (ev.timePoll.options || []).find(x => x.id === el("lockWhen").dataset.lock); if (!o) return; if (!confirm(`Lock in ${twWhen(o)}? Everyone invited hears the new time.`)) return;
+    try { await updateDoc(doc(db, "events", ev.id), { date: o.date, time: o.time || ev.time || "", updatedBy: myUid(), "timePoll.lockedId": o.id }); toast("Locked in. Everyone's been told.", null, null, "coral:party"); } catch (e) { toast(e.message); } };
+}
 function pollsInner(ev, hint = "Add a poll to help decide: food, time, theme.") {
   const me = myUid(); const manage = canManage(ev);
   const list = S.polls.map(p => {
@@ -4175,7 +4270,7 @@ function pollsInner(ev, hint = "Add a poll to help decide: food, time, theme.") 
   }).join("");
   // Group polls: any member can add one (the rules allow it); removing someone else's is host-only.
   const canAdd = manage || (ev._col && ev._col[0] === "groups");
-  return `<div class="glass-head">Polls${canAdd ? ` <a class="btn-th ghost small" id="addPoll">＋ Add</a>` : `<span>${S.polls.length}</span>`}</div><div class="scroll-cap">${list || `<p class="muted-th">${manage ? esc(hint) : "No polls yet."}</p>`}</div>`;
+  return `<div class="glass-head">Polls${canAdd ? ` <a class="btn-th ghost small" id="addPoll">＋ Add</a>${manage && !ev.timePoll ? ` <a class="btn-th ghost small" id="addWhen">🗓 When works?</a>` : ""}` : `<span>${S.polls.length}</span>`}</div><div class="scroll-cap">${list || `<p class="muted-th">${manage ? esc(hint) : "No polls yet."}</p>`}</div>`;
 }
 // Group date polls: the leading dated option can become an event in one tap.
 function planBtn(ev, p) {

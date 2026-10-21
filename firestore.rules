@@ -227,6 +227,13 @@ service cloud.firestore {
           && uid() in groupMemberUids(resource.data.groupId);
       }
       // An invited (non-host) guest may only edit their own key in a map field.
+      // When works?: a guest changes only their own entry in timePoll.votes
+      function onlyOwnVote() {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['timePoll'])
+          && 'timePoll' in resource.data
+          && request.resource.data.timePoll.diff(resource.data.timePoll).affectedKeys().hasOnly(['votes'])
+          && request.resource.data.timePoll.votes.diff(resource.data.timePoll.get('votes', {})).affectedKeys().hasOnly([uid()]);
+      }
       function onlyOwn(field) {
         return request.resource.data.diff(resource.data).affectedKeys().hasOnly([field])
           && request.resource.data[field].diff(resource.data.get(field, {})).affectedKeys().hasOnly([uid()]);
@@ -273,7 +280,7 @@ service cloud.firestore {
       allow create: if signedIn() && request.resource.data.hostId == uid()
         && (!isDemoUser() || demoEventOk(request.resource.data));
       allow update: if (isHost()
-        || (isInvited() && (onlyOwn('rsvps') || onlyOwn('plusOnes') || onlyOwn('plusNames') || onlyOwn('hypes') || onlyOwn('answers')))
+        || (isInvited() && (onlyOwn('rsvps') || onlyOwn('plusOnes') || onlyOwn('plusNames') || onlyOwn('hypes') || onlyOwn('answers') || onlyOwnVote()))
         || ((openLink() || viaGroup()) && selfJoin()))
         && (!isDemoUser() || demoEventOk(request.resource.data));
       allow delete: if signedIn() && uid() == resource.data.hostId
@@ -426,6 +433,18 @@ service cloud.firestore {
 
     // ---- Settlements ----
     // Doc shape: { from, to, amountCents, involved:[from,to], note, addedBy, createdAt }
+    // Up for it?: a low-stakes "I'm free Thursday" post to friends or a group. Only the people it was posted to
+    // can see it; they may only change who's in (ins); the poster may change anything and take it down.
+    match /asks/{askId} {
+      allow read: if signedIn() && uid() in resource.data.uids;
+      allow create: if signedIn() && request.resource.data.by == uid() && uid() in request.resource.data.uids
+        && request.resource.data.status == 'open' && request.resource.data.text is string && request.resource.data.text.size() <= 200
+        && request.resource.data.uids.size() <= 400
+        && (!isDemoUser() || request.resource.data.uids.hasOnly(demoUids()));
+      allow update: if signedIn() && (uid() == resource.data.by
+        || (uid() in resource.data.uids && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ins'])));
+      allow delete: if signedIn() && uid() == resource.data.by;
+    }
     match /settlements/{settlementId} {
       allow read: if signedIn() && uid() in resource.data.involved;
       allow create: if signedIn()

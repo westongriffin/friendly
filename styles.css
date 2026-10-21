@@ -1426,3 +1426,17 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 .t-lavender{--paint:linear-gradient(160deg,#F5F0FF,#E4D9FF 55%,#D2C2FF);--bgsize:200% 200%;--anim:drift;--anim-dur:22s}
 .t-gameday{--paint:repeating-linear-gradient(90deg,rgba(255,255,255,.05) 0 2px,transparent 2px 44px),linear-gradient(160deg,#0B1F3A,#143A66 55%,#1F4E8C)}
 .t-blacktie{--paint:radial-gradient(circle at 50% -5%,#3A3745,transparent 55%),linear-gradient(160deg,#0C0B0E,#1C1A22 55%,#2A2733)}
+
+/* Up for it? */
+.uf-ask{display:flex;align-items:center;gap:10px;width:100%;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:6px 8px 6px 6px;box-shadow:var(--shadow);margin:2px 0 6px;text-align:left}
+.uf-ask-av{flex:none;display:flex}.uf-ask-text{flex:1;color:var(--muted);font-size:.9rem;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.uf-ask-chips{display:flex;gap:4px}.uf-ask-chips .fchip{padding:4px 9px;font-size:.72rem;min-height:30px}
+.uf-list{padding:0}.uf-post{padding:12px 14px;border-top:1px solid var(--line)}.uf-post:first-child{border-top:0}.uf-post-h{display:flex;gap:10px;align-items:flex-start}.uf-post-h>.avatar,.uf-post-h>.blip{flex:none}.uf-post-h .btn{align-self:center}
+.uf-post-f{display:flex;align-items:center;gap:8px;margin-top:10px;padding-left:50px}.uf-post-f>.muted{flex:1;min-width:0}.uf-post-f .btn{margin-left:auto;flex:none;white-space:nowrap}.uf-post-h .muted{line-height:1.35}.uf-post.done{background:#FFF7F5;display:block}
+/* When works? */
+.ww-opt{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:10px 0;border-top:1px solid rgba(255,255,255,.12);color:inherit}.ww-opt:first-of-type{border-top:0}
+.ww-opt.best{background:rgba(255,255,255,.08);margin:0 -14px;padding:10px 14px;border-radius:12px;border-top:0}
+.ww-tick{width:30px;height:30px;border-radius:50%;border:2px solid rgba(255,255,255,.35);display:grid;place-items:center;font-weight:800;flex:none}.ww-opt.mine .ww-tick{background:#25A56A;border-color:#25A56A;color:#fff}
+.ww-mid{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}.ww-mid small{opacity:.8;font-size:.78rem}
+.ww-bar{height:6px;border-radius:3px;background:rgba(255,255,255,.18);overflow:hidden}.ww-bar i{display:block;height:100%;background:var(--th-accent);border-radius:3px}
+.ww-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;flex-wrap:wrap}
+.app-dialog #askWhen,.app-dialog #askPart,.app-dialog #askAud{flex-wrap:wrap;overflow:visible;padding-bottom:0;margin-bottom:0}
