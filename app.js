@@ -7126,3 +7126,39 @@ window.closeDialog = closeDialog;
 if ("serviceWorker" in navigator) { const reg = () => navigator.serviceWorker.register("./sw.js").catch(() => {}); if (document.readyState === "complete") reg(); else addEventListener("load", reg); }
 
 render();
+
+// ---------- SWIPE BETWEEN TABS (Home · Plans · Groups · Money · Curate) ----------
+// A sideways swipe on a tab page moves to the next or previous tab. Swipes that start on anything that scrolls
+// sideways (chip rows, photo strips, the Curate tray), inside a dialog or the photo viewer, on a form field, or at
+// the screen's edges (the system's back gesture) are left alone. Vertical scrolling wins whenever it's ambiguous.
+const TAB_ORDER = [["home", "#/"], ["plans", "#/plans"], ["groups", "#/groups"], ["money", "#/money"], ["curate", "#/curate"]];
+(() => {
+  let sx = 0, sy = 0, st = 0, active = false, horiz = null, mainEl = null;
+  const scrollsX = n => { for (; n && n !== document.body; n = n.parentElement) { if (n.scrollWidth > n.clientWidth + 2) { const o = getComputedStyle(n).overflowX; if (o === "auto" || o === "scroll") return true; } } return false; };
+  const tabIdx = () => TAB_ORDER.findIndex(([n]) => n === (S.route || {}).name);
+  const reset = () => { if (!mainEl) return; const m = mainEl; m.style.transition = "transform .2s ease, opacity .2s ease"; m.style.transform = ""; m.style.opacity = ""; setTimeout(() => { m.style.transition = ""; }, 220); };
+  document.addEventListener("touchstart", e => {
+    active = false; horiz = null; if (e.touches.length !== 1) return;
+    const t = e.touches[0]; if (tabIdx() < 0 || el("appDialog") || document.querySelector("dialog[open], .pv, .lightbox, .cheer")) return;
+    if (t.clientX < 24 || t.clientX > innerWidth - 24) return;
+    if (e.target.closest("input, textarea, select, [contenteditable], canvas, iframe, .map, .chiprow, .hd-scroll, .tabs, [data-noswipe]") || scrollsX(e.target)) return;
+    sx = t.clientX; sy = t.clientY; st = Date.now(); active = true; mainEl = document.querySelector("main");
+  }, { passive: true });
+  document.addEventListener("touchmove", e => {
+    if (!active) return; const t = e.touches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+    if (horiz === null) { if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return; horiz = Math.abs(dx) > Math.abs(dy) * 1.4; if (!horiz) { active = false; return; } }
+    const i = tabIdx(), edge = (dx > 0 && i === 0) || (dx < 0 && i === TAB_ORDER.length - 1);
+    if (mainEl) { mainEl.style.transition = "none"; mainEl.style.transform = `translateX(${Math.max(-90, Math.min(90, dx * (edge ? 0.15 : 0.35)))}px)`; }
+  }, { passive: true });
+  document.addEventListener("touchend", e => {
+    if (!active) return; active = false; const t = (e.changedTouches || [])[0]; if (!t || horiz !== true) return reset();
+    const dx = t.clientX - sx, dt = Date.now() - st, i = tabIdx(), fast = Math.abs(dx) > 40 && dt < 250;
+    const to = (Math.abs(dx) > 70 || fast) ? i + (dx < 0 ? 1 : -1) : -1;
+    if (to < 0 || to >= TAB_ORDER.length) return reset();
+    const dir = dx < 0 ? -1 : 1, m = mainEl;
+    if (m) { m.style.transition = "transform .16s ease, opacity .16s ease"; m.style.transform = `translateX(${dir * 48}px)`; m.style.opacity = "0"; }
+    setTimeout(() => { go(TAB_ORDER[to][1]); const n = document.querySelector("main"); if (!n) return; n.style.transition = "none"; n.style.transform = `translateX(${-dir * 40}px)`; n.style.opacity = "0";
+      requestAnimationFrame(() => requestAnimationFrame(() => { n.style.transition = "transform .22s ease, opacity .22s ease"; n.style.transform = ""; n.style.opacity = ""; setTimeout(() => { n.style.transition = ""; }, 240); })); }, m ? 110 : 0);
+  }, { passive: true });
+  document.addEventListener("touchcancel", () => { active = false; reset(); }, { passive: true });
+})();
