@@ -1798,7 +1798,7 @@ function homeBody() {
   const upcoming = evs.filter(e => e.date >= t).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
   let hiddenToday = []; try { hiddenToday = JSON.parse(LS.get("friendlyTodayHidden") || "[]"); } catch {}
   const todayEvs = upcoming.filter(e => e.date === t && !hiddenToday.includes(e.id + "|" + e.date)).slice(0, 2);
-  const todayCards = todayEvs.map(e => `<div class="card notif-card today-card" data-ev="${e.id}" role="button"><button type="button" class="today-x" data-hide-today="${e.id}|${e.date}" aria-label="Hide this">✕</button>${dotHat(56)}<div style="flex:1;min-width:0"><div class="eyebrow-sm">Today</div><b>${esc(e.title)}${e.time ? " · " + fmtTime(e.time) : ""}</b><div class="muted sm">${e.kind === "meeting" ? (e.invitedUids || []).filter(u => (e.rsvps || {})[u] === "going").length + " accepted" : goingCount(e) + " going"}${evStops(e).length ? " · " + evStops(e).length + " stops" : e.location ? " · " + esc(placeName(e.location)) : ""}</div></div><span class="chev">›</span></div>`).join("");
+  const todayCards = todayEvs.map(e => liveWindow(e).phase ? liveCard(e) : `<div class="card notif-card today-card" data-ev="${e.id}" role="button"><button type="button" class="today-x" data-hide-today="${e.id}|${e.date}" aria-label="Hide this">✕</button>${dotHat(56)}<div style="flex:1;min-width:0"><div class="eyebrow-sm">Today</div><b>${esc(e.title)}${e.time ? " · " + fmtTime(e.time) : ""}</b><div class="muted sm">${e.kind === "meeting" ? (e.invitedUids || []).filter(u => (e.rsvps || {})[u] === "going").length + " accepted" : goingCount(e) + " going"}${evStops(e).length ? " · " + evStops(e).length + " stops" : e.location ? " · " + esc(placeName(e.location)) : ""}</div></div><span class="chev">›</span></div>`).join("");
   if ((S.profile.city || "").trim()) ensureCurated();
   const mine = upcoming.filter(e => !e._unjoined);
   const hero = mine.find(e => !todayEvs.includes(e)) || null;
@@ -1813,7 +1813,7 @@ function homeBody() {
     : `<div><h1>${greet}, ${esc(first(S.profile.name))}</h1><p class="muted sm">${dateLine} · ${plansLine}</p></div>${dot("happy", 54)}`;
   return `
   <header class="hd-greet">${head}</header>
-  ${notifCard()}${todayCards}${birthdayCard()}
+  ${notifCard()}${todayCards}${afterCard()}${birthdayCard()}
   ${askBox()}${asksSection()}
   ${hero ? heroCard(hero) : mine.length || todayEvs.length ? "" : `<div class="card empty">${dot("sleepy", 84)}<b>No plans yet</b><p class="muted">Tell Dot what you're thinking, or start one from scratch.</p><div class="btnrow" style="justify-content:center"><button class="btn primary" id="homeTell">Tell Dot</button><button class="btn" data-go="#/new">New event</button></div></div>`}
   ${needsYou()}
@@ -1823,6 +1823,78 @@ function homeBody() {
   ${memoriesStrip()}
   ${latestList()}
   ${crewsRow()}`;
+}
+// ---------- LIVE LAYER (the hours around a plan: statuses, who's where, the morning after) ----------
+// Statuses are the day-of card's status comments (kind "status": omw | late | here | clear, late carries mins).
+function liveWindow(ev) {
+  if (!ev || !ev.date) return { phase: null };
+  const [y, m, d] = ev.date.split("-").map(Number), [sh, sm] = (ev.time || "09:00").split(":").map(Number);
+  const start = new Date(y, m - 1, d, sh, sm).getTime();
+  const end = ev.endTime ? new Date(y, m - 1, d, ...ev.endTime.split(":").map(Number)).getTime() : start + 4 * 3600e3;
+  const now = Date.now(), H = 3600e3;
+  const phase = now < start - 3 * H ? null : now < start ? "soon" : now <= end ? "now" : now <= end + 20 * H ? "after" : null;
+  return { start, end, phase };
+}
+const LIVE_LABEL = { omw: "On my way", late: "Running late", here: "I'm here" }, LIVE_ICON = { omw: "🚗", late: "⏰", here: "📍" };
+const liveLatest = rows => { const latest = {}; (rows || []).forEach(c => { if (c.kind !== "status") return; if (!latest[c.authorId] || latest[c.authorId].createdAt < c.createdAt) latest[c.authorId] = c; });
+  return Object.fromEntries(Object.entries(latest).filter(([, c]) => c.status !== "clear" && Date.now() - c.createdAt < 18 * 3600e3)); };
+const lateWord = c => c.status === "late" ? (c.mins ? `running ${c.mins} min late` : "running late") : c.status === "here" ? "here" : "on the way";
+// Home keeps one small listener on today's plan so Who's where stays current without opening the event.
+function ensureLiveSub(ev) {
+  if (S._live && S._live.id === ev.id) return;
+  if (S._liveUnsub) { S._liveUnsub(); S._liveUnsub = null; }
+  S._live = { id: ev.id, rows: [] };
+  try { S._liveUnsub = onSnapshot(query(subCol(ev, "comments"), where("kind", "==", "status")), snap => { S._live = { id: ev.id, rows: snap.docs.map(d => ({ id: d.id, ...d.data() })) }; if (S.route.name === "home") renderSoon(); }, () => {}); S.subs.push(() => S._liveUnsub && S._liveUnsub()); } catch {}
+}
+function liveCard(ev) {
+  ensureLiveSub(ev);
+  const me = myUid(), { start, phase } = liveWindow(ev), host = ev.hostId, iHost = host === me;
+  const latest = liveLatest((S._live && S._live.id === ev.id) ? S._live.rows : []), mine = latest[me];
+  const mins = Math.max(1, Math.round((start - Date.now()) / 60000));
+  const when = phase === "now" ? "Happening now" : mins < 60 ? `in ${mins} min` : `in ${Math.round(mins / 60)}h`;
+  const people = [...new Set([host, ...(ev.invitedUids || []).filter(u => (ev.rsvps || {})[u] === "going")])];
+  const here = people.filter(u => (latest[u] && latest[u].status === "here") || (u === host && !latest[u]));
+  const way = people.filter(u => latest[u] && (latest[u].status === "omw" || latest[u].status === "late"));
+  const notYet = people.filter(u => !here.includes(u) && !way.includes(u));
+  const hostName = first(nameOf(host)), hostPhone = !iHost && (payInfoOf(host).phone || "");
+  const where = evStops(ev).length ? evStops(ev)[0] : null, dir = where ? stopMapUrl(where) : ev.location && !/zoom|meet\.google|teams|http|online|call/i.test(ev.location) ? "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(ev.location) : "";
+  const line = mine ? (mine.status === "here" ? "You're here 🎉" : `You're ${lateWord(mine)}. ${iHost ? "Your guests" : hostName} can see that.`) : iHost ? "Tap one and your guests will know." : `Tap one so ${hostName} isn't guessing.`;
+  const row = (label, list, extra = "") => list.length ? `<div class="lv-row"><b>${label} (${list.length})</b><span class="hd-faces">${list.slice(0, 6).map(u => avatar(u, "xs")).join("")}${list.length > 6 ? `<span class="more">+${list.length - 6}</span>` : ""}</span>${extra}</div>` : "";
+  const lateNotes = way.filter(u => latest[u].status === "late").map(u => `${first(nameOf(u))} ${latest[u].mins ? latest[u].mins + " min" : "late"}`).join(" · ");
+  return `<div class="card lv-card" data-live="${esc(ev.id)}">
+    <div class="lv-head"><span class="hd-chip dark">${phase === "now" ? "Now" : "Today"}${ev.time ? " · " + fmtTime(ev.time) : ""}</span><span class="muted sm">${when}</span><button type="button" class="today-x" data-hide-today="${esc(ev.id)}|${esc(ev.date)}" aria-label="Hide this">✕</button></div>
+    <h2 class="lv-title" data-ev="${esc(ev.id)}">${ev.emoji ? esc(ev.emoji) + " " : ""}${esc(ev.title)}</h2>
+    <div class="muted sm">${where ? esc(where.name || where.place || "") : ev.location ? esc(ev.location) : (goingCount(ev) + " going")}</div>
+    <div class="lv-status">${["omw", "late", "here"].map(k => `<button type="button" class="lv-st ${mine && mine.status === k ? "on" : ""}" data-lstatus="${k}" data-lev="${esc(ev.id)}" aria-pressed="${mine && mine.status === k ? "true" : "false"}">${LIVE_ICON[k]} ${LIVE_LABEL[k]}</button>`).join("")}</div>
+    <div class="muted sm lv-line">${line}</div>
+    <div class="lv-who">${row("Here", here)}${row("On the way", way, lateNotes ? `<span class="muted sm lv-late">${esc(lateNotes)}</span>` : "")}${row("Not yet", notYet)}</div>
+    <div class="lv-btns">${dir ? `<a class="btn small" href="${esc(dir)}" target="_blank" rel="noopener">Directions</a>` : ""}${hostPhone ? `<a class="btn small" href="${esc(smsLink([hostPhone], `Hey ${hostName}! `))}">Text ${esc(hostName)}</a>` : ""}<a class="btn primary small" data-go="#/e/${esc(ev.id)}">Open</a></div></div>`;
+}
+// Post a status from anywhere (Home live card or the event's Day-of card). Tapping the one you're on clears it.
+async function postStatus(ev, status, current) {
+  const me = myUid(), post = async (st, mins) => { await addDoc(subCol(ev, "comments"), { kind: "status", status: st, ...(mins ? { mins } : {}), authorId: me, authorName: S.profile.name, text: "", createdAt: Date.now() });
+    toast(st === "clear" ? "Status cleared" : st === "late" ? "Everyone can see you're running late" : st === "here" ? "You made it 🎉" : "Everyone can see you're on the way", null, null, st === "here" ? "coral:party" : undefined); };
+  if (current === status) return post("clear");
+  if (status !== "late") return post(status);
+  dialog(`<h3>Running late</h3><p class="muted" style="margin-top:-6px">About how long?</p><div class="chiprow" id="lateMins" style="flex-wrap:wrap;overflow:visible">${[10, 20, 30, 45].map(m => `<button type="button" class="fchip" data-lm="${m}">${m} min</button>`).join("")}<button type="button" class="fchip" data-lm="0">Not sure</button></div>`, null);
+  document.querySelectorAll("[data-lm]").forEach(b => b.onclick = async () => { closeDialog(); try { await post("late", +b.dataset.lm || 0); } catch (e) { toast(e.message); } });
+}
+function wireLive() {
+  document.querySelectorAll("[data-lstatus]").forEach(b => b.onclick = async () => { const ev = S.events.get(b.dataset.lev); if (!ev) return; const cur = (liveLatest((S._live || {}).rows)[myUid()] || {}).status || ""; b.disabled = true; try { await postStatus(ev, b.dataset.lstatus, cur); } catch (e) { toast(e.message); } b.disabled = false; });
+  document.querySelectorAll(".lv-title[data-ev]").forEach(a => a.onclick = () => go("#/e/" + a.dataset.ev));
+  document.querySelectorAll("[data-hide-after]").forEach(b => b.onclick = e => { e.stopPropagation(); let h = []; try { h = JSON.parse(LS.get("friendlyAfterHidden") || "[]"); } catch {} h = [...h, b.dataset.hideAfter].slice(-30); try { LS.set("friendlyAfterHidden", JSON.stringify(h)); } catch {} render(); });
+}
+// The morning after: one card for the plan that just ended, with photos and the tab.
+function afterCard() {
+  const me = myUid(); let hidden = []; try { hidden = JSON.parse(LS.get("friendlyAfterHidden") || "[]"); } catch {}
+  const ev = myEvents().filter(e => liveWindow(e).phase === "after" && !hidden.includes(e.id) && (e.rsvps || {})[me] !== "no").sort((a, b) => liveWindow(b).end - liveWindow(a).end)[0];
+  if (!ev) return "";
+  const pics = S.memories.get(ev.id) || [], others = [...new Set(pics.map(p => p.addedBy).filter(u => u && u !== me))];
+  const evening = parseInt((ev.time || "12:00").split(":")[0], 10) >= 17;
+  const owe = [...S.expenses.values()].filter(x => x.eventId === ev.id && x.paidBy !== me && !(x.paid || {})[me]).reduce((n, x) => n + (x.shares ? (x.shares[me] || 0) : ((x.split || []).includes(me) ? Math.round(x.amountCents / x.split.length) : 0)), 0);
+  return `<div class="card lv-after"><button type="button" class="today-x" data-hide-after="${esc(ev.id)}" aria-label="Hide this">✕</button><div class="lv-after-h">${coral("party", 46)}<div style="flex:1;min-width:0"><b>${evening ? "Last night was a good one." : "That was a good one."}</b><div class="muted sm">Add your photos from ${esc(ev.title)}.${others.length ? ` ${esc(andNames(others.map(u => first(nameOf(u)))))} already added ${pics.length}.` : ""}</div></div></div>
+    ${pics.length ? `<div class="hd-scroll hd-mems lv-after-pics">${pics.filter(p => p.img).slice(0, 6).map(p => `<img src="${esc(p.img)}" data-hdmem="${esc(ev.id)}|${esc(p.id)}" alt="" loading="lazy">`).join("")}</div>` : ""}
+    <div class="lv-btns"><a class="btn primary small" data-go="#/e/${esc(ev.id)}?to=photosCard">Add photos</a>${owe ? `<a class="btn small" data-go="#/money?to=settleCard">Settle up ${fmt$(owe)}</a>` : `<a class="btn small" data-go="#/e/${esc(ev.id)}?to=wall">Say thanks</a>`}</div></div>`;
 }
 // ---------- UP FOR IT? (low-stakes "I'm free Thursday, who's in?" posts) ----------
 // asks/{id}: by, text, date, part (morning|afternoon|evening|any), whenLabel, audience ("friends" or a group id),
@@ -1929,7 +2001,7 @@ function crewsRow() {
   return `<div class="hd-h"><h3>Your crews</h3><a class="hd-link" data-go="#/groups">Groups ›</a></div><div class="hd-scroll hd-crews">${groups.map((g, i) => `<a class="hd-crew" data-go="#/g/${g.id}"><span class="hd-crew-ic" style="background:${esc(g.color || GROUP_COLORS[i % GROUP_COLORS.length])}">${groupMini(g)}</span><span>${esc(g.name)}</span></a>`).join("")}</div>`;
 }
 function wireHomeDash() {
-  wireBanners(); wireAsks();
+  wireBanners(); wireAsks(); wireLive();
   document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
   document.querySelectorAll("[data-act]").forEach(a => a.onclick = e => { e.preventDefault(); location.hash = routeTail(a.dataset.act); });
   document.querySelectorAll("[data-hdmem]").forEach(im => im.onclick = () => { const [eid, pid] = im.dataset.hdmem.split("|"), ev = S.events.get(eid), p = (S.memories.get(eid) || []).find(x => x.id === pid); if (ev && p) openPhoto(ev, p); });
@@ -4034,9 +4106,9 @@ function dayInner(ev) {
   return `<div class="glass-head">Day of <span>${esc(fmtDay(ev))}</span></div>
     <div class="day-sec"><div class="glass-sub">☀️ Weather &amp; arrivals</div>
     <div id="wx" class="muted-th sm" style="margin:0 0 8px">${esc(ev._wx || "")}</div>
-    ${statuses.length ? `<div class="chipwrap">${statuses.map(c => `<span class="day-chip">${c.status === "late" ? "⏰" : "🚗"} ${esc(first(c.authorName || nameOf(c.authorId)))} ${c.status === "late" ? "is running late" : "is on the way"} <i>${ago(c.createdAt)}</i></span>`).join("")}</div>` : ""}
+    ${statuses.length ? `<div class="chipwrap">${statuses.map(c => `<span class="day-chip">${LIVE_ICON[c.status] || "🚗"} ${esc(first(c.authorName || nameOf(c.authorId)))} is ${lateWord(c)} <i>${ago(c.createdAt)}</i></span>`).join("")}</div>` : ""}
     <div class="btnrow" style="margin:4px 0 10px">
-      ${soon || mine ? `<button type="button" class="btn-th small ${mine === "omw" ? "accent" : ""}" data-status="omw">🚗 On my way</button><button type="button" class="btn-th small ${mine === "late" ? "accent" : ""}" data-status="late">⏰ Running late</button>` : ""}
+      ${soon || mine ? `<button type="button" class="btn-th small ${mine === "omw" ? "accent" : ""}" data-status="omw">🚗 On my way</button><button type="button" class="btn-th small ${mine === "late" ? "accent" : ""}" data-status="late">⏰ Running late</button><button type="button" class="btn-th small ${mine === "here" ? "accent" : ""}" data-status="here">📍 I'm here</button>` : ""}
       ${S.profile && S.profile.calToken ? "" : `<button type="button" class="btn-th small" id="addCal">📆 Add to calendar</button>`}
     </div>
     </div>
@@ -4064,9 +4136,7 @@ function wireDay(ev) {
   const me = myUid();
   document.querySelectorAll("[data-status]").forEach(b => b.onclick = async () => {
     const latest = typed("status").filter(c => c.authorId === me).sort((a, b) => b.createdAt - a.createdAt)[0];
-    const status = latest && latest.status === b.dataset.status ? "clear" : b.dataset.status;
-    try { await addDoc(subCol(ev, "comments"), { kind: "status", status, authorId: me, authorName: S.profile.name, text: "", createdAt: Date.now() }); toast(status === "clear" ? "Status cleared" : status === "late" ? "Everyone can see you're running late" : "Everyone can see you're on the way"); }
-    catch (e) { toast(e.message); }
+    try { await postStatus(ev, b.dataset.status, latest && latest.status !== "clear" ? latest.status : ""); } catch (e) { toast(e.message); }
   });
   if (el("addCal")) el("addCal").onclick = () => openCalendarDialog(ev);
   if (el("addBring")) el("addBring").onclick = () => dialog(`<h3>Add to the bring list</h3><label class="field"><span>What</span><input id="bItem" placeholder="Ice, cups, a dessert…" maxlength="60"></label><label class="field"><span>How many <span class="muted">(optional)</span></span><input id="bQty" placeholder="2 bags" maxlength="20"></label>`, "Add", async () => {

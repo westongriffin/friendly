@@ -1544,6 +1544,15 @@ exports.onNudge = onDocumentCreated({ document: "nudges/{id}", ...PUSH }, async 
 exports.onComment = onDocumentCreated({ document: "events/{id}/comments/{cid}", ...PUSH }, async e => {
   const c = e.data && e.data.data(); if (!c) return;
   const ev = (await db.doc("events/" + e.params.id).get()).data(); if (!ev) return;
+  // Day-of entries aren't chat. A status goes to the host (and co-hosts) only; bring-list and ride entries stay quiet.
+  if (c.kind === "status") {
+    if (c.status === "clear") return;
+    const hosts = [ev.hostId, ...(ev.cohostUids || [])].filter(u => u && u !== c.authorId);
+    const what = c.status === "here" ? "is here" : c.status === "late" ? (c.mins ? `is running ${c.mins} min late` : "is running late") : "is on the way";
+    await notify(hosts, `${firstName(c.authorName)} ${what}`, (ev.emoji || "📍") + " " + ev.title, "/#/e/" + e.params.id + "?to=dayCard", { type: "reminder", actorId: c.authorId, key: "live:" + e.params.id, actors: [c.authorId], actorNames: [firstName(c.authorName)] });
+    return;
+  }
+  if (c.kind === "bring" || c.kind === "ride") return;
   await notify((ev.invitedUids || []).filter(u => u !== c.authorId),
     firstName(c.authorName) + " on " + ev.title, commentPreview(c),
     "/#/e/" + e.params.id + "?to=wall&c=" + e.params.cid, { type: "comment", actorId: c.authorId });
