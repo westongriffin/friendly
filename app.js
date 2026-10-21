@@ -538,6 +538,7 @@ function evDate(ev) { const [y, m, d] = (ev.date || "2000-01-01").split("-").map
 function fmtTime(t) { if (!t) return ""; const [h, mi] = t.split(":").map(Number); const d = new Date(); d.setHours(h, mi); return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }); }
 function fmtWhen(ev) {
   const d = evDate(ev);
+  if (ev.endDate && ev.endDate > ev.date) return `${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} to ${evDate({ date: ev.endDate }).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}`;
   let s = d.toLocaleDateString(undefined, { weekday: "short", month: "long", day: "numeric" });
   if (ev.time) s += " · " + fmtTime(ev.time) + (ev.endTime ? "–" + fmtTime(ev.endTime) : "");
   return s;
@@ -2696,7 +2697,7 @@ async function leaveGroup(g) {
 const compose = { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji",
   title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false,
   questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "" };
-function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", repeat: "", stops: [], _restored: false, _fromDraft: false, _plan: null, _draftId: null, plusOn: null, plusMax: 0, bring: [], bringOn: true, carOn: true, drive: false, seats: 3 }); clearTimeout(draftTimer); }
+function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", endDate: "", repeat: "", stops: [], _restored: false, _fromDraft: false, _plan: null, _draftId: null, plusOn: null, plusMax: 0, bring: [], bringOn: true, carOn: true, drive: false, seats: 3 }); clearTimeout(draftTimer); }
 // ---- "Let me plan it": say the plan, Dot drafts it, you review it in the composer. Nothing is created or sent until you tap Create.
 function planContext(text, mode, ctx) {
   const d = new Date(), pad = n => String(n).padStart(2, "0");
@@ -3302,7 +3303,7 @@ const STOP_EMOJIS = ["🍽️", "🍔", "🌮", "🍕", "🍣", "🍸", "🍻", 
 const stopMins = t => { if (!/^\d{2}:\d{2}$/.test(t || "")) return 99999; const [h, m] = t.split(":").map(Number); return (h < 5 ? h + 24 : h) * 60 + m; };   // 12:30 AM sorts after 10 PM
 // Timed stops sort among themselves; a stop with no time yet stays where it is.
 const sortStops = arr => { const slots = arr.map((x, i) => stopMins(x.time) < 99999 ? i : -1).filter(i => i >= 0); const timed = slots.map(i => arr[i]).map((x, k) => [x, k]).sort((a, b) => (stopMins(a[0].time) - stopMins(b[0].time)) || (a[1] - b[1])).map(p => p[0]); const out = arr.slice(); slots.forEach((i, k) => { out[i] = timed[k]; }); return out; };
-const cleanStops = arr => (Array.isArray(arr) ? arr : []).slice(0, 8).map(x => ({ time: /^\d{2}:\d{2}$/.test((x && x.time) || "") ? x.time : "", emoji: String((x && x.emoji) || "📍").slice(0, 4), name: String((x && x.name) || "").trim().slice(0, 60), place: String((x && x.place) || "").trim().slice(0, 120), ...((x && x.note) ? { note: String(x.note).trim().slice(0, 160) } : {}) })).filter(x => x.name || x.place);
+const cleanStops = arr => (Array.isArray(arr) ? arr : []).slice(0, 24).map(x => ({ time: /^\d{2}:\d{2}$/.test((x && x.time) || "") ? x.time : "", emoji: String((x && x.emoji) || "📍").slice(0, 4), name: String((x && x.name) || "").trim().slice(0, 60), place: String((x && x.place) || "").trim().slice(0, 120), ...((x && x.note) ? { note: String(x.note).trim().slice(0, 160) } : {}), ...(/^\d{4}-\d{2}-\d{2}$/.test((x && x.day) || "") ? { day: x.day } : {}) })).filter(x => x.name || x.place);
 const evStops = ev => { const st = cleanStops(ev && ev.stops); return st.length >= 2 ? sortStops(st) : []; };
 const stopsText = ev => evStops(ev).map(x => `${x.time ? fmtTime(x.time) + " " : ""}${x.name || x.place}${x.name && x.place ? " at " + placeLine(x) : ""}`).join("\n");
 // "Three Empires Brewing, Frisco, TX" under "Three Empires Brewing" reads as just "Frisco, TX".
@@ -3396,12 +3397,13 @@ function composeBody() {
     <div class="seg kind-seg" id="kindSeg">
       <button type="button" class="${compose.kind !== "meeting" ? "on" : ""}" data-kind="event">🎉 Event</button>
       <button type="button" class="${compose.kind === "meeting" ? "on" : ""}" data-kind="meeting">📅 Meeting</button>
+      <button type="button" class="${compose.kind === "trip" ? "on" : ""}" data-kind="trip">⛵ Trip</button>
     </div>
     ${!compose._draftId && (S.drafts || []).length ? `<p class="muted sm" style="margin:-4px 0 10px">You have ${S.drafts.length} saved draft${S.drafts.length === 1 ? "" : "s"} · <a data-go="#/drafts" style="color:var(--accent);font-weight:600">Open Drafts</a></p>` : ""}
     ${compose._fromDraft ? `<p class="muted sm" style="margin:-4px 0 10px">Restored your draft · <a id="discardDraft" style="color:var(--accent);font-weight:600">Discard</a></p>` : ""}
     ${compose._plan ? planCard() : (window.Blip && !isDemo() && !compose._fromDraft && !compose.title ? `<button type="button" class="btn tell-dot" id="composeTell">${dot("happy", 26)} Or just tell Dot: “Taco night Friday at 7, invite the crew, bring a side.”</button>` : "")}
     <p class="muted sm draft-status" id="draftStatus" style="margin:-4px 0 10px;min-height:1.4em"></p>
-    ${compose.kind === "meeting" ? `<p class="muted sm" style="margin:-4px 0 12px">A plain calendar entry: title, time, place, who. Everyone gets a calendar invite by email.</p>` : ""}
+    ${compose.kind === "meeting" ? `<p class="muted sm" style="margin:-4px 0 12px">A plain calendar entry: title, time, place, who. Everyone gets a calendar invite by email.</p>` : compose.kind === "trip" ? `<p class="muted sm" style="margin:-4px 0 12px">A few days away. You get a day-by-day plan, where everyone's staying, rides, packing, and one running tab.</p>` : ""}
     <div class="${compose.kind === "meeting" ? "hidden" : ""}">
     <div class="compose-preview t-${th.id}" id="cPreview" style="--th-accent:${th.accent};--th-ink:${th.ink};--th-on-accent:${th.onAccent};font-family:${th.font},system-ui">
       ${compose.cover ? `<div class="preview-cover"><img src="${compose.cover}" alt=""></div>` : ""}
@@ -3435,7 +3437,8 @@ function composeBody() {
     <div class="form-card card">
       <label class="field"><span>${compose.kind === "meeting" ? "Meeting title" : "What's the plan?"}</span><input id="cTitle" maxlength="80" value="${esc(compose.title)}" placeholder="Rooftop taco night"></label>
       <div class="two">
-        <label class="field"><span>Date</span><input id="cDate" type="date" value="${compose.date || todayStr()}"></label>
+        <label class="field"><span>${compose.kind === "trip" ? "First day" : "Date"}</span><input id="cDate" type="date" value="${compose.date || todayStr()}"></label>
+        ${compose.kind === "trip" ? `<label class="field"><span>Last day</span><input id="cEndDate" type="date" value="${compose.endDate || addDays(compose.date || todayStr(), 2)}" min="${compose.date || todayStr()}"></label>` : ""}
         <label class="field stops-hide ${(compose.stops || []).length >= 2 ? "hidden" : ""}"><span>Start</span><input id="cTime" type="time" value="${compose.time}"></label>
       </div>
       <div class="two">
@@ -3575,7 +3578,7 @@ function openComposeInviteDialog() {
   });
 }
 function syncCompose() {
-  compose.title = el("cTitle").value; compose.date = el("cDate").value; compose.time = el("cTime").value;
+  compose.title = el("cTitle").value; compose.date = el("cDate").value; compose.time = el("cTime").value; if (el("cEndDate")) compose.endDate = el("cEndDate").value;
   compose.end = el("cEnd").value; compose.where = el("cWhere").value; compose.notes = el("cNotes").value; if (el("cFood")) compose.food = el("cFood").value;
   compose.cap = el("cCap").value; if (el("cApproval")) compose.approval = el("cApproval").checked;
   if (el("cRepeat")) Object.assign(compose, readRepeat("c"));
@@ -3684,7 +3687,7 @@ async function createEvent() {
     // The event's own unguessable id is the access token behind the "add people" flow
     // (anyone with the link can open + join), so it's always on now.
     openLink: true,
-    kind: compose.kind === "meeting" ? "meeting" : "event", ...readRepeat("c"),
+    kind: compose.kind === "meeting" ? "meeting" : compose.kind === "trip" ? "trip" : "event", endDate: compose.kind === "trip" && el("cEndDate") && el("cEndDate").value > (el("cDate").value || "") ? el("cEndDate").value : "", ...readRepeat("c"),
     invitedPhones, invitedPhoneNames, guestEmails: [], sequence: 0,
     createdAt: Date.now()
   };
@@ -3775,7 +3778,7 @@ function renderEventPage(root, id) {
   S.evSubs.forEach(fn => fn()); S.evSubs = [];
   S.comments = []; S.photos = []; S.polls = []; S.songs = [];
   const sub = (name, fn) => S.evSubs.push(onSnapshot(collection(db, "events", id, name), snap => fn(snap.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.warn("listener event/" + name + ":", err.code || err.message)));
-  sub("comments", rows => { S.comments = rows.sort((a, b) => a.createdAt - b.createdAt); withInputKept(() => { const b = el("wall"); if (b) { b.innerHTML = wallInner(ev); wireWall(ev); } const dc = el("dayCard"); if (dc) { dc.innerHTML = dayInner(ev); wireDay(ev); } }); });
+  sub("comments", rows => { S.comments = rows.sort((a, b) => a.createdAt - b.createdAt); withInputKept(() => { const b = el("wall"); if (b) { b.innerHTML = wallInner(ev); wireWall(ev); } const dc = el("dayCard"); if (dc) { dc.innerHTML = dayInner(ev); wireDay(ev); } const tc = el("tripCard"); if (tc) { tc.innerHTML = tripInner(ev); wireTrip(ev); wireDay(ev); } }); });
   sub("photos", rows => { const seen = S._photoIds && S._photoIds.get(id); const fresh = seen ? rows.filter(p => !seen.has(p.id) && p.addedBy !== myUid() && Date.now() - (p.createdAt || 0) < 300e3) : [];
     (S._photoIds = S._photoIds || new Map()).set(id, new Set(rows.map(p => p.id)));
     if (fresh.length) { const who = first(nameOf(fresh[0].addedBy)); toast(`Ooh, ${who} just added ${fresh.length === 1 ? "a photo" : fresh.length + " photos"}!`, null, null, "coral:party"); }
@@ -3878,6 +3881,7 @@ function eventInner(ev) {
 
   <div class="ev-card-glass" id="rsvpCard">${rsvpBtns}</div>
   ${ev.timePoll ? `<div class="ev-card-glass" id="whenCard">${whenInner(ev)}</div>` : ""}
+  ${ev.kind === "trip" ? `<div class="ev-card-glass" id="tripCard">${tripInner(ev)}</div>` : ""}
 
   ${!canSeeGuests(ev) ? `<div class="ev-card-glass" id="guestCard"><div class="glass-head">Guest list <span>${going} going</span></div><p class="muted-th sm" style="margin:0">🔒 RSVP above to see who's coming.</p></div>` : (() => { const gOpen = collapsedOpen("friendlyGuestOpen:" + ev.id, true); return `<div class="ev-card-glass inv-card ${gOpen ? "open" : ""}" id="guestCard">
     <button type="button" class="glass-head inv-toggle" id="guestToggle" aria-expanded="${gOpen}"><span>Guest list <span class="muted-th sm">· ${(ev.invitedUids || []).length + (ev.invitedPhones || []).length} invited</span></span><span class="inv-chev">›</span></button>
@@ -4353,7 +4357,7 @@ function openCalendarDialog(ev) {
   document.querySelectorAll("#appDialog [data-go]").forEach(b => b.onclick = () => { closeDialog(); go(b.dataset.go); });
 }
 function wireEventPage(ev) {
-  wireWhen(ev);
+  wireWhen(ev); if (ev.kind === "trip") wireTrip(ev);
   if (ev.coverFull) fullCoverOf(ev).then(c => { const img = document.querySelector(".event-cover img"); if (img && c && img.getAttribute("src") !== c) img.src = c; });
   const id = ev.id;
   markPeeked("#/e/" + ev.id);
@@ -4412,6 +4416,62 @@ function wireEventPage(ev) {
 }
 
 // ----- Polls -----
+// ---------- TRIPS (a plan that spans days: day-by-day stops, Staying with rooms, rides, packing, one tab) ----------
+// A trip is an event with kind "trip" and endDate. Stops carry a day; rooms are bring-list entries of kind "room"
+// (claims are the people in the room); rides and the shared packing list are the Day-of card's carpool and bring list.
+const tripDays = ev => { const out = []; let d = ev.date; for (let i = 0; i < 14 && d <= (ev.endDate || ev.date); i++) { out.push(d); d = addDays(d, 1); } return out; };
+const dayShort = d => evDate({ date: d }).toLocaleDateString("en-US", { weekday: "short" });
+const dayLong = d => evDate({ date: d }).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+function tripInner(ev) {
+  const me = myUid(), manage = canManage(ev), days = tripDays(ev), t = todayStr();
+  if (!S._tripDay || !days.includes(S._tripDay) && S._tripDay !== "all") S._tripDay = days.find(d => d >= t) || days[0];
+  const sel = S._tripDay, all = cleanStops(ev.stops), stopsOf = d => sortStops(all.filter(x => (x.day || ev.date) === d));
+  const dayBlock = d => { const st = stopsOf(d); return `<div class="trip-day"><div class="trip-day-h"><b>${esc(dayLong(d))}</b>${manage ? `<button type="button" class="btn-th ghost small" data-addstop="${d}">＋ Add a stop</button>` : ""}</div>
+    ${st.length ? `<div class="stops">${st.map(x => `<div class="stop"><span class="t">${x.time ? esc(fmtTime(x.time)) : ""}</span><span><b>${esc(x.emoji || "")} ${esc(x.name || x.place)}</b>${x.name && x.place ? `<small><a href="${esc(stopMapUrl(x))}" target="_blank" rel="noopener">${esc(x.place)}</a></small>` : ""}${x.note ? `<small>${esc(x.note)}</small>` : ""}</span>${manage ? `<button type="button" class="wall-del" data-delstop="${esc(x.day || ev.date)}|${esc(x.name)}|${esc(x.time)}" title="Remove">✕</button>` : ""}</div>`).join("")}</div>` : `<p class="muted-th sm" style="margin:4px 0 0">Nothing planned yet${manage ? ". Add the first stop." : "."}</p>`}</div>`; };
+  const stay = ev.stay || {}, rooms = typed("room");
+  const xs = [...S.expenses.values()].filter(x => x.eventId === ev.id), total = xs.reduce((n, x) => n + (x.amountCents || 0), 0);
+  const share = xs.reduce((n, x) => n + (x.shares ? (x.shares[me] || 0) : ((x.split || []).includes(me) ? Math.round(x.amountCents / x.split.length) : 0)), 0);
+  const bal = pairwise().filter(p => p.from === me), owe = bal.reduce((n, p) => n + p.amount, 0);
+  return `<div class="glass-head">The trip <span>${days.length} day${days.length === 1 ? "" : "s"}</span></div>
+    <div class="chiprow trip-days">${days.map(d => `<button type="button" class="fchip ${sel === d ? "on" : ""}" data-tripday="${d}">${esc(dayShort(d))}${d === t ? " · today" : ""}</button>`).join("")}<button type="button" class="fchip ${sel === "all" ? "on" : ""}" data-tripday="all">Everything</button></div>
+    ${(sel === "all" ? days : [sel]).map(dayBlock).join("")}
+    <div class="day-sec" style="margin-top:14px"><div class="glass-sub">🏡 Staying ${manage ? `<button type="button" class="btn-th ghost small" id="editStay">${stay.name ? "Edit" : "＋ Add"}</button>` : ""}</div>
+    ${stay.name ? `<div class="day-row"><span style="flex:1;min-width:0"><b>${esc(stay.name)}</b><div class="muted-th sm">${[stay.address, stay.checkIn ? "check-in " + esc(stay.checkIn) : "", stay.checkOut ? "check-out " + esc(stay.checkOut) : "", stay.code ? "code " + esc(stay.code) : ""].filter(Boolean).join(" · ")}</div>${stay.note ? `<div class="muted-th sm">${esc(stay.note)}</div>` : ""}</span>${stay.address ? `<a class="btn-th small" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stay.address)}" target="_blank" rel="noopener">Map</a>` : ""}</div>` : `<p class="muted-th sm" style="margin:2px 0 6px">${manage ? "Add where everyone's staying: address, check-in, the gate code." : "The host hasn't added the place yet."}</p>`}
+    <div class="trip-rooms">${rooms.map(c => { const st = bringState(c), inRoom = st.who.includes(me); return `<div class="day-row"><span style="flex:1;min-width:0"><b>${esc(c.item)}</b>${c.qty ? ` <span class="muted-th sm">· sleeps ${esc(c.qty)}</span>` : ""}<div class="muted-th sm">${st.who.length ? `<span class="hd-faces">${st.who.slice(0, 5).map(u => avatar(u, "xs")).join("")}</span> ${st.who.map(u => esc(first(claimerName(c, u) || "A guest"))).join(", ")}` : "Nobody in here yet"}${st.hasTarget && !st.covered ? ` · ${st.remaining} spot${st.remaining === 1 ? "" : "s"} left` : ""}</div></span>
+      ${inRoom ? `<button type="button" class="btn-th small accent" data-claim="${c.id}" title="Tap to leave">✓ You're in</button>` : st.covered ? `<span class="muted-th sm">Full</span>` : `<button type="button" class="btn-th small" data-claim="${c.id}">Take a spot</button>`}${manage ? `<button type="button" class="wall-del" data-delc="${c.id}" title="Remove">✕</button>` : ""}</div>`; }).join("")}
+    ${manage ? `<button type="button" class="btn-th ghost small" id="addRoom" style="margin-top:6px">＋ Add a room</button>` : ""}</div></div>
+    <div class="day-sec"><div class="glass-sub">🎒 Packing</div><p class="muted-th sm" style="margin:2px 0 8px">Shared things (cooler, speaker, firewood) go on the bring list below so people can claim them. Your own list stays on this phone.</p>
+    <div class="trip-pack">${packList(ev).map((p, i) => `<label class="trip-pack-row"><input type="checkbox" data-pack="${i}" ${p.done ? "checked" : ""}><span class="${p.done ? "done" : ""}">${esc(p.t)}</span><button type="button" class="wall-del" data-packdel="${i}" title="Remove">✕</button></label>`).join("")}</div>
+    <form class="trip-pack-add" id="packAdd"><input id="packText" maxlength="40" placeholder="Swimsuit, sunscreen, charger…" aria-label="Add to your packing list"><button type="submit" class="btn-th small">Add</button></form></div>
+    <div class="day-sec"><div class="glass-sub">💸 Running tab <a class="btn-th ghost small" data-go="#/money">Money ›</a></div>
+    <div class="trip-tab"><div><span class="muted-th sm">Trip total</span><b>${fmt$(total)}</b><span class="muted-th sm">${xs.length ? xs.slice(0, 3).map(x => esc(x.desc || "expense")).join(", ") + (xs.length > 3 ? ", and more" : "") : "nothing on it yet"}</span></div><div><span class="muted-th sm">Your share so far</span><b>${fmt$(share)}</b><span class="muted-th sm">${owe ? "you owe " + fmt$(owe) + " overall" : "you're square"}</span></div></div>
+    <div class="btnrow" style="margin-top:10px"><button type="button" class="btn-th accent small" id="tripAddX">＋ Add expense</button><button type="button" class="btn-th small" id="tripScan">📷 Scan a receipt</button></div></div>`;
+}
+const packKey = ev => "friendlyPack:" + ev.id;
+function packList(ev) { try { return JSON.parse(LS.get(packKey(ev)) || "[]"); } catch { return []; } }
+function savePack(ev, list) { try { LS.set(packKey(ev), JSON.stringify(list.slice(0, 60))); } catch {} const tc = el("tripCard"); if (tc) { tc.innerHTML = tripInner(ev); wireTrip(ev); wireDay(ev); } }
+function wireTrip(ev) {
+  const me = myUid();
+  document.querySelectorAll("[data-tripday]").forEach(b => b.onclick = () => { S._tripDay = b.dataset.tripday; const tc = el("tripCard"); if (tc) { tc.innerHTML = tripInner(ev); wireTrip(ev); wireDay(ev); } });
+  document.querySelectorAll("[data-addstop]").forEach(b => b.onclick = () => dialog(`<h3>Add a stop</h3><p class="muted" style="margin-top:-6px">${esc(dayLong(b.dataset.addstop))}</p><label class="field"><span>What</span><input id="tsName" maxlength="60" placeholder="Check in at the cabin"></label><label class="field"><span>Where <span class="muted">(optional)</span></span><input id="tsPlace" maxlength="120" placeholder="1250 Lakeshore Dr"></label><div class="two"><label class="field"><span>Time</span><input id="tsTime" type="time"></label><label class="field"><span>Emoji</span><input id="tsEmoji" maxlength="4" value="📍"></label></div><label class="field"><span>Note <span class="muted">(optional)</span></span><input id="tsNote" maxlength="160" placeholder="Gate code in the Staying card"></label>`, "Add", async () => {
+    const name = el("tsName").value.trim(); if (!name) return toast("Say what the stop is.");
+    const stops = [...cleanStops(ev.stops), { day: b.dataset.addstop, name, place: el("tsPlace").value.trim(), time: el("tsTime").value || "", emoji: el("tsEmoji").value.trim() || "📍", note: el("tsNote").value.trim() }];
+    try { await updateDoc(doc(db, "events", ev.id), { stops }); closeDialog(); } catch (e) { toast(e.message); }
+  }));
+  document.querySelectorAll("[data-delstop]").forEach(b => b.onclick = async () => { const [day, name, time] = b.dataset.delstop.split("|"); if (!confirm(`Remove “${name}”?`)) return;
+    const stops = cleanStops(ev.stops).filter(x => !((x.day || ev.date) === day && x.name === name && (x.time || "") === time)); try { await updateDoc(doc(db, "events", ev.id), { stops }); } catch (e) { toast(e.message); } });
+  if (el("editStay")) el("editStay").onclick = () => { const st = ev.stay || {}; dialog(`<h3>Where everyone's staying</h3><label class="field"><span>Place</span><input id="stName" maxlength="80" value="${esc(st.name || "")}" placeholder="Cedar Point Cabin"></label><label class="field"><span>Address</span><input id="stAddr" maxlength="160" value="${esc(st.address || "")}" placeholder="1250 Lakeshore Dr, Pottsboro"></label><div class="two"><label class="field"><span>Check-in</span><input id="stIn" maxlength="20" value="${esc(st.checkIn || "")}" placeholder="4 PM"></label><label class="field"><span>Check-out</span><input id="stOut" maxlength="20" value="${esc(st.checkOut || "")}" placeholder="11 AM"></label></div><div class="two"><label class="field"><span>Door or gate code</span><input id="stCode" maxlength="20" value="${esc(st.code || "")}"></label><label class="field"><span>Note</span><input id="stNote" maxlength="160" value="${esc(st.note || "")}" placeholder="Wifi: lakehouse / sunset24"></label></div>`, "Save", async () => {
+    const name = el("stName").value.trim(); if (!name) return toast("Give the place a name.");
+    try { await updateDoc(doc(db, "events", ev.id), { stay: { name, address: el("stAddr").value.trim(), checkIn: el("stIn").value.trim(), checkOut: el("stOut").value.trim(), code: el("stCode").value.trim(), note: el("stNote").value.trim() } }); closeDialog(); } catch (e) { toast(e.message); } }); };
+  if (el("addRoom")) el("addRoom").onclick = () => dialog(`<h3>Add a room</h3><div class="two"><label class="field"><span>Room</span><input id="rmName" maxlength="40" placeholder="Lake room, Loft, Pullout"></label><label class="field"><span>Sleeps</span><input id="rmBeds" inputmode="numeric" value="2"></label></div><p class="muted sm">People take their own spot. Leave Sleeps blank for no limit.</p>`, "Add", async () => {
+    const item = el("rmName").value.trim(); if (!item) return toast("Name the room."); const qty = el("rmBeds").value.trim();
+    try { await addDoc(subCol(ev, "comments"), { kind: "room", item, qty: /^\d+$/.test(qty) ? qty : "", authorId: me, authorName: S.profile.name, text: "", createdAt: Date.now() }); closeDialog(); } catch (e) { toast(e.message); } });
+  document.querySelectorAll("[data-pack]").forEach(cb => cb.onchange = () => { const l = packList(ev); if (l[+cb.dataset.pack]) l[+cb.dataset.pack].done = cb.checked; savePack(ev, l); });
+  document.querySelectorAll("[data-packdel]").forEach(b => b.onclick = () => { const l = packList(ev); l.splice(+b.dataset.packdel, 1); savePack(ev, l); });
+  if (el("packAdd")) el("packAdd").onsubmit = e => { e.preventDefault(); const t = el("packText").value.trim(); if (!t) return; savePack(ev, [...packList(ev), { t, done: false }]); const inp = el("packText"); if (inp) inp.focus(); };
+  if (el("tripAddX")) el("tripAddX").onclick = () => openExpense(ev.id, null);
+  if (el("tripScan")) el("tripScan").onclick = () => scanReceipt(ev.id, null, { desc: "", paidBy: me, people: [] }, ev.groupId);
+}
 // ---------- WHEN WORKS? (the host offers a few times; everyone taps the ones that work) ----------
 // events/{id}.timePoll: { options: [{id, date, time}], votes: {uid: [optionIds]}, lockedId }
 const twWhen = o => `${evDate({ date: o.date }).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}${o.time ? " · " + fmtTime(o.time) : ""}`;

@@ -1303,7 +1303,7 @@ exports.onEventCreated = onDocumentCreated({ document: "events/{id}", ...MAIL },
     await writePreview(e.params.id, ev); return;
   }
   await notify((ev.invitedUids || []).filter(u => u !== ev.hostId),
-    firstName(nm[ev.hostId]) + " invited you" + (kind === "meeting" ? " to a meeting" : ""), (kind === "meeting" ? "📅 " : (ev.emoji || "🎉") + " ") + ev.title,
+    firstName(nm[ev.hostId]) + " invited you" + (kind === "meeting" ? " to a meeting" : ev.kind === "trip" ? " on a trip" : ""), (kind === "meeting" ? "📅 " : (ev.emoji || "🎉") + " ") + ev.title + (ev.kind === "trip" && ev.endDate ? ` · ${niceWhen(ev.date).replace(/ · .*$/, "")} to ${niceWhen(ev.endDate).replace(/ · .*$/, "")}` : ""),
     "/#/e/" + e.params.id + "?to=rsvpCard", { type: kind, actorId: ev.hostId });
   await Promise.all([sendInviteEmails(e.params.id, ev, "REQUEST"), writePreview(e.params.id, ev)]);
 });
