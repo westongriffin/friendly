@@ -869,6 +869,17 @@ function whoTarget(uid, sec) {
 // Flash something that is still loading (comments inside the photo viewer): look for it a few times, then give up.
 function flashWhenFound(find, tries = 20) { const t = find(); if (t) { t.scrollIntoView({ block: "center" }); t.classList.add("focus-flash"); setTimeout(() => t.classList.remove("focus-flash"), 2400); return; } if (tries > 0) setTimeout(() => flashWhenFound(find, tries - 1), 250); }
 window.go = path => { location.hash = path; };
+// iPhone's text-size setting: the system body size is measured (a hidden span set in -apple-system-body; 17pt is
+// the default) and the page's rem scale follows it, so Larger Text makes Friendly's text larger too.
+function followTextSize() {
+  if (!(NATIVE || IOS)) return;
+  try { const sp = document.createElement("span"); sp.style.cssText = "position:absolute;visibility:hidden;font:-apple-system-body"; sp.textContent = "a"; document.body.appendChild(sp);
+    const px = parseFloat(getComputedStyle(sp).fontSize) || 17; sp.remove(); const scale = Math.min(1.6, Math.max(.9, px / 17));
+    document.documentElement.style.fontSize = Math.abs(scale - 1) < .02 ? "" : (16 * scale).toFixed(2) + "px"; } catch {}
+}
+followTextSize(); document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") followTextSize(); });
+// Rows that act as buttons answer to Enter and Space, like real buttons.
+document.addEventListener("keydown", e => { const t = e.target; if ((e.key === "Enter" || e.key === " ") && t && t.matches && t.matches('[role="button"], [data-go]:not(a):not(button)') && !t.matches("input,textarea,select,a,button")) { e.preventDefault(); t.click(); } });
 // Tapping the logo goes Home from any page; on Home it scrolls back to the top. Caught at the document so it
 // works on every page and every redraw.
 document.addEventListener("click", e => {
@@ -1200,7 +1211,7 @@ function reportFreezeTraceOf(tr) {
     return;
   }
   if (KILLED_RELOAD) { addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `page killed by iOS and reloaded ${killedAfterS}s after its last heartbeat (${deviceLine()}), on ${tr.route || "?"}; last steps:\n` + (tr.log || []).slice(-8).join("\n"), route: tr.route, version: tr.v, platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now(), tracedAt: tr.hb }).catch(() => {}); return; }
-  if (!(tr.stalled || endedOnScreen)) return;
+  if (!tr.stalled) return;   // closing the app while it's on screen is normal, not a freeze
   addDoc(collection(db, "bugs"), { uid: myUid(), name: "diag", text: `freeze trace (previous session ${tr.stalled ? "stalled" : "ended while on screen"}, last heartbeat ${new Date(tr.hb).toTimeString().slice(0, 8)}, ${deviceLine()}, worker store ${LS.ok ? "ok" : "NOT answering"}):\n` + tr.log.join("\n"), route: tr.route, version: tr.v, platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", status: "open", diag: true, createdAt: Date.now(), tracedAt: tr.hb }).catch(() => {});
 }
 function render() {
@@ -1623,6 +1634,7 @@ function wireEdgeDot() {
 }
 function wireShell() {
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
+  document.querySelectorAll('[role="button"]:not([tabindex]), [data-go]:not(a):not(button):not(input):not([tabindex])').forEach(e => { e.tabIndex = 0; });   // keyboard and screen-reader reachable
   if (el("brandDot")) el("brandDot").onclick = e => { e.stopPropagation(); showLogoTip(); };
   wireEdgeDot();
   wireUpdateBanner();
@@ -4183,7 +4195,7 @@ function addPollDialog(ev) {
   dialog(`<h3>New poll</h3><label class="field"><span>Question</span><input id="pq" placeholder="What should we eat? · Which weekend works?"></label>
     <label class="field"><span>Options (one per line)</span><textarea id="popts" placeholder="Tacos\nPizza\nSushi"></textarea></label>
     <div class="two"><label class="field"><span>Or add dates</span><input type="date" id="pdate"></label>
-    <label class="field"><span>&nbsp;</span><button type="button" class="btn small" id="pAddDate">＋ Add date as option</button></label></div>`,
+    </div><button type="button" class="btn ghost small" id="pAddDate" style="margin:-4px 0 8px;padding-left:0">＋ Add a date as an option</button>`,
     "Add poll", async () => {
       const q = el("pq").value.trim(); const opts = el("popts").value.split("\n").map(s => s.trim()).filter(Boolean);
       if (!q || opts.length < 2) return toast("Add a question and at least two options.");
@@ -4586,7 +4598,7 @@ function expenseBody(id) {
     <div><h1>${esc(x.desc || "Expense")}</h1><div class="muted">${fmt$(x.amountCents)} · ${esc(nameOf(x.paidBy))} paid${ev ? " · " + esc(ev.title) : ""} · ${new Date(x.createdAt).toLocaleDateString()}</div></div></div>
   ${x.receipt ? `<div class="btnrow" style="margin-top:12px"><button class="btn small" id="viewReceipt">🧾 View receipt</button></div>` : ""}
   ${x.addedBy !== myUid() ? "" : Object.keys(x.paid || {}).some(u => u !== x.paidBy) ? `<p class="muted sm" style="margin-top:10px">Someone has already paid, so this can't be changed. Mark their payment unpaid first if it needs fixing.</p>`
-    : `<div class="btnrow" style="margin-top:12px"><button class="btn small" id="xReopen">${(x.items || []).length ? "✏️ Reopen to make changes" : "✏️ Change who's splitting"}</button></div>`}
+    : `<div class="btnrow" style="margin-top:12px"><button class="btn small" id="xReopen">${(x.items || []).length ? "✏️ Reopen to make changes" : "✏️ Change who's splitting"}</button>${Object.keys(x.paid || {}).length ? "" : `<button class="btn small danger-ghost" id="xDelete">Delete</button>`}</div>`}
   <div class="section-head"><h2>${x.shares ? "Who owes what" : `Split ${n} way${n > 1 ? "s" : ""}`}</h2></div>
   <div class="card">${(x.split || []).map(u => {
     const me = myUid(), cents = x.shares ? (x.shares[u] || 0) : share, paid = (x.paid || {})[u], payer = u === x.paidBy, canManage = me === x.paidBy || me === x.addedBy;
@@ -4631,6 +4643,7 @@ function wireExpensePage() {
   const pseudo = { id: x.id, _col: ["expenses", x.id], _manage: false, title: x.desc };
   if (el("viewReceipt")) el("viewReceipt").onclick = () => lightbox(x.receipt);
   if (el("xReopen")) el("xReopen").onclick = () => (x.items || []).length ? reopenAsPick(x) : changeSplitPeople(x);
+  if (el("xDelete")) el("xDelete").onclick = () => { if (!confirm(`Delete “${x.desc || "this expense"}”? Nobody has paid on it yet.`)) return; deleteWithUndo("expenses", x.id, x, "expense"); go("#/money"); };
   const share = u => x.shares ? (x.shares[u] || 0) : Math.round(x.amountCents / ((x.split || []).length || 1));
   const mine = share(myUid());
   document.querySelectorAll("[data-xvenmo]").forEach(b => b.onclick = () => payVenmo(x.paidBy, mine, "pay", x.id));
@@ -5391,8 +5404,8 @@ function profileBody() {
   </div>
   <div class="section-head" style="margin-top:22px"><h2>Notifications</h2></div>
   <div class="card member-row"${NATIVE ? ' id="notifRow" style="cursor:pointer"' : ""}><span class="li">🔔</span><div style="flex:1;min-width:0"><b>${({ on: "On for this device", off: "Off", denied: "Blocked in your browser settings", unsupported: "Not available in this browser", native: "Managed in iPhone Settings" })[pushState()]}</b><div class="muted sm">${IOS && !STANDALONE && pushState() === "off" ? "Add Friendly to your Home Screen first (Share → Add to Home Screen)." : NATIVE ? "Tap to open Notification settings." : "Invites, comments, RSVPs, and day-of reminders."}</div></div>${NATIVE ? `<span class="chev">›</span>` : pushState() === "off" ? `<button class="btn small primary" id="pushToggle">Turn on</button>` : pushState() === "on" ? `<button class="btn small" id="pushToggle">Turn off</button>` : ""}</div>
-  ${["native", "on"].includes(pushState()) ? `<div class="card" style="padding:12px 16px;margin-top:8px">
-    <p class="muted sm" style="margin:0 0 4px">What you get notified about:</p>
+  ${pushState() !== "unsupported" ? `<div class="card" style="padding:12px 16px;margin-top:8px">
+    <p class="muted sm" style="margin:0 0 4px">What you get notified about${["native", "on"].includes(pushState()) ? "" : " (once notifications are on)"}:</p>
     ${NOTIF_CATS.map(c => `<label class="switch" style="margin:8px 0"><input type="checkbox" data-notifpref="${c.key}" ${(p.notifPrefs || {})[c.key] !== false ? "checked" : ""}><span>${esc(c.label)}</span></label>`).join("")}
   </div>` : ""}
   <div class="section-head" style="margin-top:22px"><h2>Calendar sync</h2></div>
