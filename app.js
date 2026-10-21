@@ -6631,7 +6631,7 @@ const isPeeked = a => { const tail = tailOf(a.url); if (tail === "#/" || tail ==
 const unreadCount = () => (S.activity || []).filter(a => a.createdAt > seenAt() && !isPeeked(a)).length;
 const newCountFor = urlTail => (S.activity || []).filter(a => a.createdAt > seenAt() && !isPeeked(a) && tailOf(a.url) === urlTail).length;
 const isNewEvent = ev => (S.activity || []).some(a => a.createdAt > seenAt() && !isPeeked(a) && tailOf(a.url) === "#/e/" + ev.id);
-const actIcon = a => a.type === "digest" ? dot("happy", 30) : a.sid || /paid you|as paid/.test(a.title) || a.type === "photo" ? coral(a.type === "photo" ? "happy" : "party", 30) : /pick your items|picked their items/.test(a.title) ? "🧾" : /joined via your link/.test(a.title) ? "🔗" : /waiting on your RSVP/.test(a.title) ? "📣" : /mentioned you/.test(a.title) ? "＠" : /to a meeting/.test(a.title) ? "📅" : /You're in!/.test(a.title) ? "🎟️" : /still owe/.test(a.title) ? "💸" : /invited you/.test(a.title) ? "🎟️" : /^Today:/.test(a.title) ? "⏰" : /reported/i.test(a.title) ? "⚑" : /is going|might come|can't make|joined the waitlist|requested/.test(a.title) ? "✅" : "💬";
+const actIcon = a => a.type === "digest" ? dot("happy", 30) : /wants to be friends|wanted to be friends|friends now|accepted your friend/.test(a.title) ? "👋" : a.sid || /paid you|as paid/.test(a.title) || a.type === "photo" ? coral(a.type === "photo" ? "happy" : "party", 30) : /pick your items|picked their items/.test(a.title) ? "🧾" : /joined via your link/.test(a.title) ? "🔗" : /waiting on your RSVP/.test(a.title) ? "📣" : /mentioned you/.test(a.title) ? "＠" : /to a meeting/.test(a.title) ? "📅" : /You're in!/.test(a.title) ? "🎟️" : /still owe/.test(a.title) ? "💸" : /invited you/.test(a.title) ? "🎟️" : /^Today:/.test(a.title) ? "⏰" : /reported/i.test(a.title) ? "⚑" : /is going|might come|can't make|joined the waitlist|requested/.test(a.title) ? "✅" : "💬";
 function notifCard() {
   let pushDismissed = false; try { pushDismissed = !!LS.get("friendlyPushDismissed"); } catch {}
   if (NATIVE || pushDismissed) return "";
@@ -6643,11 +6643,22 @@ function activityBody() {
   if (S._actOpenSeen == null) S._actOpenSeen = seenAt();   // keep "new" highlights until you leave the page
   const rows = S.activity || [];
   return `<div class="section-head"><h2>Activity</h2></div>
-  <div class="card">${rows.length ? rows.map(a => `<a class="act-row ${a.createdAt > S._actOpenSeen ? "new" : ""}" data-act="${esc(a.url || "#/")}"><span class="li">${actIcon(a)}</span><div style="flex:1;min-width:0"><b>${esc(a.title)}</b><div class="muted sm" style="overflow-wrap:anywhere">${esc(a.body || "")}</div>${a.sid && S.settlements.get(a.sid) ? payReacts(S.settlements.get(a.sid), true) : ""}</div><span class="muted sm">${ago(a.createdAt)}</span></a>`).join("") : emptyState("🔔", "Nothing yet", "Invites, comments, RSVPs, and reminders will show up here.", "sleepy")}</div>
+  <div class="card">${rows.length ? rows.map(a => { a = friendAlertNow(a); return `<a class="act-row ${a.createdAt > S._actOpenSeen ? "new" : ""}" data-act="${esc(a.url || "#/")}"><span class="li">${actIcon(a)}</span><div style="flex:1;min-width:0"><b>${esc(a.title)}</b><div class="muted sm" style="overflow-wrap:anywhere">${esc(a.body || "")}</div>${a.sid && S.settlements.get(a.sid) ? payReacts(S.settlements.get(a.sid), true) : ""}${a._req ? `<span class="btnrow act-acts" style="gap:6px;margin-top:8px"><button type="button" class="btn small primary" data-friendaccept="${esc(a._req)}">Accept</button><button type="button" class="btn ghost small" data-frienddecline="${esc(a._req)}">Decline</button></span>` : ""}</div><span class="muted sm">${ago(a.createdAt)}</span></a>`; }).join("") : emptyState("🔔", "Nothing yet", "Invites, comments, RSVPs, and reminders will show up here.", "sleepy")}</div>
   ${rows.length ? `<div class="empty caughtup">${dot("sleepy", 64)}<b>You're all caught up</b><p class="muted">Nothing new since you last looked.</p></div>` : ""}`;
 }
+// "Wes wants to be friends" is only true while the request is open. Once it's accepted the row says so (and opens
+// the chat); once it's gone the row says the request closed. While it's open, Accept and Decline sit right on the row.
+function friendAlertNow(a) {
+  if (a.type !== "friend" || !a.actorId || !/wants to be friends/.test(a.title || "")) return a;
+  const f = friendshipWith(a.actorId), name = first(nameOf(a.actorId));
+  if (f && f.status === "accepted") return { ...a, title: `You and ${name} are friends now`, body: "Say hi 👋", url: "#/m/" + f.id };
+  if (f && f.status === "pending" && f.requestedBy === a.actorId) return { ...a, _req: f.id, body: "Accept to message each other." };
+  return { ...a, title: `${name} wanted to be friends`, body: "That request isn't open anymore.", url: "#/friends" };
+}
 function wireActivity() {
-  document.querySelectorAll("[data-act]").forEach(a => a.onclick = e => { e.preventDefault(); location.hash = routeTail(a.dataset.act); });
+  document.querySelectorAll("[data-act]").forEach(a => a.onclick = e => { if (e.target.closest("button")) return; e.preventDefault(); location.hash = routeTail(a.dataset.act); });
+  document.querySelectorAll(".act-acts [data-friendaccept]").forEach(b => b.onclick = async e => { e.preventDefault(); e.stopPropagation(); const f = S.friends.get(b.dataset.friendaccept); if (!f) return; b.disabled = true; await acceptFriend(f); });
+  document.querySelectorAll(".act-acts [data-frienddecline]").forEach(b => b.onclick = e => { e.preventDefault(); e.stopPropagation(); const f = S.friends.get(b.dataset.frienddecline); if (f) dropFriendship(f, "Request declined"); });
   // Seen up to the newest item's own time (server clock), not this phone's: a phone clock running behind left the
   // newest item "unread" forever, so every redraw wrote again and the screen kept redrawing.
   if (unreadCount()) { const newest = Math.max(Date.now(), ...(S.activity || []).map(x => x.createdAt || 0)); if (Date.now() - (S._actSeenTry || 0) > 5000) { S._actSeenTry = Date.now(); S._actSeenWrote = newest; updateDoc(doc(db, "users", myUid()), { activitySeenAt: newest }).catch(() => {}); } }

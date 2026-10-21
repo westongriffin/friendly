@@ -1891,8 +1891,12 @@ exports.onFriendship = onDocumentWritten({ document: "friendships/{fid}", ...PUS
   const nm = u => firstName(((after.people || {})[u] || {}).name || "Someone");
   if (!before && after.status === "pending")
     await notify([other], nm(by) + " wants to be friends on Friendly", "Accept to message each other.", "/#/friends?to=reqCard&who=" + encodeURIComponent(by), { type: "friend", actorId: by });
-  else if (after.status === "accepted" && (!before || before.status !== "accepted") && after.via !== "group")
+  else if (after.status === "accepted" && (!before || before.status !== "accepted") && after.via !== "group") {
     await notify([by], nm(other) + " accepted your friend request", "Say hi! 👋", "/#/m/" + e.params.fid, { type: "friend", actorId: other });
+    // The "wants to be friends" alert the other person got now reads as done instead of asking them to accept again.
+    const old = await db.collection("activity").where("type", "==", "friend").where("actorId", "==", by).get().catch(() => null);
+    if (old) await Promise.all(old.docs.filter(d => (d.get("uids") || []).includes(other) && /wants to be friends/.test(d.get("title") || "")).map(d => d.ref.update({ title: `You and ${nm(by)} are friends now`, body: "Say hi 👋", url: "/#/m/" + e.params.fid }).catch(() => {})));
+  }
 });
 exports.onDmMessage = onDocumentCreated({ document: "dms/{fid}/messages/{mid}", ...PUSH }, async e => {
   const m = e.data && e.data.data(); if (!m) return;
