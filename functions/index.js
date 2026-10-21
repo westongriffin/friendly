@@ -1222,7 +1222,7 @@ const mentionNotify = (c, url, where) => (c.mentions && c.mentions.length) ? not
 // Which notifCategory toggle (profile > Notifications) a push type falls under.
 // Types with no entry here (money reminders, admin content reports) always send --
 // only the four categories the person can actually see and turn off are gated.
-const NOTIF_CATEGORY = { event: "invites", meeting: "invites", rsvp: "invites", nudge: "reminders", reminder: "reminders", mention: "chat", comment: "chat", dm: "chat", friend: "invites", birthday: "birthdays", money: "money", photo: "photos", ask: "invites" };
+const NOTIF_CATEGORY = { event: "invites", meeting: "invites", rsvp: "invites", nudge: "reminders", reminder: "reminders", mention: "chat", comment: "chat", dm: "chat", friend: "invites", birthday: "birthdays", money: "money", photo: "photos", ask: "invites", digest: "reminders" };
 // Every device for a set of users (native FCM tokens + web push subscriptions):
 // send, prune anything dead, and log the item to the Activity feed so it shows
 // in-app even for people who keep notifications (or this category) off.
@@ -2019,6 +2019,39 @@ exports.onRsvp = onDocumentUpdated({ document: "events/{id}", ...MAIL }, async e
 
 // 9am daily (project timezone): day-of reminders, the next occurrence of
 // repeating events, and gentle money reminders.
+// ---- Your week ----
+// Sunday 6 PM: one push per person with the week ahead (plans, birthdays, RSVPs waiting on them); nothing when it's
+// empty. config/digest.onlyUids limits a run to a few accounts (used for testing).
+const plusDays = (ymd, n) => { const [y, m, d] = ymd.split("-").map(Number); const x = new Date(Date.UTC(y, m - 1, d + n)); return x.toISOString().slice(0, 10); };
+const wkDay = ymd => new Date(ymd + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
+const wkTime = t => { const m = /^(\d{2}):(\d{2})$/.exec(t || ""); if (!m) return ""; let h = +m[1]; const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12; return `${h}${m[2] === "00" ? "" : ":" + m[2]} ${ap}`; };
+exports.weeklyDigest = onSchedule({ schedule: "0 18 * * 0", timeZone: "America/Chicago", timeoutSeconds: 300, ...PUSH }, async () => {
+  const cfg = (await db.doc("config/digest").get()).data() || {};
+  const only = Array.isArray(cfg.onlyUids) && cfg.onlyUids.length ? new Set(cfg.onlyUids) : null;
+  const today = todayIn("America/Chicago"), dow = new Date(today + "T12:00:00Z").getUTCDay();
+  const mon = plusDays(today, ((8 - dow) % 7) || 7), sun = plusDays(mon, 6);
+  const per = {}; const bag = u => (per[u] = per[u] || { plans: [], bdays: [], waiting: 0 });
+  const ok = u => typeof u === "string" && u && !u.startsWith("ph:") && (only ? only.has(u) : !u.startsWith("demo-"));
+  const evs = await db.collection("events").where("date", ">=", mon).where("date", "<=", sun).get();
+  evs.docs.map(d => ({ id: d.id, ...d.data() })).filter(ev => !ev.draft).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || ""))).forEach(ev => {
+    for (const u of ev.invitedUids || []) { if (!ok(u) || (ev.rsvps || {})[u] === "no") continue; const b = bag(u); b.plans.push(`${ev.title} ${wkDay(ev.date)}${ev.time ? " " + wkTime(ev.time) : ""}`); if (u !== ev.hostId && !(ev.rsvps || {})[u]) b.waiting++; }
+  });
+  const groups = await db.collection("groups").get(); const seen = new Set();
+  for (const g of groups.docs) { const data = g.data();
+    for (const [uid, info] of Object.entries(data.members || {})) { const mmdd = /(\d{2}-\d{2})$/.exec(String(info.birthday || "")); if (!mmdd) continue;
+      const day = [mon, plusDays(mon, 1), plusDays(mon, 2), plusDays(mon, 3), plusDays(mon, 4), plusDays(mon, 5), sun].find(d => d.endsWith(mmdd[1])); if (!day) continue;
+      for (const u of (data.memberUids || []).filter(x => x !== uid && ok(x))) { const k = u + "|" + uid; if (seen.has(k)) continue; seen.add(k); bag(u).bdays.push(`${firstName(info.name || "A friend")}'s birthday ${new Date(day + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" })}`); } } }
+  let sent = 0;
+  for (const [u, b] of Object.entries(per)) {
+    if (!b.plans.length && !b.bdays.length) continue;
+    const parts = [];
+    if (b.plans.length) parts.push(b.plans.slice(0, 3).join(", ") + (b.plans.length > 3 ? `, and ${b.plans.length - 3} more` : "") + ".");
+    if (b.bdays.length) parts.push(b.bdays.slice(0, 2).join(", ") + ".");
+    if (b.waiting) parts.push(`${b.waiting} RSVP${b.waiting === 1 ? "" : "s"} waiting on you.`);
+    await notify([u], `Your week · ${b.plans.length ? b.plans.length + " plan" + (b.plans.length === 1 ? "" : "s") : "a birthday"}`, parts.join(" "), "/#/?to=digestCard", { type: "digest" }); sent++;
+  }
+  logger.info(`weeklyDigest: ${sent} sent for ${mon}..${sun}${only ? " (only " + [...only].join(",") + ")" : ""}`);
+});
 exports.dailyReminders = onSchedule({ schedule: "0 9 * * *", timeZone: "America/Chicago", ...MAIL }, async () => {
   const d = new Date();
   const today = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");

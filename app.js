@@ -1814,6 +1814,7 @@ function homeBody() {
     : `<div><h1>${greet}, ${esc(first(S.profile.name))}</h1><p class="muted sm">${dateLine} · ${plansLine}</p></div>${dot("happy", 54)}`;
   return `
   <header class="hd-greet">${head}</header>
+  ${weekDigest(mine)}
   ${notifCard()}${todayCards}${afterCard()}${birthdayCard()}
   ${askBox()}${asksSection()}
   ${hero ? heroCard(hero) : mine.length || todayEvs.length ? "" : `<div class="card empty">${dot("sleepy", 84)}<b>No plans yet</b><p class="muted">Tell Dot what you're thinking, or start one from scratch.</p><div class="btnrow" style="justify-content:center"><button class="btn primary" id="homeTell">Tell Dot</button><button class="btn" data-go="#/new">New event</button></div></div>`}
@@ -1824,6 +1825,46 @@ function homeBody() {
   ${memoriesStrip()}
   ${latestList()}
   ${crewsRow()}`;
+}
+// ---------- YOUR WEEK (the Sunday-night rundown; Dot also sends one push at 6 PM) ----------
+// Shows from Sunday 6 PM through Monday for the week starting Monday. ✕ hides that week's digest on this phone.
+function digestWeek() {
+  const now = new Date(), dow = now.getDay(), t = todayStr();
+  if (!((dow === 0 && now.getHours() >= 18) || dow === 1)) return null;
+  const mon = dow === 0 ? addDays(t, 1) : t; return { mon, sun: addDays(mon, 6) };
+}
+function weekDigest(mine) {
+  const wk = digestWeek(); if (!wk) return "";
+  let hidden = ""; try { hidden = LS.get("friendlyDigestHidden") || ""; } catch {}
+  if (hidden === wk.mon) return "";
+  const me = myUid(), rows = [];
+  const dateChip = d => `<span class="hd-date"><b>${evDate({ date: d }).toLocaleDateString("en-US", { weekday: "short" })}</b><span>${evDate({ date: d }).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span></span>`;
+  for (const ev of mine.filter(e => e.date >= wk.mon && e.date <= wk.sun && (e.rsvps || {})[me] !== "no").slice(0, 5)) {
+    const noAnswer = ev.hostId !== me && !(ev.rsvps || {})[me];
+    rows.push({ date: ev.date, html: `<div class="wk-row">${dateChip(ev.date)}<div class="hd-evt"><b>${esc(ev.emoji || "")} ${esc(ev.title)}</b><span class="muted sm">${esc(fmtTime(ev.time) || "")}${noAnswer ? (ev.time ? " · " : "") + "you haven't answered" : ev.hostId === me ? (ev.time ? " · " : "") + "you're hosting" : ""}</span></div>${noAnswer ? `<a class="btn primary small" data-go="#/e/${esc(ev.id)}?to=rsvpCard">RSVP</a>` : hdFaces(ev)}</div>` });
+  }
+  for (const b of upcomingBirthdays(8).filter(b => b.date >= wk.mon && b.date <= wk.sun).slice(0, 2)) {
+    rows.push({ date: b.date, html: `<div class="wk-row">${dateChip(b.date)}<div class="hd-evt"><b>🎂 ${esc(first(b.name))}'s birthday</b><span class="muted sm">Plan something?</span></div><a class="btn small" data-go="#/new">Plan</a></div>` });
+  }
+  for (const a of [...(S.asks || new Map()).values()].filter(a => a.status === "open" && (a.expiresAt || 0) > Date.now() && a.by !== me && a.date >= wk.mon && a.date <= wk.sun).slice(0, 2)) {
+    const ins = (a.ins || []).filter(u => u !== a.by), im = ins.includes(me);
+    rows.push({ date: a.date, html: `<div class="wk-row">${dateChip(a.date)}<div class="hd-evt"><b>${esc(first(nameOf(a.by)))} is free ${esc(a.whenLabel || "")}</b><span class="muted sm">${a.text ? esc(a.text) + " · " : ""}Up for it${ins.length ? ", " + ins.length + " in" : ""}</span></div>${im ? `<span class="pill ok">You're in</span>` : `<button type="button" class="btn small" data-askin="${esc(a.id)}">I'm in</button>`}</div>` });
+  }
+  rows.sort((a, b) => a.date.localeCompare(b.date));
+  const pairs = pairwise(), owe = pairs.filter(p => p.from === me), owed = pairs.filter(p => p.to === me);
+  const iOwe = owe.reduce((n, p) => n + p.amount, 0), toMe = owed.reduce((n, p) => n + p.amount, 0);
+  const money = iOwe || toMe ? `<a class="wk-money" data-go="#/money?to=settleCard"><span>💸</span><div style="flex:1;min-width:0">${toMe ? `<b>${owed.length === 1 ? esc(first(nameOf(owed[0].from))) + " owes you " + fmt$(toMe) : owed.length + " friends owe you " + fmt$(toMe)}</b>` : ""}${toMe && iOwe ? " · " : ""}${iOwe ? `<span class="${toMe ? "muted sm" : ""}">you owe ${owe.length === 1 ? esc(first(nameOf(owe[0].to))) + " " : ""}${fmt$(iOwe)}</span>` : toMe ? `<span class="muted sm">you owe nobody</span>` : ""}</div><span class="btn small">${iOwe ? "Settle up" : "Remind"}</span></a>` : "";
+  const picks = [...(S.splits || new Map()).values()].filter(x => x.status === "open" && ((x.uids || []).includes(me) || x.paidBy === me)).slice(0, 2).map(x => { const left = (x.people || []).filter(u => !(x.done || {})[u]).length, meDone = !!(x.done || {})[me] || x.paidBy === me; return `<a class="wk-money" data-go="#/pick/${esc(x.id)}"><span>🧾</span><div style="flex:1;min-width:0"><b>${esc(x.desc || x.merchant || "Receipt")}</b> · <span class="muted sm">${meDone ? `${left} ${left === 1 ? "person hasn't" : "people haven't"} picked yet` : "you haven't picked yet"}</span></div><span class="btn small">${meDone ? "Open" : "Pick"}</span></a>`; }).join("");
+  if (!rows.length && !money && !picks) return "";
+  const range = `${evDate({ date: wk.mon }).toLocaleDateString("en-US", { month: "short", day: "numeric" })} to ${evDate({ date: wk.sun }).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+  return `<div class="card wk-card" id="digestCard"><button type="button" class="today-x" data-hide-digest="${esc(wk.mon)}" aria-label="Hide this week's rundown">✕</button>
+    <div class="wk-head">${dot("happy", 40)}<div><b>Your week</b><div class="muted sm">Sunday night rundown · ${range}</div></div></div>
+    ${rows.length ? `<div class="wk-list">${rows.map(r => r.html).join("")}</div>` : `<p class="muted sm" style="margin:8px 0 0">Nothing on the calendar yet. Post an Up for it and see who bites.</p>`}
+    ${money}${picks}
+    <p class="muted sm wk-foot">Dot sends this every Sunday at 6 PM. <a class="hd-link" data-go="#/profile?to=notifPrefs">Change</a></p></div>`;
+}
+function wireDigest() {
+  document.querySelectorAll("[data-hide-digest]").forEach(b => b.onclick = e => { e.stopPropagation(); try { LS.set("friendlyDigestHidden", b.dataset.hideDigest); } catch {} render(); });
 }
 // ---------- LIVE LAYER (the hours around a plan: statuses, who's where, the morning after) ----------
 // Statuses are the day-of card's status comments (kind "status": omw | late | here | clear, late carries mins).
@@ -2002,7 +2043,7 @@ function crewsRow() {
   return `<div class="hd-h"><h3>Your crews</h3><a class="hd-link" data-go="#/groups">Groups ›</a></div><div class="hd-scroll hd-crews">${groups.map((g, i) => `<a class="hd-crew" data-go="#/g/${g.id}"><span class="hd-crew-ic" style="background:${esc(g.color || GROUP_COLORS[i % GROUP_COLORS.length])}">${groupMini(g)}</span><span>${esc(g.name)}</span></a>`).join("")}</div>`;
 }
 function wireHomeDash() {
-  wireBanners(); wireAsks(); wireLive();
+  wireBanners(); wireAsks(); wireLive(); wireDigest();
   document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
   document.querySelectorAll("[data-act]").forEach(a => a.onclick = e => { e.preventDefault(); location.hash = routeTail(a.dataset.act); });
   document.querySelectorAll("[data-hdmem]").forEach(im => im.onclick = () => { const [eid, pid] = im.dataset.hdmem.split("|"), ev = S.events.get(eid), p = (S.memories.get(eid) || []).find(x => x.id === pid); if (ev && p) openPhoto(ev, p); });
@@ -5626,7 +5667,7 @@ function profileBody() {
   </div>
   <div class="section-head" style="margin-top:22px"><h2>Notifications</h2></div>
   <div class="card member-row"${NATIVE ? ' id="notifRow" style="cursor:pointer"' : ""}><span class="li">🔔</span><div style="flex:1;min-width:0"><b>${({ on: "On for this device", off: "Off", denied: "Blocked in your browser settings", unsupported: "Not available in this browser", native: "Managed in iPhone Settings" })[pushState()]}</b><div class="muted sm">${IOS && !STANDALONE && pushState() === "off" ? "Add Friendly to your Home Screen first (Share → Add to Home Screen)." : NATIVE ? "Tap to open Notification settings." : "Invites, comments, RSVPs, and day-of reminders."}</div></div>${NATIVE ? `<span class="chev">›</span>` : pushState() === "off" ? `<button class="btn small primary" id="pushToggle">Turn on</button>` : pushState() === "on" ? `<button class="btn small" id="pushToggle">Turn off</button>` : ""}</div>
-  ${pushState() !== "unsupported" ? `<div class="card" style="padding:12px 16px;margin-top:8px">
+  ${pushState() !== "unsupported" ? `<div class="card" id="notifPrefs" style="padding:12px 16px;margin-top:8px">
     <p class="muted sm" style="margin:0 0 4px">What you get notified about${["native", "on"].includes(pushState()) ? "" : " (once notifications are on)"}:</p>
     ${NOTIF_CATS.map(c => `<label class="switch" style="margin:8px 0"><input type="checkbox" data-notifpref="${c.key}" ${(p.notifPrefs || {})[c.key] !== false ? "checked" : ""}><span>${esc(c.label)}</span></label>`).join("")}
   </div>` : ""}
@@ -6457,7 +6498,7 @@ const isPeeked = a => { const tail = tailOf(a.url); if (tail === "#/" || tail ==
 const unreadCount = () => (S.activity || []).filter(a => a.createdAt > seenAt() && !isPeeked(a)).length;
 const newCountFor = urlTail => (S.activity || []).filter(a => a.createdAt > seenAt() && !isPeeked(a) && tailOf(a.url) === urlTail).length;
 const isNewEvent = ev => (S.activity || []).some(a => a.createdAt > seenAt() && !isPeeked(a) && tailOf(a.url) === "#/e/" + ev.id);
-const actIcon = a => a.sid || /paid you|as paid/.test(a.title) || a.type === "photo" ? coral(a.type === "photo" ? "happy" : "party", 30) : /pick your items|picked their items/.test(a.title) ? "🧾" : /joined via your link/.test(a.title) ? "🔗" : /waiting on your RSVP/.test(a.title) ? "📣" : /mentioned you/.test(a.title) ? "＠" : /to a meeting/.test(a.title) ? "📅" : /You're in!/.test(a.title) ? "🎟️" : /still owe/.test(a.title) ? "💸" : /invited you/.test(a.title) ? "🎟️" : /^Today:/.test(a.title) ? "⏰" : /reported/i.test(a.title) ? "⚑" : /is going|might come|can't make|joined the waitlist|requested/.test(a.title) ? "✅" : "💬";
+const actIcon = a => a.type === "digest" ? dot("happy", 30) : a.sid || /paid you|as paid/.test(a.title) || a.type === "photo" ? coral(a.type === "photo" ? "happy" : "party", 30) : /pick your items|picked their items/.test(a.title) ? "🧾" : /joined via your link/.test(a.title) ? "🔗" : /waiting on your RSVP/.test(a.title) ? "📣" : /mentioned you/.test(a.title) ? "＠" : /to a meeting/.test(a.title) ? "📅" : /You're in!/.test(a.title) ? "🎟️" : /still owe/.test(a.title) ? "💸" : /invited you/.test(a.title) ? "🎟️" : /^Today:/.test(a.title) ? "⏰" : /reported/i.test(a.title) ? "⚑" : /is going|might come|can't make|joined the waitlist|requested/.test(a.title) ? "✅" : "💬";
 function notifCard() {
   let pushDismissed = false; try { pushDismissed = !!LS.get("friendlyPushDismissed"); } catch {}
   if (NATIVE || pushDismissed) return "";
