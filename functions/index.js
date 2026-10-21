@@ -1884,7 +1884,33 @@ exports.onGroupUpdated = onDocumentUpdated({ document: "groups/{gid}" }, async e
   await dropRedundantPhoneInvites(e.data.after.ref, before, after, after.memberUids || []);
   const joined = (after.memberUids || []).filter(u => !(before.memberUids || []).includes(u));
   if (joined.length) await groupFriends(after, joined);
+  const left = (before.memberUids || []).filter(u => !(after.memberUids || []).includes(u));
+  if (left.length) await ungroupFriends(e.params.gid, left, after.memberUids || []);
 });
+exports.onGroupDeleted = onDocumentDeleted({ document: "groups/{gid}" }, async e => {
+  const g = e.data && e.data.data(); if (!g) return;
+  await ungroupFriends(e.params.gid, g.memberUids || [], g.memberUids || []);
+});
+// The reverse of groupFriends: someone leaves (or is removed, or the group goes away) and the friendships that
+// existed only because of that group go too. A friendship stays when the two still share another group, when
+// either of them asked for it, or when they've messaged each other.
+async function ungroupFriends(gid, leavers, others) {
+  let n = 0;
+  for (const a of leavers) {
+    const mine = await db.collection("groups").where("memberUids", "array-contains", a).get();
+    const stillWith = new Set(); mine.docs.forEach(d => { if (d.id !== gid) (d.get("memberUids") || []).forEach(u => stillWith.add(u)); });
+    for (const b of others) {
+      if (a === b || stillWith.has(b)) continue;
+      const id = pairId(a, b), ref = db.doc("friendships/" + id), f = await ref.get();
+      if (!f.exists || f.get("via") !== "group") continue;
+      const dm = await db.doc("dms/" + id).get(); if (dm.exists && dm.get("lastAt")) continue;
+      await ref.delete().then(() => n++).catch(() => {});
+      if (dm.exists) await dm.ref.delete().catch(() => {});
+    }
+  }
+  if (n) logger.info(`ungroupFriends: ${n} group-made friendship(s) dropped after leaving ${gid}`);
+  return n;
+}
 
 // Event updated: RSVP changes tell the host (and promote waitlisters), edits
 // re-send calendar invites, new guests get theirs, and the preview refreshes.
