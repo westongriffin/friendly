@@ -5620,7 +5620,8 @@ function messagesBody(tab = "messages") {
     const all = friends.map(otherIn).sort((a, b) => personName(a).localeCompare(personName(b)));
     return head + reqs + (all.length ? `${search("Search your friends…")}
   <div class="section-head" style="margin-top:18px"><h2>All friends</h2><span class="muted sm">${all.length}</span></div>
-  <div class="card">${all.map(u => row(u, `<b>${esc(personName(u))}</b><div class="muted sm">Our Friendlyship ›</div>`, `<button class="btn small" data-go="#/m/${pairOf(u)}" data-stop="1">Message</button>`, "#/fs/" + u)).join("")}</div>`
+  <div class="card">${all.map(u => { const shared = [...S.groups.values()].filter(g => (g.memberUids || []).includes(u)).map(g => g.name);   // group members become friends automatically; say which group
+    return row(u, `<b>${esc(personName(u))}</b><div class="muted sm">${shared.length ? `${esc(shared[0])}${shared.length > 1 ? ` +${shared.length - 1}` : ""} · ` : ""}Our Friendlyship ›</div>`, `<button class="btn small" data-go="#/m/${pairOf(u)}" data-stop="1">Message</button>`, "#/fs/" + u); }).join("")}</div>`
       : inc.length ? "" : emptyState("👥", "No friends yet", "Add friends to message them one-on-one, even if you're not in a group together.", "coral:happy"));
   }
   const reqLink = inc.length ? `<button type="button" class="req-link" data-go="#/friends">👋 ${inc.length === 1 ? "1 friend request" : inc.length + " friend requests"} waiting <span>›</span></button>` : "";
