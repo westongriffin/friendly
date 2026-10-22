@@ -1450,7 +1450,7 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 .lv-line{margin-top:8px}
 .lv-who{display:flex;flex-direction:column;gap:6px;margin-top:12px}.lv-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.lv-row>b{font-size:.85rem;min-width:92px}.lv-late{flex-basis:100%;padding-left:102px}
 .lv-btns{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}.lv-btns .btn{flex:1;min-width:0;white-space:nowrap}
-.lv-after{position:relative;border:1.5px solid #FFD2CB;background:#FFF7F5;margin-bottom:14px}.lv-after .today-x{top:10px;right:10px}.lv-after-h{display:flex;gap:12px;align-items:flex-start;padding-right:28px}.lv-after-h>svg,.lv-after-h>.blip{flex:none}
+.lv-after{position:relative;border:1.5px solid #FFD2CB;background:var(--surface);margin-bottom:14px}.lv-after-btns{justify-content:flex-end}.lv-after-btns .btn{flex:0 0 auto}.lv-after .today-x{top:10px;right:10px}.lv-after-h{display:flex;gap:12px;align-items:flex-start;padding-right:28px}.lv-after-h>svg,.lv-after-h>.blip{flex:none}
 .lv-after-pics{margin-top:10px}
 .hd-chip.dark{background:var(--ink)}
 
@@ -1500,7 +1500,37 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 
 /* Greeting: the plans count stands out; Dot and Coral side by side and tappable */
 .hd-plans{color:#B4412F;font-weight:700;text-decoration:none}
-.hd-mascots{display:flex;align-items:flex-end;gap:2px;flex:none;margin-right:-4px}.hd-mascot{border:0;background:none;padding:0;cursor:pointer;line-height:0;transition:transform .15s ease}.hd-mascot:active{transform:scale(.92)}.hd-mascot+.hd-mascot{margin-left:-10px;margin-bottom:6px}
+.hd-mascots{position:relative;display:flex;align-items:flex-end;gap:14px;flex:none;margin:8px 2px 0 0;padding-top:10px;border-radius:18px}.hd-mascot{position:relative;border:0;background:none;padding:0;cursor:pointer;line-height:0;transform-origin:50% 90%}.hd-mascot:active .hd-m-wrap{transform:scale(.92)}.hd-m-wrap{display:block;line-height:0;transition:transform .15s ease}
 .hd-greet{align-items:center}
 /* Running late: a typed number */
 .late-custom{display:flex;gap:8px;margin-top:10px}.late-custom input{flex:1;min-width:0;border:1px solid var(--line);border-radius:12px;padding:9px 12px;font:inherit;background:var(--surface)}
+
+/* Name tags (style C) */
+.mtag{position:absolute;top:-10px;right:-14px;font-size:.62rem;font-weight:800;padding:2px 7px;border-radius:10px 10px 10px 2px;line-height:1.2;background:#FFFEFC;color:var(--ink);border:1.5px solid var(--ink);white-space:nowrap;transform:rotate(6deg);box-shadow:0 1px 3px rgba(42,32,25,.12)}
+.mtag-coral{border-color:#FF6B57;color:#B4412F}.mtag-dot{border-color:#8A5A00;color:#8A5A00}
+/* The show */
+.hd-prop{position:absolute;top:-6px;font-size:1.05rem;line-height:1;pointer-events:none;animation:prop-rise 1.6s ease-out both;z-index:2}
+@keyframes prop-rise{0%{opacity:0;transform:translateY(8px) scale(.6)}25%{opacity:1;transform:translateY(-2px) scale(1.05)}100%{opacity:0;transform:translateY(-26px) scale(1)}}
+.hd-mascots.flash::after{content:"";position:absolute;inset:-6px;border-radius:18px;background:#fff;animation:m-flash .45s ease-out both}
+@keyframes m-flash{0%{opacity:.95}100%{opacity:0}}
+.m-bounce{animation:m-bounce 1.3s ease-in-out}@keyframes m-bounce{0%,100%{transform:translateY(0)}25%{transform:translateY(-8px)}50%{transform:translateY(0)}75%{transform:translateY(-5px)}}
+.m-bounce-big{animation:m-bounce-big 1.5s ease-in-out}@keyframes m-bounce-big{0%,100%{transform:translateY(0) scale(1,1)}15%{transform:translateY(-18px) scale(.94,1.08)}30%{transform:translateY(0) scale(1.08,.92)}48%{transform:translateY(-14px) scale(.96,1.05)}62%{transform:translateY(0) scale(1.05,.95)}80%{transform:translateY(-8px)}}
+.m-spin{animation:m-spin 1s cubic-bezier(.4,0,.2,1)}@keyframes m-spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
+.m-shimmy{animation:m-shimmy 1.2s ease-in-out}@keyframes m-shimmy{0%,100%{transform:rotate(0)}15%{transform:rotate(-9deg) translateX(-3px)}30%{transform:rotate(9deg) translateX(3px)}45%{transform:rotate(-8deg) translateX(-2px)}60%{transform:rotate(8deg) translateX(2px)}75%{transform:rotate(-4deg)}}
+.m-look{animation:m-look 2s ease-in-out}@keyframes m-look{0%,100%{transform:rotate(0)}25%{transform:rotate(-9deg)}70%{transform:rotate(9deg)}}
+.m-nod{animation:m-nod 1.4s ease-in-out}@keyframes m-nod{0%,100%{transform:translateY(0) rotate(0)}25%{transform:translateY(3px) rotate(3deg)}50%{transform:translateY(0) rotate(0)}75%{transform:translateY(3px) rotate(3deg)}}
+.m-sway{animation:m-sway 2.6s ease-in-out}@keyframes m-sway{0%,100%{transform:rotate(0)}30%{transform:rotate(-4deg)}70%{transform:rotate(4deg)}}
+.m-jump{animation:m-jump 1s cubic-bezier(.3,0,.2,1)}@keyframes m-jump{0%,100%{transform:translateY(0) scale(1,1)}20%{transform:translateY(2px) scale(1.08,.9)}50%{transform:translateY(-24px) scale(.95,1.08)}80%{transform:translateY(0) scale(1.05,.95)}}
+.m-zoom{animation:m-zoom 1.7s cubic-bezier(.5,0,.3,1)}@keyframes m-zoom{0%{transform:translateX(0)}35%{transform:translateX(140px) rotate(14deg)}55%{transform:translateX(140px) rotate(14deg)}100%{transform:translateX(0) rotate(0)}}
+.m-lean-l{animation:m-lean-l 1.5s ease-in-out}@keyframes m-lean-l{0%,100%{transform:rotate(0) translateX(0)}40%,70%{transform:rotate(-14deg) translateX(-10px)}}
+.m-lean-r{animation:m-lean-r .9s ease-in-out}@keyframes m-lean-r{0%,100%{transform:rotate(0) translateX(0)}45%,65%{transform:rotate(14deg) translateX(10px)}}
+.m-swap-l{animation:m-swap-l 1.5s ease-in-out}@keyframes m-swap-l{0%,100%{transform:translateX(0)}40%,60%{transform:translateX(-86px) translateY(-6px)}}
+.m-swap-r{animation:m-swap-r 1.5s ease-in-out}@keyframes m-swap-r{0%,100%{transform:translateX(0)}40%,60%{transform:translateX(86px) translateY(6px)}}
+.m-bump-l{animation:m-bump-l .8s ease-in-out}@keyframes m-bump-l{0%,100%{transform:translateX(0)}45%{transform:translateX(-26px)}}
+.m-wobble{animation:m-wobble 1s ease-out}@keyframes m-wobble{0%{transform:rotate(0)}15%{transform:rotate(12deg) translateX(6px)}35%{transform:rotate(-9deg)}55%{transform:rotate(6deg)}75%{transform:rotate(-3deg)}100%{transform:rotate(0)}}
+.m-hide{animation:m-hide 2.2s ease-in-out}@keyframes m-hide{0%,100%{transform:translateX(0) scale(1);opacity:1}30%,65%{transform:translateX(-62px) scale(.72);opacity:0}}
+.m-drag{animation:m-drag 1.8s ease-in-out}@keyframes m-drag{0%,100%{transform:translateX(0)}35%,60%{transform:translateX(-48px)}}
+.m-wave{animation:m-wave 2s ease-in-out}@keyframes m-wave{0%,100%{transform:rotate(0)}20%,60%{transform:rotate(-6deg)}}
+/* Maybe and declined tiles */
+.ev-card.maybe{opacity:.62;filter:saturate(.75)}.ev-card.declined{opacity:.5;filter:saturate(.4)}
+@media (prefers-reduced-motion: reduce){.hd-mascot,.hd-mascot *{animation:none!important}}

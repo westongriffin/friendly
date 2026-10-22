@@ -1798,9 +1798,10 @@ const unjoinedEvents = () => [...((S.phoneEvents || new Map()).values())].filter
 // What's next, what needs you, money at a glance, Dot's picks, the week, memories, the latest, and your crews.
 const inDaysWord = ev => { const d = daysUntil(ev); return d <= 0 ? "today" : d === 1 ? "tomorrow" : `in ${d} days`; };
 const hdFaces = ev => { const g = (ev.invitedUids || []).filter(u => (ev.rsvps || {})[u] === "going"); if (!canSeeGuests(ev) || !g.length) return ""; return `<span class="hd-faces">${g.slice(0, 3).map(u => avatar(u, "xs")).join("")}${g.length > 3 ? `<span class="more">+${g.length - 3}</span>` : ""}</span>`; };
+const declinedByMe = ev => (ev.rsvps || {})[myUid()] === "no";
 function homeBody() {
   const me = myUid(), t = todayStr();
-  const evs = [...myEvents(), ...unjoinedEvents()];
+  const evs = [...myEvents(), ...unjoinedEvents()].filter(e => !declinedByMe(e));
   const upcoming = evs.filter(e => e.date >= t).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
   let hiddenToday = []; try { hiddenToday = JSON.parse(LS.get("friendlyTodayHidden") || "[]"); } catch {}
   const todayEvs = upcoming.filter(e => e.date === t && !hiddenToday.includes(e.id + "|" + e.date)).slice(0, 2);
@@ -1817,7 +1818,7 @@ function homeBody() {
   const dateLine = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
   const plansLine = weekCount ? `${weekCount} plan${weekCount === 1 ? "" : "s"} this week` : "nothing on the calendar this week";
   // Weekends are Coral's: she takes the greeting.
-  const plansLink = `<a class="hd-plans" data-go="#/plans">${plansLine}</a>`, pair = `<span class="hd-mascots"><button type="button" class="hd-mascot" data-mascot="dot" aria-label="Meet Dot">${dot("happy", 62)}</button><button type="button" class="hd-mascot" data-mascot="coral" aria-label="Meet Coral">${coral("happy", 62)}</button></span>`;
+  const plansLink = `<a class="hd-plans" data-go="#/plans">${plansLine}</a>`, pair = `<span class="hd-mascots" id="hdMascots">${mascotBtn("dot")}${mascotBtn("coral")}</span>`;
   const head = weekend ? `<div><h1>It's ${new Date().toLocaleDateString("en-US", { weekday: "long" })}, ${esc(first(S.profile.name))}.</h1><p class="muted sm">What are we doing? · ${plansLink}</p></div>${pair}`
     : `<div><h1>${greet}, ${esc(first(S.profile.name))}</h1><p class="muted sm">${dateLine} · ${plansLink}</p></div>${pair}`;
   return `
@@ -1833,6 +1834,62 @@ function homeBody() {
   ${memoriesStrip()}${yearCard()}
   ${latestList()}
   ${crewsRow()}`;
+}
+// ---------- THE SHOW: Dot and Coral on Home ----------
+// Two friends with different energy. Dot is calm (small bounces, thinking, painting, the odd nap); Coral is the
+// lively one (big bounces, spins, waves, zooming off and back). Every few seconds one bit plays: solo or together.
+const MSIZE = 72;
+const mascotBtn = k => `<button type="button" class="hd-mascot m-${k}" data-mascot="${k}" aria-label="Meet ${k === "dot" ? "Dot" : "Coral"}"><span class="hd-m-wrap">${k === "dot" ? dot("happy", MSIZE) : coral("happy", MSIZE)}</span><span class="mtag mtag-${k}">${k === "dot" ? "Dot" : "Coral"}</span></button>`;
+const SHOW_BITS = (() => {
+  const H = {};
+  const btn = k => document.querySelector(`#hdMascots .m-${k}`);
+  const anim = (k, cls, ms) => { const b = btn(k); if (!b) return; b.classList.add(cls); setTimeout(() => b.classList.remove(cls), ms); };
+  const face = (k, mood, ms, extra = {}) => { const w = btn(k) && btn(k).querySelector(".hd-m-wrap"); if (!w || !window.Blip) return; w.innerHTML = window.Blip.svg({ mood, size: MSIZE, coral: k === "coral", ...extra }); if (ms) setTimeout(() => { if (w.isConnected) w.innerHTML = window.Blip.svg({ mood: "happy", size: MSIZE, coral: k === "coral" }); }, ms); };
+  const prop = (k, emoji, ms = 1600, dx = 0) => { const box = el("hdMascots"); if (!box) return; const p = document.createElement("span"); p.className = "hd-prop"; p.textContent = emoji; p.style.left = (k === "dot" ? 22 : 108) + dx + "px"; box.appendChild(p); setTimeout(() => p.remove(), ms); };
+  const flash = () => { const box = el("hdMascots"); if (!box) return; box.classList.add("flash"); setTimeout(() => box.classList.remove("flash"), 500); };
+  const after = (ms, fn) => setTimeout(fn, ms);
+  return [
+    // Dot, solo
+    ["dot", 2600, () => { anim("dot", "m-sway", 2600); prop("dot", "💤", 2400, 14); }],
+    ["dot", 2600, () => { face("dot", "thinking", 2600); prop("dot", "💭", 2200, 16); }],
+    ["dot", 3000, () => { face("dot", "painter", 3000); prop("dot", "🎨", 1800, -22); }],
+    ["dot", 1300, () => anim("dot", "m-bounce", 1300)],
+    ["dot", 2000, () => anim("dot", "m-look", 2000)],
+    ["dot", 1400, () => anim("dot", "m-nod", 1400)],
+    ["dot", 2200, () => { face("dot", "party", 2200); }],
+    ["dot", 1600, () => prop("dot", "❤️", 1600, 10)],
+    // Coral, solo
+    ["coral", 1500, () => anim("coral", "m-bounce-big", 1500)],
+    ["coral", 1000, () => anim("coral", "m-spin", 1000)],
+    ["coral", 2000, () => { face("coral", "happy", 2000, { wave: true }); anim("coral", "m-wave", 2000); prop("coral", "👋", 1500, 22); }],
+    ["coral", 2400, () => { face("coral", "party", 2400); prop("coral", "🎉", 1600, -8); }],
+    ["coral", 1200, () => anim("coral", "m-shimmy", 1200)],
+    ["coral", 1000, () => { anim("coral", "m-jump", 1000); prop("coral", "🎵", 1400, 20); }],
+    ["coral", 1700, () => anim("coral", "m-zoom", 1700)],
+    ["coral", 1500, () => { anim("coral", "m-lean-l", 1500); prop("coral", "👀", 1200, -30); }],
+    ["coral", 2000, () => { prop("coral", "☕", 1800, 16); anim("coral", "m-sway", 2000); }],
+    // Together
+    ["both", 2400, () => { anim("dot", "m-lean-r", 900); anim("coral", "m-lean-l", 900); after(450, () => prop("dot", "✨", 1000, 44)); after(900, () => { face("dot", "party", 1400); face("coral", "party", 1400); }); }],
+    ["both", 1500, () => { anim("dot", "m-swap-r", 1500); anim("coral", "m-swap-l", 1500); }],
+    ["both", 2000, () => { anim("coral", "m-bump-l", 800); after(380, () => { anim("dot", "m-wobble", 1000); face("dot", "thinking", 1500); prop("dot", "❗", 900, 18); }); }],
+    ["both", 2500, () => { face("dot", "party", 2400); face("coral", "party", 2400); prop("dot", "🎉", 1500, -6); prop("coral", "🎉", 1500, 10); }],
+    ["both", 2200, () => { anim("coral", "m-hide", 2200); after(400, () => anim("dot", "m-look", 1600)); after(1300, () => prop("dot", "👀", 800, 46)); }],
+    ["both", 2300, () => { anim("dot", "m-nod", 1500); anim("coral", "m-nod", 1500); after(700, () => anim("coral", "m-shimmy", 1200)); }],
+    ["both", 2800, () => { prop("dot", "💤", 1500, 14); anim("dot", "m-sway", 1500); after(1400, () => anim("coral", "m-bump-l", 700)); after(1900, () => { anim("dot", "m-wobble", 900); face("dot", "thinking", 1200); }); }],
+    ["both", 1800, () => { anim("coral", "m-drag", 1800); after(120, () => anim("dot", "m-drag", 1800)); prop("coral", "💨", 1000, 36); }],
+    ["both", 2200, () => { prop("coral", "📸", 1400, 30); after(650, () => { flash(); face("dot", "party", 1500); face("coral", "party", 1500); }); }],
+  ];
+})();
+function startMascotShow() {
+  clearTimeout(S._showTimer);
+  if (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const tick = () => {
+    if (!el("hdMascots") || document.hidden) { S._showTimer = setTimeout(tick, 2500); return; }
+    let pick; do { pick = SHOW_BITS[Math.floor(Math.random() * SHOW_BITS.length)]; } while (SHOW_BITS.length > 1 && pick === S._lastBit);
+    S._lastBit = pick; try { pick[2](); } catch {}
+    S._showTimer = setTimeout(tick, pick[1] + 3500 + Math.random() * 4500);
+  };
+  S._showTimer = setTimeout(tick, 1800 + Math.random() * 1500);
 }
 // ---------- A YEAR WITH THE CREW (the recap page: #/year or #/year/2025) ----------
 function yearData(y) {
@@ -2013,9 +2070,9 @@ function afterCard() {
   const pics = S.memories.get(ev.id) || [], others = [...new Set(pics.map(p => p.addedBy).filter(u => u && u !== me))];
   const evening = parseInt((ev.time || "12:00").split(":")[0], 10) >= 17;
   const owe = [...S.expenses.values()].filter(x => x.eventId === ev.id && x.paidBy !== me && !(x.paid || {})[me]).reduce((n, x) => n + (x.shares ? (x.shares[me] || 0) : ((x.split || []).includes(me) ? Math.round(x.amountCents / x.split.length) : 0)), 0);
-  return `<div class="card lv-after"><button type="button" class="today-x" data-hide-after="${esc(ev.id)}" aria-label="Hide this">✕</button><div class="lv-after-h">${coral("party", 46)}<div style="flex:1;min-width:0"><b>${evening ? "Last night was a good one." : "That was a good one."}</b><div class="muted sm">Add your photos from ${esc(ev.title)}.${others.length ? ` ${esc(andNames(others.map(u => first(nameOf(u)))))} already added ${pics.length}.` : ""}</div></div></div>
+  return `<div class="card lv-after"><button type="button" class="today-x" data-hide-after="${esc(ev.id)}" aria-label="Hide this">✕</button><div class="lv-after-h">${coral("party", 46)}<div style="flex:1;min-width:0"><b>${evening ? "Last night was a good one!" : "That was a good one!"}</b><div class="muted sm">Add your photos from ${esc(ev.title)}.${others.length ? ` ${esc(andNames(others.map(u => first(nameOf(u)))))} already added ${pics.length}.` : ""}</div></div></div>
     ${pics.length ? `<div class="hd-scroll hd-mems lv-after-pics">${pics.filter(p => p.img).slice(0, 6).map(p => `<img src="${esc(p.img)}" data-hdmem="${esc(ev.id)}|${esc(p.id)}" alt="" loading="lazy">`).join("")}</div>` : ""}
-    <div class="lv-btns"><a class="btn primary small" data-go="#/e/${esc(ev.id)}?to=photosCard">Add photos</a>${owe ? `<a class="btn small" data-go="#/money?to=settleCard">Settle up ${fmt$(owe)}</a>` : `<a class="btn small" data-go="#/e/${esc(ev.id)}?to=wall">Say thanks</a>`}</div></div>`;
+    <div class="lv-btns lv-after-btns">${owe ? `<a class="btn ghost small" data-go="#/money?to=settleCard">Settle up ${fmt$(owe)}</a>` : `<a class="btn ghost small" data-go="#/e/${esc(ev.id)}?to=wall">Say thanks</a>`}<a class="btn primary small" data-go="#/e/${esc(ev.id)}?to=photosCard">Add photos</a></div></div>`;
 }
 // ---------- UP FOR IT? (low-stakes "I'm free Thursday, who's in?" posts) ----------
 // asks/{id}: by, text, date, part (morning|afternoon|evening|any), whenLabel, audience ("friends" or a group id),
@@ -2166,6 +2223,7 @@ function crewsRow() {
 function wireHomeDash() {
   wireBanners(); wireAsks(); wireLive(); wireDigest();
   document.querySelectorAll("[data-mascot]").forEach(b => b.onclick = () => openMascot(b.dataset.mascot));
+  startMascotShow();
   document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
   document.querySelectorAll("[data-act]").forEach(a => a.onclick = e => { e.preventDefault(); location.hash = routeTail(a.dataset.act); });
   document.querySelectorAll("[data-hdmem]").forEach(im => im.onclick = () => { const [eid, pid] = im.dataset.hdmem.split("|"), ev = S.events.get(eid), p = (S.memories.get(eid) || []).find(x => x.id === pid); if (ev && p) openPhoto(ev, p); });
@@ -2176,10 +2234,11 @@ function wireHomeDash() {
   if (unseen.length && !S._hdMemLoading) { S._hdMemLoading = true; loadMemories(false).catch(() => {}).then(() => { S._hdMemLoading = false; if (S.route.name === "home") render(); }); }
 }
 function plansBody() {
-  const evs = [...myEvents(), ...unjoinedEvents()];
+  const all = [...myEvents(), ...unjoinedEvents()], evs = all.filter(e => !declinedByMe(e));
   const t = todayStr();
   let upcoming = evs.filter(e => e.date >= t).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
   let past = evs.filter(e => e.date < t).sort((a, b) => b.date.localeCompare(a.date));
+  let declined = all.filter(declinedByMe).sort((a, b) => b.date.localeCompare(a.date));
   if (homeFilter !== "all") { const f = homeFilter === "none" ? e => !e.groupId && ![...S.groups.values()].some(g => evInGroup(e, g)) : e => evInGroup(e, S.groups.get(homeFilter)); upcoming = upcoming.filter(f); past = past.filter(f); }
 
   // Pending group invites render in shell(), so they show on every page.
@@ -2196,7 +2255,9 @@ function plansBody() {
   ${filterBar}
   ${homeView === "calendar" ? calendarBody([...upcoming, ...past]) : `<div class="ev-grid">${upcoming.length ? upcoming.map(eventCard).join("") : emptyState("🗓️", "No plans yet", "Create your first event: pick a theme and invite the crew.", "sleepy") + (window.Blip && !isDemo() ? `<div style="text-align:center;margin:-6px 0 14px"><button type="button" class="btn tell-dot inline" id="homeTell">${dot("happy", 26)} Or just tell Dot the plan</button></div>` : "")}</div>
   ${past.length || !S.pastLoaded ? `<button type="button" class="section-head past-head" id="pastToggle" aria-expanded="${!!S.pastOpen}"><h2>Past</h2><span class="muted sm">${S.pastLoaded ? past.length + (past.length === 1 ? " event" : " events") : ""}</span><span class="past-chev" aria-hidden="true">›</span></button>
-  ${S.pastOpen ? (S.pastLoaded ? `<div class="ev-grid dim">${past.map(eventCard).join("")}</div>` : `<p class="muted sm" style="margin:6px 2px">Loading past events…</p>`) : ""}` : ""}`}`;
+  ${S.pastOpen ? (S.pastLoaded ? `<div class="ev-grid dim">${past.map(eventCard).join("")}</div>` : `<p class="muted sm" style="margin:6px 2px">Loading past events…</p>`) : ""}` : ""}
+  ${declined.length ? `<button type="button" class="section-head past-head" id="declinedToggle" aria-expanded="${!!S.declinedOpen}"><h2>Declined</h2><span class="muted sm">${declined.length + (declined.length === 1 ? " plan" : " plans")} you can't make</span><span class="past-chev" aria-hidden="true">›</span></button>
+  ${S.declinedOpen ? `<div class="ev-grid dim">${declined.map(eventCard).join("")}</div>` : ""}` : ""}`}`;
 }
 function emptyState(emoji, title, sub, mood) { const art = mood && window.Blip ? mascot(mood, 84) : `<div class="big">${emoji}</div>`; return `<div class="card empty">${art}<b>${esc(title)}</b><p class="muted">${esc(sub)}</p></div>`; }
 
@@ -2207,9 +2268,10 @@ function eventCard(ev) {
   const tf = tileFaces(ev);
   const myR = (ev.rsvps || {})[myUid()];
   const rsvpDot = myR ? `<span class="you-pill ${myR}">${{ going: "You're going", maybe: "Maybe", no: "Can't go", waitlist: "Waitlisted", pending: "Pending" }[myR] || ""}</span>` : "";
+  const dimCls = myR === "maybe" ? " maybe" : myR === "no" ? " declined" : "";
   const pills = `${isNewEvent(ev) ? `<span class="new-pill">New</span>` : ""}${rsvpDot}`;
   return `
-  <a class="ev-card t-${esc(th.id)} ${ev.cover ? "has-cover" : ""} ${ev._unjoined ? "unjoined" : ""}" data-ev="${ev.id}" style="--th-accent:${esc(th.accent)};--th-ink:${esc(th.ink)};--th-on-accent:${esc(th.onAccent)}">
+  <a class="ev-card t-${esc(th.id)} ${ev.cover ? "has-cover" : ""} ${ev._unjoined ? "unjoined" : ""}${dimCls}" data-ev="${ev.id}" style="--th-accent:${esc(th.accent)};--th-ink:${esc(th.ink)};--th-on-accent:${esc(th.onAccent)}">
     ${ev.cover ? `<img class="cover-img" src="${esc(ev.cover)}" alt="">` : `<div class="ev-card-bg"></div>`}
     <div class="ev-card-body">
       ${pills ? `<div class="ev-pills">${pills}</div>` : ""}
@@ -2242,6 +2304,7 @@ function wirePlans() {
   document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
   document.querySelectorAll("[data-filter]").forEach(b => b.onclick = () => { homeFilter = b.dataset.filter; calDay = null; render(); });
   if (el("pastToggle")) el("pastToggle").onclick = () => { S.pastOpen = !S.pastOpen; if (S.pastOpen) startPast(); render(); };
+  if (el("declinedToggle")) el("declinedToggle").onclick = () => { S.declinedOpen = !S.declinedOpen; render(); };
   if (homeView === "calendar") startPast();
   if (el("viewToggle")) el("viewToggle").onclick = () => { homeView = homeView === "calendar" ? "cards" : "calendar"; try { LS.set("friendlyHomeView", homeView); } catch {} render(); };
   if (el("calPrev")) el("calPrev").onclick = () => { calYM = { y: calYM.m === 0 ? calYM.y - 1 : calYM.y, m: (calYM.m + 11) % 12 }; calDay = null; render(); };
@@ -3955,7 +4018,7 @@ function eventInner(ev) {
     </div>
   </div>`; })() : ""}
 
-  <div class="ev-card-glass" id="dayCard">${dayInner(ev)}</div>
+  ${declinedByMe(ev) && ev.date !== todayStr() ? "" : `<div class="ev-card-glass" id="dayCard">${dayInner(ev)}</div>`}
   <div class="ev-card-glass" id="pollsCard">${pollsInner(ev)}</div>
   <div class="ev-card-glass" id="playlistCard">${playlistInner(ev)}</div>
   <div class="ev-card-glass" id="photosCard">${photosInner(ev)}</div>
