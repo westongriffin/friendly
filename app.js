@@ -1846,7 +1846,8 @@ const SHOW_BITS = (() => {
   const anim = (k, cls, ms) => { const b = btn(k); if (!b) return; b.classList.add(cls); setTimeout(() => b.classList.remove(cls), ms); };
   const face = (k, mood, ms, extra = {}) => { const w = btn(k) && btn(k).querySelector(".hd-m-wrap"); if (!w || !window.Blip) return; w.innerHTML = window.Blip.svg({ mood, size: MSIZE, coral: k === "coral", ...extra }); if (ms) setTimeout(() => { if (w.isConnected) w.innerHTML = window.Blip.svg({ mood: "happy", size: MSIZE, coral: k === "coral" }); }, ms); };
   const prop = (k, emoji, ms = 1500) => { const b = btn(k); if (!b) return; const p = document.createElement("span"); p.className = "hd-prop"; p.textContent = emoji; b.appendChild(p); setTimeout(() => p.remove(), ms); };
-  const say = (k, text, ms = 1500) => { const b = btn(k); if (!b) return; b.querySelectorAll(".hd-say").forEach(x => x.remove()); const p = document.createElement("span"); p.className = "hd-say"; p.textContent = text; b.appendChild(p); setTimeout(() => p.remove(), ms); };
+  // one bubble on screen at a time, so two lines never overlap; a new line replaces the old one
+  const say = (k, text, ms = 1500) => { const b = btn(k); if (!b) return; document.querySelectorAll("#hdMascots .hd-say").forEach(x => x.remove()); const p = document.createElement("span"); p.className = "hd-say"; p.textContent = text; b.appendChild(p); setTimeout(() => p.remove(), ms); };
   const flash = () => { const box = el("hdMascots"); if (!box) return; box.classList.add("flash"); setTimeout(() => box.classList.remove("flash"), 500); };
   const at = (ms, fn) => setTimeout(fn, ms);
   // reactions: lean toward the other one, laugh, get startled, clap
@@ -1884,10 +1885,25 @@ const SHOW_BITS = (() => {
     [3000, () => { say("coral", "say cheese", 1200); at(800, () => { flash(); face("dot", "party", 1500); face("coral", "party", 1500); prop("coral", "📸", 1200); }); }],
     [3400, () => { anim("coral", "m-lean-l", 1500); say("coral", "psst", 1100); at(600, () => anim("dot", "m-lean-r", 1000)); at(1500, () => { face("dot", "party", 1300); face("coral", "party", 1300); say("dot", "haha", 1100); }); }],
     [3200, () => { anim("dot", "m-lean-r", 1500); anim("coral", "m-lean-l", 1500); at(1600, () => { laugh("dot"); laugh("coral"); say("coral", "you blinked", 1300); }); }],
+    // More of the two of them
+    [3400, () => { anim("coral", "m-lean-l", 1200); say("coral", "tickle tickle", 1100); at(500, () => { anim("dot", "m-shimmy", 1400); face("dot", "party", 1600); }); at(1500, () => say("dot", "stop! haha", 1300)); }],
+    [3200, () => { prop("dot", "☕", 1800); say("dot", "coffee?", 1200); at(1000, () => { anim("coral", "m-bounce-big", 1500); say("coral", "YES", 1100); }); at(2200, () => prop("coral", "☕", 1200)); }],
+    [3600, () => { say("coral", "race ya", 1000); at(600, () => { anim("coral", "m-zoom", 1700); anim("dot", "m-swap-r", 1500); }); at(2300, () => say("coral", "I win", 1100)); at(2900, () => { face("dot", "thinking", 1200); say("dot", "you cheated", 1200); }); }],
+    [3400, () => { prop("coral", "🎵", 1800); anim("coral", "m-sway", 2600); at(800, () => { anim("dot", "m-sway", 1800); prop("dot", "🎵", 1600); }); at(2200, () => { face("dot", "party", 1300); face("coral", "party", 1300); say("coral", "harmony", 1100); }); }],
+    [3600, () => { anim("dot", "m-bounce", 1300); at(250, () => anim("coral", "m-bounce", 1300)); at(1300, () => { anim("dot", "m-lean-r", 900); anim("coral", "m-lean-l", 900); }); at(1750, () => prop("dot", "✨", 900)); at(2300, () => say("coral", "nailed it", 1200)); }],
+    [3600, () => { prop("coral", "🖼️", 1600); say("coral", "look", 1000); at(600, () => watch("dot", 1600)); at(1300, () => say("dot", "is that me?", 1300)); at(2500, () => { laugh("coral"); say("coral", "yep", 1000); }); }],
+    [3400, () => { anim("dot", "m-sway", 1600); say("dot", "yawn", 1000); at(900, () => { anim("coral", "m-shimmy", 1400); say("coral", "yaaawn", 1200); }); at(2300, () => { face("dot", "thinking", 1200); say("dot", "very funny", 1100); }); }],
+    [3400, () => { anim("coral", "m-bump-l", 800); at(300, () => { anim("dot", "m-spin", 1000); prop("dot", "😵‍💫", 1300); }); at(1400, () => say("dot", "dizzy…", 1200)); at(1900, () => laugh("coral")); }],
+    [3400, () => { anim("dot", "m-nod", 1400); say("dot", "hi there", 1200); at(1200, () => { anim("coral", "m-bounce-big", 1500); say("coral", "make a plan!", 1400); }); at(2700, () => say("dot", "no pressure", 1100)); }],
+    [3800, () => { anim("coral", "m-lean-l", 1200); say("coral", "guess what", 1100); at(1100, () => say("dot", "what", 900)); at(2000, () => { say("coral", "chicken butt", 1300); laugh("coral"); }); at(2500, () => laugh("dot")); }],
+    [3600, () => { prop("dot", "🧘", 2200); anim("dot", "m-sway", 2600); at(600, () => { anim("coral", "m-bounce-big", 1500); say("coral", "pssst", 1000); }); at(1800, () => { anim("coral", "m-bounce-big", 1500); say("coral", "PSSST", 1000); }); at(2900, () => { face("dot", "thinking", 1200); say("dot", "serenity", 1100); }); }],
+    [3600, () => { anim("dot", "m-lean-r", 900); at(600, () => say("coral", "wait wait", 1000)); at(1500, () => { anim("dot", "m-lean-r", 900); anim("coral", "m-lean-l", 900); }); at(1950, () => prop("dot", "✨", 900)); at(2400, () => { say("coral", "there", 900); face("dot", "party", 1200); face("coral", "party", 1200); }); }],
   ];
 })();
 function startMascotShow() {
   clearTimeout(S._showTimer);
+  // Name tags introduce them for about ten seconds, then fade; once seen this session they don't come back.
+  const box = el("hdMascots"); if (box) { if (S._tagsDone) box.classList.add("tags-off"); else { clearTimeout(S._tagsTimer); S._tagsTimer = setTimeout(() => { S._tagsDone = true; const b = el("hdMascots"); if (b) b.classList.add("tags-off"); }, 10000); } }
   if (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   const tick = () => {
     if (!el("hdMascots") || document.hidden) { S._showTimer = setTimeout(tick, 2500); return; }
@@ -2073,12 +2089,13 @@ function afterCard() {
   const me = myUid(); let hidden = []; try { hidden = JSON.parse(LS.get("friendlyAfterHidden") || "[]"); } catch {}
   const ev = myEvents().filter(e => liveWindow(e).phase === "after" && !hidden.includes(e.id) && (e.rsvps || {})[me] !== "no").sort((a, b) => liveWindow(b).end - liveWindow(a).end)[0];
   if (!ev) return "";
-  const pics = S.memories.get(ev.id) || [], others = [...new Set(pics.map(p => p.addedBy).filter(u => u && u !== me))];
+  const pics = (S.memories.get(ev.id) || []).filter(p => p.img), others = [...new Set(pics.map(p => p.addedBy).filter(u => u && u !== me))];
   const evening = parseInt((ev.time || "12:00").split(":")[0], 10) >= 17;
   const owe = [...S.expenses.values()].filter(x => x.eventId === ev.id && x.paidBy !== me && !(x.paid || {})[me]).reduce((n, x) => n + (x.shares ? (x.shares[me] || 0) : ((x.split || []).includes(me) ? Math.round(x.amountCents / x.split.length) : 0)), 0);
-  return `<div class="card lv-after"><button type="button" class="today-x" data-hide-after="${esc(ev.id)}" aria-label="Hide this">✕</button><div class="lv-after-h">${coral("party", 46)}<div style="flex:1;min-width:0"><b>${evening ? "Last night was a good one!" : "That was a good one!"}</b><div class="muted sm">Add your photos from ${esc(ev.title)}.${others.length ? ` ${esc(andNames(others.map(u => first(nameOf(u)))))} already added ${pics.length}.` : ""}</div></div></div>
-    ${pics.length ? `<div class="hd-scroll hd-mems lv-after-pics">${pics.filter(p => p.img).slice(0, 6).map(p => `<img src="${esc(p.img)}" data-hdmem="${esc(ev.id)}|${esc(p.id)}" alt="" loading="lazy">`).join("")}</div>` : ""}
-    <div class="lv-btns lv-after-btns">${owe ? `<a class="btn ghost small" data-go="#/money?to=settleCard">Settle up ${fmt$(owe)}</a>` : `<a class="btn ghost small" data-go="#/e/${esc(ev.id)}?to=wall">Say thanks</a>`}<a class="btn primary small" data-go="#/e/${esc(ev.id)}?to=photosCard">Add photos</a></div></div>`;
+  return `<div class="card lv-after">
+    <div class="lv-after-grid">${coral("party", 40)}<div class="lv-after-text"><b>${evening ? "Last night was a good one!" : "That was a good one!"}</b><p>Add your photos from ${esc(ev.title)}.${others.length ? ` ${esc(andNames(others.map(u => first(nameOf(u)))))} already added ${pics.length}.` : ""}</p></div><button type="button" class="today-x lv-after-x" data-hide-after="${esc(ev.id)}" aria-label="Hide this">✕</button></div>
+    ${pics.length ? `<div class="hd-scroll hd-mems lv-after-pics">${pics.slice(0, 6).map(p => `<img src="${esc(p.img)}" data-hdmem="${esc(ev.id)}|${esc(p.id)}" alt="" loading="lazy">`).join("")}</div>` : ""}
+    <div class="lv-after-btns">${owe ? `<a class="btn ghost small" data-go="#/money?to=settleCard">Settle up ${fmt$(owe)}</a>` : `<a class="btn ghost small" data-go="#/e/${esc(ev.id)}?to=wall">Say thanks</a>`}<a class="btn primary small" data-go="#/e/${esc(ev.id)}?to=photosCard">Add photos</a></div></div>`;
 }
 // ---------- UP FOR IT? (low-stakes "I'm free Thursday, who's in?" posts) ----------
 // asks/{id}: by, text, date, part (morning|afternoon|evening|any), whenLabel, audience ("friends" or a group id),
