@@ -1817,8 +1817,9 @@ function homeBody() {
   const dateLine = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
   const plansLine = weekCount ? `${weekCount} plan${weekCount === 1 ? "" : "s"} this week` : "nothing on the calendar this week";
   // Weekends are Coral's: she takes the greeting.
-  const head = weekend ? `<div><h1>It's ${new Date().toLocaleDateString("en-US", { weekday: "long" })}, ${esc(first(S.profile.name))}.</h1><p class="muted sm">What are we doing? · ${plansLine}</p></div>${coral("happy", 54)}`
-    : `<div><h1>${greet}, ${esc(first(S.profile.name))}</h1><p class="muted sm">${dateLine} · ${plansLine}</p></div>${dot("happy", 54)}`;
+  const plansLink = `<a class="hd-plans" data-go="#/plans">${plansLine}</a>`, pair = `<span class="hd-mascots"><button type="button" class="hd-mascot" data-mascot="dot" aria-label="Meet Dot">${dot("happy", 62)}</button><button type="button" class="hd-mascot" data-mascot="coral" aria-label="Meet Coral">${coral("happy", 62)}</button></span>`;
+  const head = weekend ? `<div><h1>It's ${new Date().toLocaleDateString("en-US", { weekday: "long" })}, ${esc(first(S.profile.name))}.</h1><p class="muted sm">What are we doing? · ${plansLink}</p></div>${pair}`
+    : `<div><h1>${greet}, ${esc(first(S.profile.name))}</h1><p class="muted sm">${dateLine} · ${plansLink}</p></div>${pair}`;
   return `
   <header class="hd-greet">${head}</header>
   ${weekDigest(mine)}
@@ -1955,7 +1956,8 @@ function liveWindow(ev) {
 const LIVE_LABEL = { omw: "On my way", late: "Running late", here: "I'm here" }, LIVE_ICON = { omw: "🚗", late: "⏰", here: "📍" };
 const liveLatest = rows => { const latest = {}; (rows || []).forEach(c => { if (c.kind !== "status") return; if (!latest[c.authorId] || latest[c.authorId].createdAt < c.createdAt) latest[c.authorId] = c; });
   return Object.fromEntries(Object.entries(latest).filter(([, c]) => c.status !== "clear" && Date.now() - c.createdAt < 18 * 3600e3)); };
-const lateWord = c => c.status === "late" ? (c.mins ? `running ${c.mins} min late` : "running late") : c.status === "here" ? "here" : "on the way";
+const minsWord = n => n === 1 ? "1 min" : `${n} mins`;
+const lateWord = c => c.status === "late" ? (c.mins ? `running ${minsWord(c.mins)} late` : "running late") : c.status === "here" ? "here" : "on the way";
 // Home keeps one small listener on today's plan so Who's where stays current without opening the event.
 function ensureLiveSub(ev) {
   if (S._live && S._live.id === ev.id) return;
@@ -1977,7 +1979,7 @@ function liveCard(ev) {
   const where = evStops(ev).length ? evStops(ev)[0] : null, dir = where ? stopMapUrl(where) : ev.location && !/zoom|meet\.google|teams|http|online|call/i.test(ev.location) ? "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(ev.location) : "";
   const line = mine ? (mine.status === "here" ? "You're here 🎉" : `You're ${lateWord(mine)}. ${iHost ? "Your guests" : hostName} can see that.`) : iHost ? "Tap one and your guests will know." : `Tap one so ${hostName} isn't guessing.`;
   const row = (label, list, extra = "") => list.length ? `<div class="lv-row"><b>${label} (${list.length})</b><span class="hd-faces">${list.slice(0, 6).map(u => avatar(u, "xs")).join("")}${list.length > 6 ? `<span class="more">+${list.length - 6}</span>` : ""}</span>${extra}</div>` : "";
-  const lateNotes = way.filter(u => latest[u].status === "late").map(u => `${first(nameOf(u))} ${latest[u].mins ? latest[u].mins + " min" : "late"}`).join(" · ");
+  const lateNotes = way.filter(u => latest[u].status === "late").map(u => `${u === me ? "You're" : first(nameOf(u)) + " is"} running ${latest[u].mins ? minsWord(latest[u].mins) + " " : ""}late`).join(" · ");
   return `<div class="card lv-card" data-live="${esc(ev.id)}">
     <div class="lv-head"><span class="hd-chip dark">${phase === "now" ? "Now" : "Today"}${ev.time ? " · " + fmtTime(ev.time) : ""}</span><span class="muted sm">${when}</span><button type="button" class="today-x" data-hide-today="${esc(ev.id)}|${esc(ev.date)}" aria-label="Hide this">✕</button></div>
     <h2 class="lv-title" data-ev="${esc(ev.id)}">${ev.emoji ? esc(ev.emoji) + " " : ""}${esc(ev.title)}</h2>
@@ -1993,8 +1995,10 @@ async function postStatus(ev, status, current) {
     toast(st === "clear" ? "Status cleared" : st === "late" ? "Everyone can see you're running late" : st === "here" ? "You made it 🎉" : "Everyone can see you're on the way", null, null, st === "here" ? "coral:party" : undefined); };
   if (current === status) return post("clear");
   if (status !== "late") return post(status);
-  dialog(`<h3>Running late</h3><p class="muted" style="margin-top:-6px">About how long?</p><div class="chiprow" id="lateMins" style="flex-wrap:wrap;overflow:visible">${[10, 20, 30, 45].map(m => `<button type="button" class="fchip" data-lm="${m}">${m} min</button>`).join("")}<button type="button" class="fchip" data-lm="0">Not sure</button></div>`, null);
+  dialog(`<h3>Running late</h3><p class="muted" style="margin-top:-6px">About how long?</p><div class="chiprow" id="lateMins" style="flex-wrap:wrap;overflow:visible">${[10, 15, 20, 30, 45].map(m => `<button type="button" class="fchip" data-lm="${m}">${m} min</button>`).join("")}<button type="button" class="fchip" data-lm="0">Not sure</button></div>
+    <form class="late-custom" id="lateCustom"><input id="lateN" inputmode="numeric" pattern="[0-9]*" maxlength="3" placeholder="Or type minutes" aria-label="Minutes late"><button type="submit" class="btn small primary">Set</button></form>`, null);
   document.querySelectorAll("[data-lm]").forEach(b => b.onclick = async () => { closeDialog(); try { await post("late", +b.dataset.lm || 0); } catch (e) { toast(e.message); } });
+  el("lateCustom").onsubmit = async e => { e.preventDefault(); const n = parseInt(el("lateN").value, 10); if (!(n > 0 && n < 600)) return toast("Enter the minutes."); closeDialog(); try { await post("late", n); } catch (err) { toast(err.message); } };
 }
 function wireLive() {
   document.querySelectorAll("[data-lstatus]").forEach(b => b.onclick = async () => { const ev = S.events.get(b.dataset.lev); if (!ev) return; const cur = (liveLatest((S._live || {}).rows)[myUid()] || {}).status || ""; b.disabled = true; try { await postStatus(ev, b.dataset.lstatus, cur); } catch (e) { toast(e.message); } b.disabled = false; });
@@ -2161,6 +2165,7 @@ function crewsRow() {
 }
 function wireHomeDash() {
   wireBanners(); wireAsks(); wireLive(); wireDigest();
+  document.querySelectorAll("[data-mascot]").forEach(b => b.onclick = () => openMascot(b.dataset.mascot));
   document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
   document.querySelectorAll("[data-act]").forEach(a => a.onclick = e => { e.preventDefault(); location.hash = routeTail(a.dataset.act); });
   document.querySelectorAll("[data-hdmem]").forEach(im => im.onclick = () => { const [eid, pid] = im.dataset.hdmem.split("|"), ev = S.events.get(eid), p = (S.memories.get(eid) || []).find(x => x.id === pid); if (ev && p) openPhoto(ev, p); });
@@ -2366,7 +2371,7 @@ function groupPageBody(gid) {
   ${groupTab(g)}
   ${((g.invitedEmails || []).length || (g.invitedPhones || []).length) ? `<div class="section-head" style="margin-top:18px"><h2>Invited</h2></div>
     <div class="card">${(g.invitedEmails || []).map(e => `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">✉︎</span><div style="flex:1"><b class="mono sm">${esc(e)}</b><div class="muted sm">Hasn't joined yet</div></div>${host ? `<button class="btn ghost small" data-uninvite="${esc(e)}">✕</button>` : ""}</div>`).join("")}
-    ${(g.invitedPhones || []).map(p => { const nm = (g.invitedPhoneNames || {})[p]; return `<div class="member-row"><span class="avatar lg" style="background:#CBB;opacity:.6">💬</span><div style="flex:1;min-width:0"><b>${esc(nm || p)}</b><div class="muted sm">${nm ? esc(p) + " · " : ""}Hasn't joined yet</div></div>${host ? `<span class="btnrow" style="gap:6px"><button class="btn ghost small" data-textinvite="${esc(p)}">Text</button><button class="btn ghost small" data-uninvitephone="${esc(p)}">✕</button></span>` : ""}</div>`; }).join("")}</div>` : ""}
+    ${(g.invitedPhones || []).map(p => { const nm = (g.invitedPhoneNames || {})[p], au = (g.invitedPhoneUids || {})[p]; return `<div class="member-row">${au ? avatar(au, "lg") : `<span class="avatar lg" style="background:#CBB;opacity:.6">💬</span>`}<div style="flex:1;min-width:0"><b>${esc(nm || p)}</b><div class="muted sm">${au ? "On Friendly · invited, hasn't joined this group yet" : (nm ? esc(p) + " · " : "") + "Hasn't joined Friendly yet"}</div></div>${host ? `<span class="btnrow" style="gap:6px"><button class="btn ghost small" data-textinvite="${esc(p)}">Text</button><button class="btn ghost small" data-uninvitephone="${esc(p)}">✕</button></span>` : ""}</div>`; }).join("")}</div>` : ""}
   <div class="card th-plain" id="wall" style="margin-top:22px"><p class="muted">Loading…</p></div>
   <div class="card th-plain" id="pollsCard" style="margin-top:14px"><p class="muted">Loading…</p></div>
   <div class="btnrow" style="margin-top:20px">

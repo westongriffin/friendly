@@ -1310,6 +1310,7 @@ exports.onEventCreated = onDocumentCreated({ document: "events/{id}", ...MAIL },
     firstName(nm[ev.hostId]) + " invited you" + (kind === "meeting" ? " to a meeting" : ev.kind === "trip" ? " on a trip" : ""), (kind === "meeting" ? "📅 " : (ev.emoji || "🎉") + " ") + ev.title + (ev.kind === "trip" && ev.endDate ? ` · ${niceWhen(ev.date).replace(/ · .*$/, "")} to ${niceWhen(ev.endDate).replace(/ · .*$/, "")}` : ""),
     "/#/e/" + e.params.id + "?to=rsvpCard", { type: kind, actorId: ev.hostId });
   await Promise.all([sendInviteEmails(e.params.id, ev, "REQUEST"), writePreview(e.params.id, ev)]);
+  await resolveFreshPhoneInvites("event", e.params.id, e.data.ref, null, ev);
 });
 
 // Event deleted -> cancel the calendar entries, drop the preview.
@@ -1666,6 +1667,34 @@ async function dropRedundantPhoneInvites(ref, before, after, memberUids) {
 // phone row. Without this they stay a phone number on the event until they open the
 // link, so group pages (which need every member invited) and guest lists miss them.
 const phoneKeyOf = e164 => require("crypto").createHash("sha256").update("friendly:" + e164).digest().subarray(0, 12).toString("hex");
+// The host just added phone numbers. Any number that already belongs to an account becomes a real invite right away:
+// on an event the account joins invitedUids (RSVP card, alerts, guest list) and the phone row goes; on a group the
+// phone invite stays (that is how group invites work) but it carries the account's name and id so the Invited row
+// shows who it is, and the person gets an in-app alert instead of only a text.
+async function resolveFreshPhoneInvites(kind, id, ref, before, after) {
+  const fresh = (after.invitedPhones || []).filter(p => !((before && before.invitedPhones) || []).includes(p));
+  if (!fresh.length) return;
+  const inviterName = firstName(kind === "event" ? after.hostName : (((after.members || {})[after.ownerId] || {}).name)) || "A friend";
+  for (const p of fresh) {
+    const q = await db.collection("users").where("phoneE164", "==", p).get();
+    const acct = q.docs.find(d => d.get("onboarded") !== false) || q.docs[0]; if (!acct) continue;
+    const uid = acct.id, name = acct.get("name") || (after.invitedPhoneNames || {})[p] || "Friend";
+    if (kind === "event") {
+      if ((after.invitedUids || []).includes(uid)) continue;   // dropRedundantPhoneInvites clears these
+      const up = { invitedPhones: FieldValue.arrayRemove(p), ["invitedPhoneNames." + p]: FieldValue.delete(), ["phoneRsvps." + p]: FieldValue.delete(), invitedUids: FieldValue.arrayUnion(uid), ["names." + uid]: name, ["phoneKeys." + uid]: phoneKeyOf(p) };
+      const pre = (after.phoneRsvps || {})[p];
+      if (pre && pre.status && !(after.rsvps || {})[uid]) { up["rsvps." + uid] = pre.status; up["rsvpSetBy." + uid] = { by: pre.by || after.hostId, at: pre.at || Date.now() }; }
+      if (pre && Number(pre.plus) > 0) up["plusOnes." + uid] = Number(pre.plus);
+      await ref.update(up).catch(err => logger.warn("resolveFreshPhoneInvites event " + id + ": " + err.message));
+      await notify([uid], `${inviterName} invited you`, (after.emoji || "🎉") + " " + (after.title || "a plan"), "/#/e/" + id + "?to=rsvpCard", { type: after.kind === "meeting" ? "meeting" : "event", actorId: after.hostId });
+    } else {
+      if ((after.memberUids || []).includes(uid)) continue;
+      await ref.update({ ["invitedPhoneNames." + p]: name, ["invitedPhoneUids." + p]: uid }).catch(err => logger.warn("resolveFreshPhoneInvites group " + id + ": " + err.message));
+      await notify([uid], `${inviterName} invited you to ${after.name || "a group"}`, "Open Friendly to join.", "/#/", { type: "event", actorId: after.ownerId });
+    }
+    logger.info(`phone invite ${p} on ${kind} ${id} resolved to ${uid}`);
+  }
+}
 async function claimPhoneInvites(uid, phone, name) {
   let n = 0;
   const evs = await db.collection("events").where("invitedPhones", "array-contains", phone).get();
@@ -1967,10 +1996,12 @@ async function groupFriends(g, newcomers) {
 exports.onGroupCreated = onDocumentCreated({ document: "groups/{gid}" }, async e => {
   const g = e.data && e.data.data(); if (!g) return;
   await groupFriends(g, g.memberUids || []);
+  await resolveFreshPhoneInvites("group", e.params.gid, e.data.ref, null, g);
 });
 exports.onGroupUpdated = onDocumentUpdated({ document: "groups/{gid}" }, async e => {
   const before = e.data.before.data(), after = e.data.after.data();
   await dropRedundantPhoneInvites(e.data.after.ref, before, after, after.memberUids || []);
+  await resolveFreshPhoneInvites("group", e.params.gid, e.data.after.ref, before, after);
   const joined = (after.memberUids || []).filter(u => !(before.memberUids || []).includes(u));
   if (joined.length) await groupFriends(after, joined);
   const left = (before.memberUids || []).filter(u => !(after.memberUids || []).includes(u));
@@ -2026,6 +2057,7 @@ exports.onRsvp = onDocumentUpdated({ document: "events/{id}", ...MAIL }, async e
       await notify([changed], "You're in! " + after.title, b[changed] === "waitlist" ? "A spot opened up and it's yours." : "The host approved you.", "/#/e/" + id + "?to=rsvpCard", { type: "rsvp" });
   }
   await dropRedundantPhoneInvites(e.data.after.ref, before, after, after.invitedUids || []);
+  await resolveFreshPhoneInvites("event", e.params.id, e.data.after.ref, before, after);
   const added = (after.invitedUids || []).filter(u => !(before.invitedUids || []).includes(u));
   // Someone joined through a shared link (not added by the host, not a group
   // member added automatically): tell the host and co-hosts, since nothing else would.
