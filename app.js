@@ -5999,6 +5999,9 @@ function wireReports() {
 function wireProfile() {
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
   attachPlaces(el("pCity"), { cities: true });
+  // Unsaved edits turn the Save button sun-colored ("Save changes") until it's pressed; a save turns it coral again.
+  const markPending = () => { const b = el("saveProfile"); if (b && !b.classList.contains("pending")) { b.classList.add("pending"); b.textContent = "Save changes"; } };
+  ["pName", "pEmail", "pVenmo", "pPhone", "pZelle", "pCashapp", "pPayPref", "pBday", "pCity"].forEach(id => { const f = el(id); if (!f) return; f.addEventListener("input", markPending); f.addEventListener("change", markPending); });
   if (el("saveProfile")) el("saveProfile").onclick = async () => {
     const name = el("pName").value.trim(); if (!name) return toast("Name can't be empty.");
     const venmo = el("pVenmo").value.trim(), phone = el("pPhone") ? el("pPhone").value.trim() : (S.profile.phone || ""), zelle = ((el("pZelle") || {}).value || "").trim(), cashapp = ((el("pCashapp") || {}).value || "").trim(), payPref = (el("pPayPref") || {}).value || "";
@@ -6009,6 +6012,7 @@ function wireProfile() {
       const email = (el("pEmail") || {}).value || ""; if (email && !email.includes("@")) return toast("That email doesn't look right.");
       const city = el("pCity") ? await pickedCity(el("pCity"), true) : (S.profile.city || ""); if (city === null) return;
       await updateDoc(doc(db, "users", myUid()), { name, venmo, phone, zelle, cashapp, payPref, city, cityGuess: deleteField(), phoneE164: toE164(phone) || myPhoneE164(), birthday, email: email.trim().toLowerCase() });
+      { const b = el("saveProfile"); if (b) { b.classList.remove("pending"); b.textContent = "Saved ✓"; setTimeout(() => { if (b.isConnected && !b.classList.contains("pending")) b.textContent = "Save profile"; }, 1800); } }
       if (city) registerCity(city);
       // propagate name/contact into each group's denormalized members map
       for (const g of S.groups.values()) if ((g.memberUids || []).includes(myUid())) await updateDoc(doc(db, "groups", g.id), { [`members.${myUid()}`]: { name, venmo, phone, os: myOs(), zelle, cashapp, payPref, photo: myPhotoSm(), birthday } }).catch(() => {});
