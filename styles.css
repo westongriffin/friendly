@@ -300,8 +300,8 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .ev-title{font-family:var(--th-font);font-weight:700;font-size:clamp(30px,8vw,46px);line-height:1.02;margin:10px 0 8px;color:var(--th-ink)}
 .ev-when{font-weight:600;font-size:1rem}
 .ev-where{margin-top:3px;opacity:.9}
-.ev-hosts{margin-top:8px;font-size:0.8438rem;color:var(--th-sub)}
-.grp-tag{background:var(--th-chip);padding:2px 9px;border-radius:999px;font-weight:600}
+.ev-hosts{margin-top:8px;font-size:0.8438rem;color:var(--th-sub);display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap}.ev-hosts-names{white-space:nowrap}
+.grp-tag{background:var(--th-chip);padding:2px 9px;border-radius:999px;font-weight:600;white-space:nowrap;display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
 .ev-cap{display:inline-block;margin-top:10px;font-weight:700;font-size:0.8125rem;background:var(--th-chip);padding:4px 12px;border-radius:999px}
 .ev-cap.full{color:#fff;background:var(--bad)}
 .hype-bar{display:flex;gap:7px;justify-content:center;margin-top:14px;flex-wrap:wrap}
@@ -1366,7 +1366,7 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 .fs-pair .fsp-l,.fs-pair .fsp-r,.fs-pair .coral-pop{pointer-events:auto}
 
 /* Home: the dashboard */
-.hd-greet{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:4px 0 14px}.hd-greet h1{font-size:1.625rem;margin:0 0 2px}.hd-greet .blip{flex:none}
+.hd-greet{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:4px 0 14px}.hd-greet h1{font-size:clamp(1.3rem,6.2vw,1.625rem);margin:0 0 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.hd-greet>div:first-child{flex:1;min-width:0}.hd-greet .blip{flex:none}
 .hd-hero{position:relative;display:flex;flex-direction:column;justify-content:space-between;min-height:236px;border-radius:20px;overflow:hidden;color:var(--th-ink,#fff);box-shadow:var(--shadow-lg);isolation:isolate;margin:0 0 14px;cursor:pointer}
 .hd-hero .ev-card-bg,.hd-hero .cover-img{position:absolute;inset:0;z-index:-1}.hd-hero .cover-img{width:100%;height:100%;object-fit:cover}
 .hd-hero.has-cover{color:#fff}.hd-hero.has-cover::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.05),rgba(0,0,0,.6) 70%);z-index:-1}
@@ -1500,7 +1500,7 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 
 /* Greeting: the plans count stands out; Dot and Coral side by side and tappable */
 .hd-plans{color:#B4412F;font-weight:700;text-decoration:none}
-.hd-mascots{position:relative;display:flex;align-items:flex-end;gap:14px;flex:none;margin:8px 2px 0 0;padding-top:10px;border-radius:18px}.hd-mascot{position:relative;border:0;background:none;padding:0;cursor:pointer;line-height:0;transform-origin:50% 90%}.hd-mascot:active .hd-m-wrap{transform:scale(.92)}.hd-m-wrap{display:block;line-height:0;transition:transform .15s ease}
+.hd-mascots{position:relative;display:flex;align-items:flex-end;gap:0;flex:none;margin:6px 0 0 0;padding:12px 2px 22px 0;border-radius:18px}.hd-mascot.m-coral{margin-left:-14px;margin-bottom:-4px;z-index:1}.hd-mascot{position:relative;border:0;background:none;padding:0;cursor:pointer;line-height:0;transform-origin:50% 90%}.hd-mascot:active .hd-m-wrap{transform:scale(.92)}.hd-m-wrap{display:block;line-height:0;transition:transform .15s ease}
 .hd-greet{align-items:center}
 /* Running late: a typed number */
 .late-custom{display:flex;gap:8px;margin-top:10px}.late-custom input{flex:1;min-width:0;border:1px solid var(--line);border-radius:12px;padding:9px 12px;font:inherit;background:var(--surface)}
@@ -1534,3 +1534,14 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 /* Maybe and declined tiles */
 .ev-card.maybe{opacity:.62;filter:saturate(.75)}.ev-card.declined{opacity:.5;filter:saturate(.4)}
 @media (prefers-reduced-motion: reduce){.hd-mascot,.hd-mascot *{animation:none!important}}
+
+.m-dot .blip.idle .body{animation-duration:3.6s}.m-dot .blip.idle .eye{animation-duration:5.1s}
+.m-coral .blip.idle .body{animation-duration:2.2s;animation-delay:-1.1s}.m-coral .blip.idle .eye{animation-duration:3.3s;animation-delay:-2s}
+/* speech bubbles under the mascots */
+.hd-say{position:absolute;top:calc(100% + 2px);left:50%;transform:translateX(-50%);background:var(--ink);color:#FFFEFC;font-size:.62rem;font-weight:700;line-height:1.2;padding:3px 8px;border-radius:999px;white-space:nowrap;pointer-events:none;z-index:3;animation:say-pop .2s ease-out both}
+.hd-say::before{content:"";position:absolute;left:50%;top:-4px;margin-left:-4px;border:4px solid transparent;border-bottom-color:var(--ink);border-top:0}
+.m-coral .hd-say{background:#FF6B57;color:#fff}.m-coral .hd-say::before{border-bottom-color:#FF6B57}
+@keyframes say-pop{0%{opacity:0;transform:translateX(-50%) translateY(4px) scale(.8)}100%{opacity:1;transform:translateX(-50%) translateY(0) scale(1)}}
+.hd-prop{left:50%;margin-left:-8px}
+/* Morning-after card: ✕ never over the text, tight rows */
+.lv-after-h{padding-right:40px;align-items:center}.lv-after-h .blip{width:40px;height:40px}.lv-after-btns{margin-top:10px}
