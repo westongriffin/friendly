@@ -46,6 +46,8 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <!-- Voice messages in Messages (asked for only when you tap the mic) -->
     <!-- A microphone is optional: phones, tablets, and TVs without one still install the app (voice messages just hide). -->

@@ -26,6 +26,8 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Friendly uses your location only when you tap Near me, to find nights out close by. It is never stored or shared.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Friendly lets you take photos for your event covers and party photo wall.</string>
 	<key>NSContactsUsageDescription</key>

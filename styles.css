@@ -1573,3 +1573,7 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 /* Editor: room between the current cover and the replace controls under it */
 #coverPanel .cover-preview-img{margin-bottom:16px}
 #coverPanel .cover-preview-img+.cover-drop,#coverPanel .cover-preview-img+.ai-row,#coverPanel .cover-preview-img+.emoji-pick{margin-top:0}
+
+/* Curate: Near me */
+.cur-loc .near-me{padding:6px 10px;min-height:32px;font-size:.78rem;background:var(--surface2);border:1px solid var(--line);border-radius:999px;color:var(--ink)}
+.app-dialog .near-me{display:inline-flex}

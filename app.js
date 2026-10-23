@@ -3055,14 +3055,39 @@ async function saveCity(city, milesIn) {
   const miles = CURATE_MILES.includes(Number(milesIn)) ? Number(milesIn) : myMiles();
   try { await updateDoc(doc(db, "users", myUid()), miles === myMiles() ? { city, cityGuess: deleteField() } : { city, cityGuess: deleteField(), curateMiles: miles }); registerCity(city, miles); toast("Looking around " + city + "…", null, null, "thinking"); } catch (e) { toast(e.message); }
 }
+// Near me: the phone's location, turned into "City, ST" with Google's geocoder, then saved like a typed city.
+// Nothing about the location is kept; only the city name is.
+async function nearMe(btn) {
+  if (!navigator.geolocation) return toast("This device can't share its location. Type your city instead.");
+  const label = btn && btn.textContent; if (btn) { btn.disabled = true; btn.textContent = "Finding you…"; }
+  const done = () => { if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = label; } };
+  try {
+    const pos = await new Promise((ok, no) => navigator.geolocation.getCurrentPosition(ok, no, { timeout: 12000, maximumAge: 300000 }));
+    const { latitude: lat, longitude: lng } = pos.coords;
+    // The same Places key the city search uses: the nearest "locality" to the point is the city.
+    const r = await fetch("https://places.googleapis.com/v1/places:searchNearby", { method: "POST", headers: { "Content-Type": "application/json", "X-Goog-Api-Key": mapsKey, "X-Goog-FieldMask": "places.displayName,places.addressComponents" },
+      body: JSON.stringify({ includedTypes: ["locality"], maxResultCount: 1, rankPreference: "DISTANCE", locationRestriction: { circle: { center: { latitude: lat, longitude: lng }, radius: 20000 } } }) });
+    if (!r.ok) throw new Error("Couldn't look up that spot (" + r.status + "). Type your city instead.");
+    const place = ((await r.json()).places || [])[0] || {};
+    const town = (place.displayName || {}).text, st = ((place.addressComponents || []).find(c => (c.types || []).includes("administrative_area_level_1")) || {}).shortText;
+    if (!town) throw new Error("Couldn't tell which city that is. Type it instead.");
+    const city = st ? `${town}, ${st}` : town; S._nearMeCity = city;
+    done(); closeDialog(); await saveCity(city);
+  } catch (e) {
+    done();
+    const code = e && e.code; // 1 = permission denied, 2 = unavailable, 3 = timeout
+    toast(code === 1 ? (NATIVE ? "Location is off for Friendly. Allow it in Settings › Friendly › Location, or type your city." : "Location is blocked for this site. Allow it in your browser, or type your city.") : code === 3 ? "Couldn't get a location fix. Try again outside, or type your city." : e.message || "Couldn't get your location. Type your city instead.");
+  }
+}
 function openCityDialog() {
-  dialog(`<h3>Where are you?</h3><label class="field"><span>City</span><input id="cityIn" value="${esc(S.profile.city || "")}" placeholder="Start typing a city" maxlength="60" autocomplete="off"></label><p class="muted sm">Pick your city from the list. Used only to find things nearby. No location tracking.</p>`, "Save", async () => { const city = await pickedCity(el("cityIn")); if (city) { closeDialog(); saveCity(city); } });
+  dialog(`<h3>Where are you?</h3><button type="button" class="btn small near-me" id="nearMeDlg">📍 Use my location</button><p class="muted sm" style="margin:6px 0 10px">or</p><label class="field"><span>City</span><input id="cityIn" value="${esc(S.profile.city || "")}" placeholder="Start typing a city" maxlength="60" autocomplete="off"></label><p class="muted sm">Pick your city from the list. Used only to find things nearby. No location tracking.</p>`, "Save", async () => { const city = await pickedCity(el("cityIn")); if (city) { closeDialog(); saveCity(city); } });
   attachPlaces(el("cityIn"), { cities: true });
+  el("nearMeDlg").onclick = () => nearMe(el("nearMeDlg"));
 }
 function curateBody() {
   const city = (S.profile.city || "").trim();
   if (!city) return `<div class="section-head"><h2>${CURATE_LABEL}</h2></div>
-    <div class="card empty">${dot("thinking", 72)}<b>Where are you?</b><p class="muted">Tell me your city and I'll find a few good nights out nearby, each with a place to eat and the timing worked out.</p><div class="btnrow" style="justify-content:center;gap:8px;flex-wrap:wrap"><div class="city-wrap"><input id="curCity" class="city-in" placeholder="Start typing a city" maxlength="60" autocomplete="off"></div>${milesSelect("curMiles0")}<button type="button" class="btn primary" id="curCitySave">Look around</button></div><p class="muted sm" style="margin-top:8px">No location tracking, just the city.</p></div>`;
+    <div class="card empty">${dot("thinking", 72)}<b>Where are you?</b><p class="muted">Tell me your city and I'll find a few good nights out nearby, each with a place to eat and the timing worked out.</p><div class="btnrow" style="justify-content:center;gap:8px;flex-wrap:wrap"><button type="button" class="btn small near-me" id="nearMeEmpty">📍 Use my location</button><span class="muted sm">or</span><div class="city-wrap"><input id="curCity" class="city-in" placeholder="Start typing a city" maxlength="60" autocomplete="off"></div>${milesSelect("curMiles0")}<button type="button" class="btn primary" id="curCitySave">Look around</button></div><p class="muted sm" style="margin-top:8px">Location is used once, to name the city. Nothing is tracked.</p></div>`;
   ensureCurated();
   // Nights that already started more than an hour ago drop off (a link straight to one still opens it).
   const d = S.curated, nights = upcomingNights();
@@ -3081,7 +3106,7 @@ function curateBody() {
   if (d) markCuratedSeen();
   const phaseText = { starting: "Warming up", searching: "Searching what's on and pairing places to eat", sorting: "Sorting the good ones" }[S._curPhase] || "Looking around";
   const lead = !d && !S._curError ? `Give me a minute. ${phaseText} within ${myMiles()} miles of ${city}…` : S._curError ? "I couldn't look around just now (" + S._curError + "). Try again in a bit." : shown.length ? (filtered.length ? CURATE_LEADS[curFilter] : "Nothing tagged for that yet, so here's everything I found.") : "Nothing yet. Build your own and I'll go looking.";
-  return `<div class="section-head cur-head"><h2>${CURATE_LABEL}</h2><span class="cur-loc"><button type="button" class="cur-loc-city" id="curCityBtn" aria-label="Change city">📍 <span>${esc(city)}</span></button>${milesSelect("curMiles")}</span></div>${S.profile.cityGuess ? `<p class="muted sm cur-guess">Dot guessed your city from your phone number. Tap 📍 to change it.</p>` : ""}
+  return `<div class="section-head cur-head"><h2>${CURATE_LABEL}</h2><span class="cur-loc"><button type="button" class="cur-loc-city" id="curCityBtn" aria-label="Change city">📍 <span>${esc(city)}</span></button><button type="button" class="btn small near-me" id="nearMeBtn" aria-label="Use my location">Near me</button>${milesSelect("curMiles")}</span></div>${S.profile.cityGuess ? `<p class="muted sm cur-guess">Dot guessed your city from your phone number. Tap 📍 to change it.</p>` : ""}
   <div class="dot-say cur-dot ${curFilter === "late" ? "coral-say" : ""}">${curFilter === "late" && d ? coral("party", 48) : dot(d ? "happy" : "thinking", 48)}<div class="say-bubble">${curFilter === "late" && d ? "Coral's picks. The night doesn't have to end at 10. Tap one and Dot will set it up." : esc(lead)}<div class="cur-acts"><button type="button" class="btn small primary" id="curBuild">✨ Build me a night</button><button type="button" class="btn small" id="curBrowse">🔎 Browse ideas</button></div></div></div>
   <div class="chiprow">${CURATE_FILTERS.map(([k, l]) => `<button type="button" class="fchip ${curFilter === k ? "on" : ""}" data-cf="${k}">${l}</button>`).join("")}</div>
   ${!d && !S._curError ? `<div class="card empty compact">${dot("thinking", 64)}<p class="muted" style="margin:6px 0 0">Searching what's on, pairing dinners, checking the times. About half a minute the first time.</p></div>` : ""}
@@ -3157,6 +3182,8 @@ function wireCurate() {
   if (el("curCitySave")) el("curCitySave").onclick = firstSave;
   if (el("curCity")) { attachPlaces(el("curCity"), { cities: true }); el("curCity").onkeydown = e => { if (e.key === "Enter") firstSave(); }; }
   if (el("curCityBtn")) el("curCityBtn").onclick = openCityDialog;
+  if (el("nearMeBtn")) el("nearMeBtn").onclick = () => nearMe(el("nearMeBtn"));
+  if (el("nearMeEmpty")) el("nearMeEmpty").onclick = () => nearMe(el("nearMeEmpty"));
   if (el("curMiles")) el("curMiles").onchange = e => { S._curMore = null; saveMiles(e.target.value); };
   if (el("curBuild")) el("curBuild").onclick = () => openNightBuilder();
   if (el("curRetry")) el("curRetry").onclick = () => { S._curError = ""; curKey = ""; if (curSub) { curSub(); curSub = null; } render(); };
