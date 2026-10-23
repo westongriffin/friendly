@@ -1559,3 +1559,9 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 .uf-ask-chips .fchip[data-whenask]{background:#FFF1CC;border-color:#E7B64A;color:#8A5A00}
 /* Activity: mascots get a bigger, plain slot */
 .li:has(.blip){width:42px;height:42px;background:none;border-radius:0}
+
+/* Mascots in rows: each on its own clock, some tilted, some waving */
+.blip-var{display:block;line-height:0;transform:rotate(var(--tilt,0deg))}
+.blip-var .blip.idle .body{animation-duration:var(--idle-dur,2.8s);animation-delay:var(--idle-delay,0s)}
+.blip-var .blip.idle .eye{animation-delay:var(--idle-delay,0s)}
+.li .blip-var .blip{width:38px;height:38px}
