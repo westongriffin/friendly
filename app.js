@@ -2993,6 +2993,17 @@ function rememberBuilt(nights) {
   try { const keep = [...nights.map(n => ({ ...n, _at: Date.now() })), ...builtStore()].filter(n => Date.now() - (n._at || 0) < 14 * 864e5 && (!n.date || n.date >= todayStr())).slice(0, 30); LS.set("friendlyBuilt", JSON.stringify(keep)); } catch {}
 }
 const savedIdeas = () => { try { return JSON.parse(LS.get("friendlyIdeas") || "[]"); } catch { return []; } };
+// Built nights as a list you can tap into: compact rows first; tapping one shows the full card with a way back.
+// `state.open` is the index of the night being viewed (null = the list).
+function nightListHtml(nights, pre, state) {
+  if (state.open != null && nights[state.open]) return `<p class="muted sm nb-crumb"><a class="nb-backlist" data-nback="${pre}">‹ Back to the list</a> · ${state.open + 1} of ${nights.length}</p>${nightCardHtml(nights[state.open], pre + state.open)}`;
+  return `<div class="nb-list">${nights.map((n, i) => { const m = mergeNightStops(n), eat = m.stops.find(x => x.kind === "eat"), first = m.stops[0] || {}; return `<button type="button" class="nb-row" data-nopen="${pre}|${i}"><span class="nb-em">${esc(n.emojis || n.emoji || "🌆")}</span><span class="nb-mid"><b>${esc(n.title)}</b><small>${esc(nightWhen(n))}${first.name ? " · " + esc(first.name) : ""}${eat && eat !== first ? " · " + esc(eat.name) : ""}</small><small class="muted">${esc([n.cost, n.size].filter(Boolean).join(" · "))}</small></span><span class="chev">›</span></button>`; }).join("")}</div>`;
+}
+function wireNightList(root, nights, pre, state, repaint) {
+  root.querySelectorAll(`[data-nopen^="${pre}|"]`).forEach(b => b.onclick = () => { state.open = +b.dataset.nopen.split("|")[1]; repaint(); });
+  root.querySelectorAll(`[data-nback="${pre}"]`).forEach(a => a.onclick = () => { state.open = null; repaint(); });
+  wireNightCards(root);
+}
 function nightCardHtml(n, id) {
   n = mergeNightStops(n);
   S._nightById = S._nightById || {}; S._nightById[id] = n;
@@ -3113,7 +3124,7 @@ function curateBody() {
   ${S._curError ? `<div style="text-align:center;margin-bottom:12px"><button type="button" class="btn" id="curRetry">Try again</button></div>` : ""}
   <div id="nights">${shown.map((n, i) => nightCardHtml(n, "c" + i)).join("")}</div>
   ${extra > 0 ? `<div style="text-align:center;margin:4px 0 12px"><button type="button" class="btn" id="curMore">More ideas (${extra})</button></div>` : ""}
-  ${(() => { const b = builtStore().filter(n => !n.date || n.date >= todayStr()); return b.length ? `<details class="adv built-nights" ${S._builtOpen ? "open" : ""} id="builtNights"><summary>🗂️ Your built nights (${b.length})</summary>${b.map((n, i) => nightCardHtml(n, "s" + i)).join("")}<div style="text-align:right"><button type="button" class="btn ghost small" id="clearBuilt">Clear</button></div></details>` : ""; })()}
+  ${(() => { const b = builtStore().filter(n => !n.date || n.date >= todayStr()); S._recentState = S._recentState || { open: null }; return b.length ? `<details class="adv built-nights" ${S._builtOpen ? "open" : ""} id="builtNights"><summary>🕘 Recent builds (${b.length})</summary><div id="recentList">${nightListHtml(b, "s", S._recentState)}</div><div style="text-align:right"><button type="button" class="btn ghost small" id="clearBuilt">Clear</button></div></details>` : ""; })()}
   ${(() => { const ideas = savedIdeas(); return ideas.length ? `<details class="adv built-nights" ${S._ideasOpen ? "open" : ""} id="savedIdeas"><summary>⭐ Saved ideas (${ideas.length})</summary>${ideas.map((x, i) => ideaCardHtml(x, "v" + i, true)).join("")}</details>` : ""; })()}
   ${d ? `<p class="muted sm" style="margin:6px 4px 0">Found by Dot with web search and refreshed nightly. Double-check times before you go; things change.</p>` : ""}`;
 }
@@ -3174,7 +3185,7 @@ function openIdeasBrowser() {
 }
 function wireCurate() {
   if (el("curBrowse")) el("curBrowse").onclick = openIdeasBrowser;
-  if (el("builtNights")) { wireNightCards(el("builtNights")); el("builtNights").ontoggle = e => { S._builtOpen = e.target.open; }; }
+  if (el("builtNights")) { const b = builtStore().filter(n => !n.date || n.date >= todayStr()); const repaint = () => { const box = el("recentList"); if (!box) return; box.innerHTML = nightListHtml(b, "s", S._recentState); wireNightList(box, b, "s", S._recentState, repaint); }; wireNightList(el("builtNights"), b, "s", S._recentState, repaint); el("builtNights").ontoggle = e => { S._builtOpen = e.target.open; }; }
   if (el("savedIdeas")) { wireIdeaCards(el("savedIdeas")); el("savedIdeas").ontoggle = e => { S._ideasOpen = e.target.open; }; }
   if (el("clearBuilt")) el("clearBuilt").onclick = () => { try { LS.remove("friendlyBuilt"); } catch {} render(); };
   const firstMiles = () => (el("curMiles0") || {}).value;
@@ -3281,15 +3292,15 @@ function openNightBuilder() {
   };
   // Every batch stays: "Try another three" adds three more under the ones you already have, and they're all
   // kept under "Your built nights" on the Curate page so you can come back to them.
-  const built = []; const baseFree = B.free;
+  const built = [], nbState = { open: null }; const baseFree = B.free;
   const paintBuilt = loading => {
     const box = el("nb"); if (!box) return;
     box.innerHTML = `<div class="dot-say">${dot(loading ? "painter" : "happy", 52)}<div class="say-bubble">${loading ? (built.length ? "Three more coming up, different from these…" : "On it. Searching what's on, pairing a place to eat, checking the times. Give me half a minute.") : `${built.length} ways to do it. Pick one and I'll set it up, or poll the group.`}</div></div>
-      ${built.length ? `<div class="btnrow" style="gap:6px;margin:0 0 10px;flex-wrap:wrap"><button type="button" class="btn primary small" id="nbPollAll">Poll the group with ${built.length <= 3 ? "all three" : "the newest three"}</button></div>` : `<p class="muted sm">${esc(crumbs())}</p>`}
-      ${built.map((n, i) => nightCardHtml(n, "b" + i)).join("")}
+      ${built.length && nbState.open == null ? `<div class="btnrow" style="gap:6px;margin:0 0 10px;flex-wrap:wrap"><button type="button" class="btn primary small" id="nbPollAll">Poll the group with ${built.length <= 3 ? "all three" : "the newest three"}</button></div>` : built.length ? "" : `<p class="muted sm">${esc(crumbs())}</p>`}
+      ${built.length ? nightListHtml(built, "b", nbState) : ""}
       ${loading && built.length ? `<div class="card empty compact">${dot("painter", 56)}<p class="muted" style="margin:6px 0 0">Finding three more…</p></div>` : ""}
-      ${!loading && built.length ? `<div style="text-align:center;margin:8px 0"><button type="button" class="btn" id="nbAgain">＋ Try another three</button></div>` : ""}`;
-    wireNightCards(box);
+      ${!loading && built.length && nbState.open == null ? `<div style="text-align:center;margin:8px 0"><button type="button" class="btn" id="nbAgain">＋ Try another three</button></div><p class="muted sm" style="text-align:center;margin:4px 0 0">These stay under Recent builds on Curate for two weeks.</p>` : ""}`;
+    wireNightList(box, built, "b", nbState, () => paintBuilt(false));
     if (el("nbPollAll")) el("nbPollAll").onclick = () => pollNights(built.slice(-3));
     if (el("nbAgain")) el("nbAgain").onclick = () => run();
   };
@@ -3302,8 +3313,8 @@ function openNightBuilder() {
     try {
       const res = await requestViaFirestore("planRequests", { mode: "night", city, miles: myMiles(), vibe: B.vibe, who: B.who, budget: B.budget, free, from, to, ...nowCtx() }, 290000);
       const nights = (res.data && res.data.nights) || []; if (!nights.length) throw new Error("nothing found");
-      const first0 = built.length; built.push(...nights); rememberBuilt(nights); paintBuilt(false);
-      if (first0) { const c = el("nb").querySelectorAll(".card.night")[first0]; if (c) c.scrollIntoView({ block: "start" }); }
+      const first0 = built.length; built.push(...nights); rememberBuilt(nights); nbState.open = null; S._builtOpen = true; paintBuilt(false);
+      if (first0) { const c = el("nb").querySelectorAll(".nb-row")[first0]; if (c) c.scrollIntoView({ block: "start" }); }
     } catch (e) {
       if (built.length) { paintBuilt(false); toast("Couldn't find three more: " + e.message); return; }
       const box = el("nb"); if (!box) return;
