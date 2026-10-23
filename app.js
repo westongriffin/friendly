@@ -1806,11 +1806,12 @@ const declinedByMe = ev => (ev.rsvps || {})[myUid()] === "no";
 function homeBody() {
   const me = myUid(), t = todayStr();
   const evs = [...myEvents(), ...unjoinedEvents()].filter(e => !declinedByMe(e));
-  const upcoming = evs.filter(e => e.date >= t).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
+  const ended = e => liveWindow(e).phase === "after", isLive = e => ["soon", "now"].includes(liveWindow(e).phase);
+  const upcoming = evs.filter(e => e.date >= t && !ended(e)).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
   let hiddenToday = []; try { hiddenToday = JSON.parse(LS.get("friendlyTodayHidden") || "[]"); } catch {}
   const todayEvs = upcoming.filter(e => e.date === t && !hiddenToday.includes(e.id + "|" + e.date)).slice(0, 2);
-  const todayHero = todayEvs.find(e => !liveWindow(e).phase) || null;
-  const todayCards = todayEvs.filter(e => e !== todayHero).map(e => liveWindow(e).phase ? liveCard(e) : `<div class="card notif-card today-card" data-ev="${e.id}" role="button"><button type="button" class="today-x" data-hide-today="${e.id}|${e.date}" aria-label="Hide this">✕</button>${dotHat(56)}<div style="flex:1;min-width:0"><div class="eyebrow-sm">Today</div><b>${esc(e.title)}${e.time ? " · " + fmtTime(e.time) : ""}</b><div class="muted sm">${e.kind === "meeting" ? (e.invitedUids || []).filter(u => (e.rsvps || {})[u] === "going").length + " accepted" : goingCount(e) + " going"}${evStops(e).length ? " · " + evStops(e).length + " stops" : e.location ? " · " + esc(placeName(e.location)) : ""}</div></div><span class="chev">›</span></div>`).join("");
+  const todayHero = todayEvs.find(e => !isLive(e)) || null;
+  const todayCards = todayEvs.filter(e => e !== todayHero).map(e => isLive(e) ? liveCard(e) : `<div class="card notif-card today-card" data-ev="${e.id}" role="button"><button type="button" class="today-x" data-hide-today="${e.id}|${e.date}" aria-label="Hide this">✕</button>${dotHat(56)}<div style="flex:1;min-width:0"><div class="eyebrow-sm">Today</div><b>${esc(e.title)}${e.time ? " · " + fmtTime(e.time) : ""}</b><div class="muted sm">${e.kind === "meeting" ? (e.invitedUids || []).filter(u => (e.rsvps || {})[u] === "going").length + " accepted" : goingCount(e) + " going"}${evStops(e).length ? " · " + evStops(e).length + " stops" : e.location ? " · " + esc(placeName(e.location)) : ""}</div></div><span class="chev">›</span></div>`).join("");
   if ((S.profile.city || "").trim()) ensureCurated();
   const mine = upcoming.filter(e => !e._unjoined), weekEnd = addDays(t, (7 - new Date().getDay()) % 7);
   const hero = todayHero || mine.find(e => !todayEvs.includes(e) && !hiddenToday.includes(e.id + "|" + e.date)) || null;
