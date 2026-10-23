@@ -1562,6 +1562,7 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 
 /* Mascots in rows: each on its own clock, some tilted, some waving */
 .blip-var{display:block;line-height:0;transform:rotate(var(--tilt,0deg))}
+.blip-var .blip.idle{animation-duration:var(--hop-dur,2.2s);animation-delay:var(--idle-delay,0s)}
 .blip-var .blip.idle .body{animation-duration:var(--idle-dur,2.8s);animation-delay:var(--idle-delay,0s)}
 .blip-var .blip.idle .eye{animation-delay:var(--idle-delay,0s)}
 .li .blip-var .blip{width:38px;height:38px}

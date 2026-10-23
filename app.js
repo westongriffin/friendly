@@ -6828,8 +6828,25 @@ const unreadCount = () => (S.activity || []).filter(a => a.createdAt > seenAt() 
 const newCountFor = urlTail => (S.activity || []).filter(a => a.createdAt > seenAt() && !isPeeked(a) && tailOf(a.url) === urlTail).length;
 const isNewEvent = ev => (S.activity || []).some(a => a.createdAt > seenAt() && !isPeeked(a) && tailOf(a.url) === "#/e/" + ev.id);
 const MASCOT_VARIANTS = [{ mood: "party" }, { mood: "happy", wave: true }, { mood: "happy", tilt: -7 }, { mood: "party", tilt: 6 }, { mood: "happy" }, { mood: "party", wave: true, tilt: -5 }];
-const rowMascot = (coralIt, i, mood) => { const v = MASCOT_VARIANTS[i % MASCOT_VARIANTS.length]; const m = mood || v.mood; return `<span class="blip-var" style="--idle-dur:${(2.4 + (i % 4) * 0.45).toFixed(2)}s;--idle-delay:-${((i * 0.7) % 2.8).toFixed(2)}s;--tilt:${v.tilt || 0}deg">${window.Blip ? window.Blip.svg({ mood: m, size: 40, coral: coralIt, wave: !!v.wave }) : ""}</span>`; };
-const actIcon = (a, i = 0) => a.type === "digest" ? rowMascot(false, i, "happy") : /wants to be friends|wanted to be friends|friends now|accepted your friend/.test(a.title) ? "👋" : a.sid || /paid you|as paid/.test(a.title) || a.type === "photo" ? rowMascot(true, i, a.type === "photo" ? "happy" : undefined) : /pick your items|picked their items/.test(a.title) ? "🧾" : /joined via your link/.test(a.title) ? "🔗" : /waiting on your RSVP/.test(a.title) ? "📣" : /mentioned you/.test(a.title) ? "＠" : /to a meeting/.test(a.title) ? "📅" : /You're in!/.test(a.title) ? "🎟️" : /still owe/.test(a.title) ? "💸" : /invited you/.test(a.title) ? "🎟️" : /^Today:/.test(a.title) ? "⏰" : /reported/i.test(a.title) ? "⚑" : /is going|might come|can't make|joined the waitlist|requested/.test(a.title) ? "✅" : "💬";
+const rowMascot = (coralIt, i, mood) => { const v = MASCOT_VARIANTS[i % MASCOT_VARIANTS.length]; const m = mood || v.mood; return `<span class="blip-var" style="--idle-dur:${(2.4 + (i % 4) * 0.45).toFixed(2)}s;--hop-dur:${(1.8 + ((i * 7) % 5) * 0.35).toFixed(2)}s;--idle-delay:-${((i * 0.7) % 2.8).toFixed(2)}s;--tilt:${v.tilt || 0}deg">${window.Blip ? window.Blip.svg({ mood: m, size: 40, coral: coralIt, wave: !!v.wave }) : ""}</span>`; };
+// Every alert row is Dot or Coral, never the same one twice in a row: Coral for the social, celebratory ones
+// (money landing, photos, reactions, yeses, friends), Dot for the planning ones (invites, reminders, changes, requests).
+function actIcon(a, i = 0) {
+  const t = a.title || "", ty = a.type || "";
+  let coralIt = false, mood;
+  if (ty === "digest") mood = "happy";
+  else if (a.sid || /paid you|as paid/.test(t)) { coralIt = true; mood = "party"; }
+  else if (ty === "photo" || /photos?\b/.test(t)) { coralIt = true; mood = "happy"; }
+  else if (/wants to be friends|friends now|accepted your friend/.test(t)) { coralIt = true; mood = "happy"; }
+  else if (/wanted to be friends/.test(t)) { mood = "thinking"; }
+  else if (/is going|You're in!|joined via your link|It's a plan|became a plan|locked it in/.test(t)) { coralIt = true; mood = "party"; }
+  else if (/reacted|mentioned you|commented|on .+$/.test(t) && (ty === "comment" || ty === "mention" || /reacted/.test(t))) { coralIt = true; mood = "happy"; }
+  else if (/can't make|canceled|moved to|new place|new time|still owe|waiting on your RSVP|reported|running .*late/.test(t)) { mood = "thinking"; }
+  else if (/^Today:|reminder|is free|finding a time|collecting/.test(t) || ty === "reminder" || ty === "ask") { mood = "happy"; }
+  else if (/invited you|Your share|added/.test(t) || ty === "event" || ty === "meeting" || ty === "money") { mood = "happy"; }
+  else { coralIt = /is here|on the way/.test(t); mood = "happy"; }
+  return rowMascot(coralIt, i, mood);
+}
 function notifCard() {
   let pushDismissed = false; try { pushDismissed = !!LS.get("friendlyPushDismissed"); } catch {}
   if (NATIVE || pushDismissed) return "";
