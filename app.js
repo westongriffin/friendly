@@ -3154,6 +3154,10 @@ function wireIdeaCards(root = document) {
     try { LS.set("friendlyIdeas", JSON.stringify([x, ...savedIdeas().filter(y => y.title !== x.title)].slice(0, 40))); } catch {} b.textContent = "★ Saved"; b.classList.add("is-saved"); toast("Saved. Find it under ⭐ Saved on Curate; tap ★ again to remove it."); });
   root.querySelectorAll("[data-iunsave]").forEach(b => b.onclick = () => { const x = S._ideaById[b.dataset.iunsave]; if (!x) return; try { LS.set("friendlyIdeas", JSON.stringify(savedIdeas().filter(y => y.title !== x.title))); } catch {} S._ideasOpen = true; render(); });
 }
+// Typed idea searches stick around on this phone (last eight), so a search is one tap away next time.
+const recentIdeaSearches = () => { try { return JSON.parse(LS.get("friendlyIdeaSearches") || "[]"); } catch { return []; } };
+const rememberIdeaSearch = q => { try { LS.set("friendlyIdeaSearches", JSON.stringify([q, ...recentIdeaSearches().filter(x => x.toLowerCase() !== q.toLowerCase())].slice(0, 8))); } catch {} };
+const forgetIdeaSearch = q => { try { LS.set("friendlyIdeaSearches", JSON.stringify(recentIdeaSearches().filter(x => x !== q))); } catch {} };
 function openIdeasBrowser() {
   if (isDemo()) return toast("Browsing ideas is off in the demo.");
   const city = (S.profile.city || "").trim(); if (!city) { go("#/curate"); return; }
@@ -3163,14 +3167,17 @@ function openIdeasBrowser() {
     const box = el("ib"); if (!box) return;
     box.innerHTML = `<div class="dot-say">${dot(loading ? "painter" : "happy", 52)}<div class="say-bubble">${loading ? "Looking around " + esc(city) + "…" : ask ? `${list.length} ideas for ${esc(ask.label)}. Make one a plan, save it, or get more.` : "Browse single things to do, no full night needed. Pick a kind, or tell me exactly what you want."}</div></div>
       <div class="opts">${IDEA_CATS.map(([ic, l]) => `<button type="button" class="opt ${ask && ask.category === l ? "on" : ""}" data-icat="${esc(l)}"><span>${ic}</span>${esc(l)}</button>`).join("")}</div>
+      ${recentIdeaSearches().length && !ask ? `<div class="muted sm" style="margin:10px 0 4px">Recent searches</div><div class="recent-qs">${recentIdeaSearches().map(q => `<span class="recent-q"><button type="button" class="fchip" data-recentq="${esc(q)}">🕘 ${esc(q)}</button><button type="button" class="recent-x" data-recentx="${esc(q)}" aria-label="Forget this search">✕</button></span>`).join("")}</div>` : ""}
       <div class="ib-free"><input id="ibFree" class="inv-search" maxlength="120" placeholder="Something specific? Book a massage, pottery class…" value="${esc(ask && ask.free ? ask.free : "")}"><button type="button" class="btn small primary" id="ibGo">Find it</button></div>
       <div id="ibList">${list.map((x, i) => ideaCardHtml(x, "i" + i)).join("")}</div>
       ${loading ? `<div class="card empty compact">${dot("painter", 56)}<p class="muted" style="margin:6px 0 0">Searching real places nearby. About half a minute.</p></div>` : ""}
       ${!loading && list.length ? `<div style="text-align:center;margin:8px 0"><button type="button" class="btn" id="ibMore">＋ More ideas</button></div>` : ""}`;
     wireIdeaCards(box);
     box.querySelectorAll("[data-icat]").forEach(b => b.onclick = () => start({ category: b.dataset.icat, label: b.dataset.icat.toLowerCase() }));
-    const go2 = () => { const v = el("ibFree").value.trim(); if (v.length < 3) return toast("Tell me a little more."); start({ free: v, label: "“" + v + "”" }); };
+    const go2 = () => { const v = el("ibFree").value.trim(); if (v.length < 3) return toast("Tell me a little more."); rememberIdeaSearch(v); start({ free: v, label: "“" + v + "”" }); };
     el("ibGo").onclick = go2; el("ibFree").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); go2(); } };
+    document.querySelectorAll("[data-recentq]").forEach(b => b.onclick = () => { el("ibFree").value = b.dataset.recentq; go2(); });
+    document.querySelectorAll("[data-recentx]").forEach(b => b.onclick = e => { e.stopPropagation(); forgetIdeaSearch(b.dataset.recentx); b.closest(".recent-q").remove(); });
     if (el("ibMore")) el("ibMore").onclick = () => fetchMore();
   };
   const fetchMore = async () => {

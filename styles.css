@@ -1591,3 +1591,6 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 .cur-locbar .near-me{flex:none;display:inline-flex;align-items:center;gap:5px;height:40px;min-height:0;padding:0 11px;border-radius:999px;background:var(--surface2);border:1px solid var(--line);color:var(--ink);font-size:.85rem;font-weight:700;white-space:nowrap}
 
 .fchip-saved{background:#FFF1CC;border-color:#E7B64A;color:#8A5A00}
+
+/* Browse ideas: recent searches */
+.recent-qs{display:flex;flex-wrap:wrap;gap:6px}.recent-q{display:inline-flex;align-items:center;gap:2px}.recent-q .fchip{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.recent-x{border:0;background:none;color:var(--muted);font-size:.8rem;padding:4px;cursor:pointer}
