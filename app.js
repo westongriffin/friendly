@@ -779,7 +779,7 @@ async function resolveCity(input) {
 const BOOT_AT = Date.now(), SPLASH_MIN = 6000, SPLASH_MAX = 6000; let splashTimer = null, splashHold = false;
 // Dot's intro plays on every fresh launch (the app was closed), and when the app comes back from the background
 // after 10 minutes or more; a quicker switch back goes straight in.
-const AWAY_FOR_INTRO = 10 * 60 * 1000;
+const AWAY_FOR_INTRO = 6 * 60 * 60 * 1000;   // the welcome splash replays only after six hours away
 const markSeen = () => { try { LS.set("friendlyLastSeen", String(Date.now())); } catch {} };
 markSeen(); setInterval(() => { if (!document.hidden) markSeen(); }, 30000);
 window.addEventListener("pagehide", markSeen);
@@ -4962,13 +4962,24 @@ function downloadIcs(ev) {
   const a = document.createElement("a"); a.href = "data:text/calendar;charset=utf-8," + encodeURIComponent(ics); a.download = ev.title.replace(/[^a-z0-9]+/gi, "-") + ".ics"; a.click();
 }
 async function delEvent(ev) { if (isDemo() && DEMO_EVENTS.includes(ev.id)) return toast("Deleting this demo event is off -- it resets nightly instead."); if (!confirm(`Delete “${ev.title}”?`)) return; try { await deleteDoc(doc(db, "events", ev.id)); go("#/"); toast("Event deleted"); } catch (e) { toast(e.message); } }
+document.addEventListener("click", e => {
+  const b = e.target.closest("#eKind [data-ekind]"); if (!b) return;
+  document.querySelectorAll("#eKind .fchip").forEach(x => x.classList.toggle("on", x === b));
+  const trip = b.dataset.ekind === "trip", wrap = el("eEndWrap"), note = el("eKindNote");
+  if (wrap) wrap.hidden = !trip; if (note) note.textContent = trip ? "A trip spans days: a day-by-day plan, where everyone's staying, rides, packing, and one running tab." : b.dataset.ekind === "meeting" ? "A plain calendar entry: title, time, place, who." : "Make it a trip to get day tabs, a place to stay, rooms, packing, and a running tab.";
+  const dl = document.querySelector("#eDate") && document.querySelector("#eDate").closest("label").querySelector("span"); if (dl) dl.textContent = trip ? "First day" : "Date";
+});
 function editEvent(ev) {
   const E = { stops: evStops(ev).map(x => ({ ...x })), time: ev.time || "", where: ev.location || "", emoji: ev.emoji || "📍", kind: ev.kind || "event" };
   const ectx = { h: E, card: "eStopsCard", head: "eStopsHead", time: "eTime", where: "eWhere", hide: "estops-hide", save: () => {}, before: null };
   const many = E.stops.length >= 2;
-  dialog(`<h3>Edit event</h3>
+  dialog(`<h3>Edit ${E.kind === "trip" ? "trip" : E.kind === "meeting" ? "meeting" : "event"}</h3>
     <label class="field"><span>Title</span><input id="eTitle" value="${esc(ev.title)}"></label>
-    <div class="two"><label class="field"><span>Date</span><input id="eDate" type="date" value="${ev.date}"></label>
+    <div class="field-label" style="margin:2px 0 6px">This is a…</div><div class="chiprow" id="eKind" style="flex-wrap:wrap;overflow:visible;padding-bottom:0">${[["event", "🎉 Event"], ["meeting", "📅 Meeting"], ["trip", "⛵ Trip"]].map(([k, l]) => `<button type="button" class="fchip ${E.kind === k ? "on" : ""}" data-ekind="${k}">${l}</button>`).join("")}</div>
+    <p class="muted sm" id="eKindNote" style="margin:4px 0 10px">${E.kind === "trip" ? "A trip spans days: a day-by-day plan, where everyone's staying, rides, packing, and one running tab." : "Make it a trip to get day tabs, a place to stay, rooms, packing, and a running tab."}</p>
+    <div class="two"><label class="field"><span>${E.kind === "trip" ? "First day" : "Date"}</span><input id="eDate" type="date" value="${ev.date}"></label>
+    <label class="field" id="eEndWrap" ${E.kind === "trip" ? "" : "hidden"}><span>Last day</span><input id="eEndDate" type="date" value="${ev.endDate || addDays(ev.date, 2)}" min="${ev.date}"></label></div>
+    <div class="two"><span></span>
     <label class="field estops-hide ${many ? "hidden" : ""}"><span>Start</span><input id="eTime" type="time" value="${ev.time || ""}"></label></div>
     <label class="field estops-hide ${many ? "hidden" : ""}"><span>Where</span><input id="eWhere" value="${esc(ev.location || "")}"></label>
     <span class="field-label" style="display:flex;justify-content:space-between;margin-top:6px">${ev.kind === "meeting" ? "Agenda" : "The plan"} <small class="muted" id="eStopsHead">${stopsHead(ectx)}</small></span><div class="stops-card in-dialog" id="eStopsCard">${stopsEditor(ectx)}</div>
@@ -4980,7 +4991,8 @@ function editEvent(ev) {
     <span class="field-label" style="margin-top:10px">Co-hosts (can edit &amp; manage)</span><div class="check-grid">${contactChecks("ecoh", new Set(ev.cohostUids || []))}</div>`,
     "Save", async () => {
       const cohostUids = [...document.querySelectorAll("input[name=ecoh]:checked")].map(i => i.value).filter(u => u !== ev.hostId);
-      try { await updateDoc(doc(db, "events", ev.id), { cohostUids, ...(cohostUids.length ? { invitedUids: arrayUnion(...cohostUids) } : {}), updatedBy: myUid(), title: el("eTitle").value.trim(), date: el("eDate").value, ...(() => { const st = sortStops(cleanStops(E.stops)); return st.length >= 2 ? { stops: st, time: (st.find(x => x.time) || {}).time || el("eTime").value, location: st[0].place || el("eWhere").value.trim(), food: "" } : { stops: [], time: el("eTime").value, location: el("eWhere").value.trim() }; })(), ...(el("eFood") && cleanStops(E.stops).length < 2 ? { food: el("eFood").value.trim() } : {}), notes: el("eNotes").value.trim(), allowPlus: el("ePlusOn").checked, plusMax: plusMaxVal("e"), ...(el("eBringOn") ? { dayBring: el("eBringOn").checked, dayCarpool: el("eCarOn").checked } : {}), ...readRepeat("e") }); closeDialog(); toast("Saved"); } catch (e) { toast(e.message); }
+      const kindNow = (document.querySelector("#eKind .on") || { dataset: { ekind: E.kind } }).dataset.ekind, endDateNow = kindNow === "trip" ? (el("eEndDate") && el("eEndDate").value > el("eDate").value ? el("eEndDate").value : addDays(el("eDate").value, 1)) : "";
+      try { await updateDoc(doc(db, "events", ev.id), { cohostUids, ...(cohostUids.length ? { invitedUids: arrayUnion(...cohostUids) } : {}), updatedBy: myUid(), kind: kindNow, endDate: endDateNow, title: el("eTitle").value.trim(), date: el("eDate").value, ...(() => { const st = sortStops(cleanStops(E.stops)); return st.length >= 2 ? { stops: st, time: (st.find(x => x.time) || {}).time || el("eTime").value, location: st[0].place || el("eWhere").value.trim(), food: "" } : { stops: [], time: el("eTime").value, location: el("eWhere").value.trim() }; })(), ...(el("eFood") && cleanStops(E.stops).length < 2 ? { food: el("eFood").value.trim() } : {}), notes: el("eNotes").value.trim(), allowPlus: el("ePlusOn").checked, plusMax: plusMaxVal("e"), ...(el("eBringOn") ? { dayBring: el("eBringOn").checked, dayCarpool: el("eCarOn").checked } : {}), ...readRepeat("e") }); closeDialog(); toast("Saved"); } catch (e) { toast(e.message); }
     });
   attachPlaces(el("eWhere"));
   stopCtx = ectx; wireStops(); wireRepeat("e"); wirePlusFields("e");
@@ -5031,7 +5043,8 @@ function moneyBody() {
     return `<div class="card settle-row" data-pair="${esc(p.from + "|" + p.to)}"><div class="settle-top">${avatar(p.from)}<div style="flex:1"><b>${p.from === me ? "You owe " + esc(nameOf(p.to)) : esc(nameOf(p.from)) + " owes you"}</b>${settleWhy(p, me)}</div><span class="amt sm">${fmt$(p.amount)}</span></div><div class="settle-actions">${pay}<button class="btn small" data-record="${p.from}|${p.to}|${p.amount}">${p.from === me ? "Mark as paid" : "Mark as received"}</button></div></div>`;
   }).join("")}</div>` : ""}
   <div class="section-head"><h2>Activity</h2></div>
-  <div class="card">${rows.length ? rows.map(r => {
+  ${rows.length > 5 ? `<input type="search" class="inv-search" id="moneySearch" placeholder="Search expenses, people, amounts" autocomplete="off" aria-label="Search activity"><p class="muted sm hidden" id="moneyNoHits" style="margin:6px 2px">Nothing matches that.</p>` : ""}
+  <div class="card" id="moneyRows">${rows.length ? rows.map(r => {
     if (r.kind === "s") return `<div class="ledger" data-srow="${esc(r.id)}"><div class="li pay">⤴</div><div style="flex:1;min-width:0"><b>${esc(nameOf(r.from))} paid ${esc(nameOf(r.to))}</b><div class="muted sm">${r.note ? esc(r.note) + " · " : ""}${new Date(r.createdAt).toLocaleDateString()}</div>${payReacts(r, false)}</div><span class="amt sm">${fmt$(r.amountCents)}</span>${r.addedBy === me ? `<button class="btn ghost small" data-dels="${r.id}">✕</button>` : ""}</div>`;
     const n = (r.split || []).length || 1;
     if (r.kind === "e" && r.pitch) return `<div class="ledger" data-xrow="${r.id}"><div class="li">🎁</div><div style="flex:1"><b>${esc(r.desc)}</b><div class="muted sm">${esc(first(nameOf(r.paidBy)))} is collecting · ${fmt$(r.pitch.each)} each · ${pitchPaid(r).length} of ${(r.split || []).filter(u => u !== r.paidBy).length} in · ${new Date(r.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(pitchTotal(r))}</span><button class="btn ghost small" data-xopen="${r.id}">Open</button></div>`;
@@ -5040,6 +5053,7 @@ function moneyBody() {
 }
 function wireMoney() {
   el("addExpense").onclick = () => openExpense(null, null);
+  if (el("moneySearch")) el("moneySearch").oninput = () => { const q = el("moneySearch").value.trim().toLowerCase(); let n = 0; document.querySelectorAll("#moneyRows .ledger").forEach(r => { const hit = !q || r.textContent.toLowerCase().includes(q); r.hidden = !hit; if (hit) n++; }); el("moneyNoHits").classList.toggle("hidden", n > 0 || !q); };
   if (el("addPitch")) el("addPitch").onclick = () => openPitchIn();
   wirePitch();
   if (el("simplePay")) el("simplePay").onclick = () => { S.simplePay = !S.simplePay; render(); };
@@ -5165,7 +5179,15 @@ function wireExpensePage() {
     const b = el("wall"); if (b) withInputKept(() => { b.innerHTML = wallInner(pseudo, "Discussion"); wireWall(pseudo); });
   }, e => toast(e.message)));
 }
-function payVenmo(uid, cents, txn, expenseId) { const v = payInfoOf(uid).venmo; if (!v) return; const x = expenseId && S.expenses.get(expenseId); window.open(`https://venmo.com/${encodeURIComponent(v.replace(/^@/, ""))}?txn=${txn}&amount=${(cents / 100).toFixed(2)}&note=${encodeURIComponent((x && x.desc ? x.desc + " · " : "") + "Friendly 🤝")}`, "_blank"); if (txn === "pay") askIfSent(uid, cents, "Venmo", expenseId); else toast("Request sent in Venmo."); }
+// On a phone the Venmo app opens straight away (venmo://); if it isn't installed, or on a computer, the web link.
+function openVenmo(user, txn, amount, note) {
+  const web = `https://venmo.com/${encodeURIComponent(user)}?txn=${txn}&amount=${amount}&note=${encodeURIComponent(note)}`;
+  if (!(IOS || IS_ANDROID)) return window.open(web, "_blank");
+  let left = false; const onHide = () => { if (document.visibilityState === "hidden") left = true; }; document.addEventListener("visibilitychange", onHide);
+  try { location.href = `venmo://paycharge?txn=${txn}&recipients=${encodeURIComponent(user)}&amount=${amount}&note=${encodeURIComponent(note)}`; } catch {}
+  setTimeout(() => { document.removeEventListener("visibilitychange", onHide); if (!left && document.visibilityState === "visible") window.open(web, "_blank"); }, 1500);
+}
+function payVenmo(uid, cents, txn, expenseId) { const v = payInfoOf(uid).venmo; if (!v) return; const x = expenseId && S.expenses.get(expenseId); openVenmo(v.replace(/^@/, ""), txn, (cents / 100).toFixed(2), (x && x.desc ? x.desc + " · " : "") + "Friendly 🤝"); if (txn === "pay") askIfSent(uid, cents, "Venmo", expenseId); else toast("Request sent in Venmo."); }
 // Marks a payment as made. Undo is offered right away, and every settlement can
 // be removed later from the Activity list too.
 async function markPaid(from, to, cents, note, expenseId) {
@@ -6790,7 +6812,7 @@ const isPeeked = a => { const tail = tailOf(a.url); if (tail === "#/" || tail ==
 const unreadCount = () => (S.activity || []).filter(a => a.createdAt > seenAt() && !isPeeked(a)).length;
 const newCountFor = urlTail => (S.activity || []).filter(a => a.createdAt > seenAt() && !isPeeked(a) && tailOf(a.url) === urlTail).length;
 const isNewEvent = ev => (S.activity || []).some(a => a.createdAt > seenAt() && !isPeeked(a) && tailOf(a.url) === "#/e/" + ev.id);
-const actIcon = a => a.type === "digest" ? dot("happy", 30) : /wants to be friends|wanted to be friends|friends now|accepted your friend/.test(a.title) ? "👋" : a.sid || /paid you|as paid/.test(a.title) || a.type === "photo" ? coral(a.type === "photo" ? "happy" : "party", 30) : /pick your items|picked their items/.test(a.title) ? "🧾" : /joined via your link/.test(a.title) ? "🔗" : /waiting on your RSVP/.test(a.title) ? "📣" : /mentioned you/.test(a.title) ? "＠" : /to a meeting/.test(a.title) ? "📅" : /You're in!/.test(a.title) ? "🎟️" : /still owe/.test(a.title) ? "💸" : /invited you/.test(a.title) ? "🎟️" : /^Today:/.test(a.title) ? "⏰" : /reported/i.test(a.title) ? "⚑" : /is going|might come|can't make|joined the waitlist|requested/.test(a.title) ? "✅" : "💬";
+const actIcon = a => a.type === "digest" ? dot("happy", 40) : /wants to be friends|wanted to be friends|friends now|accepted your friend/.test(a.title) ? "👋" : a.sid || /paid you|as paid/.test(a.title) || a.type === "photo" ? coral(a.type === "photo" ? "happy" : "party", 40) : /pick your items|picked their items/.test(a.title) ? "🧾" : /joined via your link/.test(a.title) ? "🔗" : /waiting on your RSVP/.test(a.title) ? "📣" : /mentioned you/.test(a.title) ? "＠" : /to a meeting/.test(a.title) ? "📅" : /You're in!/.test(a.title) ? "🎟️" : /still owe/.test(a.title) ? "💸" : /invited you/.test(a.title) ? "🎟️" : /^Today:/.test(a.title) ? "⏰" : /reported/i.test(a.title) ? "⚑" : /is going|might come|can't make|joined the waitlist|requested/.test(a.title) ? "✅" : "💬";
 function notifCard() {
   let pushDismissed = false; try { pushDismissed = !!LS.get("friendlyPushDismissed"); } catch {}
   if (NATIVE || pushDismissed) return "";

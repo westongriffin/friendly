@@ -1598,7 +1598,7 @@ exports.onExpenseAdded = onDocumentCreated({ document: "expenses/{xid}", ...PUSH
     const share = shareOf(u);
     let body;
     if (u === x.paidBy) { const owed = x.amountCents - share; body = `You paid ${dollars(x.amountCents)}; ${owed > 0 ? dollars(owed) + " is owed back to you" : "nothing is owed back"}.`; }
-    else if (share > 0) body = `Your share is ${dollars(share)} · ${payerName} paid.`;
+    else if (share > 0) body = `Your share is ${dollars(share)} · ${payerName} paid.${(x.items || []).length && (x.tip || x.tax) ? (x.tip && x.tax ? " This includes tax and tip." : x.tip ? " This includes the tip." : " This includes tax.") : ""}`;
     else continue;
     await notify([u], `${adderName} added ${desc}`, body, url + "?who=" + encodeURIComponent(u), { type: "money", actorId: adder });
   }
@@ -2052,7 +2052,7 @@ exports.onRsvp = onDocumentUpdated({ document: "events/{id}", ...MAIL }, async e
     if (sbA[changed]) await e.data.after.ref.update({ ["rsvpSetBy." + changed]: FieldValue.delete() }).catch(() => {});
     const nm = await names([changed]);
     const word = { going: "is going to", maybe: "might come to", no: "can't make", waitlist: "joined the waitlist for", pending: "requested to join" }[a[changed]] || "updated";
-    await notify([after.hostId], firstName(nm[changed]) + " " + word, after.title, "/#/e/" + id + "?to=guestCard&who=" + encodeURIComponent(changed), { type: "rsvp", actorId: changed });
+    await notify([after.hostId, ...(after.cohostUids || [])].filter(h => h && h !== changed), firstName(nm[changed]) + " " + word, after.title, "/#/e/" + id + "?to=guestCard&who=" + encodeURIComponent(changed), { type: "rsvp", actorId: changed });
     if (a[changed] === "going" && (b[changed] === "waitlist" || b[changed] === "pending"))
       await notify([changed], "You're in! " + after.title, b[changed] === "waitlist" ? "A spot opened up and it's yours." : "The host approved you.", "/#/e/" + id + "?to=rsvpCard", { type: "rsvp" });
   }

@@ -1397,7 +1397,7 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 .cheer.in .cheer-card{transform:scale(1)}.cheer-card b{display:block;font-family:var(--display);font-size:1.3125rem;margin-top:4px}.cheer-card p{margin:6px 0 0;color:var(--muted);font-size:0.875rem}
 .cheer-card .blip{animation:cheer-hop .9s cubic-bezier(.34,1.56,.64,1) 2}
 @keyframes cheer-hop{0%,100%{transform:translateY(0)}40%{transform:translateY(-14px) rotate(-6deg)}70%{transform:translateY(0) scale(1.06,.94)}}
-.act-row .li .blip,.hd-act .li .blip{width:28px;height:28px}
+.act-row .li .blip,.hd-act .li .blip{width:38px;height:38px}
 .ms-li{background:#FFF1EE}.ms-next{opacity:.85}
 .coral-say .say-bubble{border-color:#FFC2B3}
 .bday-today{border-color:#FFC2B3;background:#FFF7F5}
@@ -1554,3 +1554,8 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 
 /* Profile: unsaved edits */
 .btn.primary.pending{background:var(--sun);color:var(--ink);box-shadow:0 0 0 3px rgba(255,193,69,.28)}
+
+/* When works? chip stands apart from Tonight */
+.uf-ask-chips .fchip[data-whenask]{background:#FFF1CC;border-color:#E7B64A;color:#8A5A00}
+/* Activity: mascots get a bigger, plain slot */
+.act-row .li:has(.blip){width:42px;height:42px;background:none;border-radius:0}
