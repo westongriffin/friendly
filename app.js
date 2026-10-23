@@ -1932,6 +1932,8 @@ function startMascotShow() {
   S._showTimer = setTimeout(tick, 1500 + Math.random() * 1200);
 }
 // ---------- A YEAR WITH THE CREW (the recap page: #/year or #/year/2025) ----------
+// The recap is a December thing: it appears on Memories from Dec 10 and on Home until mid-January. The page itself stays reachable by link.
+const recapSeason = () => { const d = new Date(), m = d.getMonth(), day = d.getDate(); return (m === 11 && day >= 10) || (m === 0 && day <= 15); };
 function yearData(y) {
   const me = myUid(), t = todayStr(), year = String(y || new Date().getFullYear());
   const mine = ev => ev.kind !== "meeting" && ev.date && ev.date.startsWith(year) && ev.date <= t && (ev.invitedUids || []).includes(me) && (ev.hostId === me || (ev.rsvps || {})[me] === "going");
@@ -1961,7 +1963,7 @@ function yearBody(y) {
   const pics = d.photos.slice().sort(() => 0.5 - Math.random()).slice(0, 9);
   return `<button class="link-back" data-go="#/">‹ Back</button>
   <div class="yr-hero"><div class="yr-k">YOUR ${esc(d.year)}</div><h1>A year with the crew</h1><div class="yr-pair">${dot("party", 64)}${coral("party", 64)}</div><p>${d.plans.length} plan${d.plans.length === 1 ? "" : "s"}. ${d.photos.length} photo${d.photos.length === 1 ? "" : "s"}. ${d.friends ? `${d.friends} friend${d.friends === 1 ? "" : "s"} along for the ride.` : "Just getting started."}</p></div>
-  <div class="yr-stats">${stat(d.plans.length, "plans")}${stat(d.photos.length, "photos")}${stat(d.spent ? fmt$(d.spent).replace(/\.00$/, "") : "$0", "split, zero fights")}${stat(d.friends, "friends along")}</div>
+  <div class="yr-stats">${stat(d.plans.length, d.plans.length === 1 ? "plan" : "plans")}${stat(d.photos.length, d.photos.length === 1 ? "photo" : "photos")}${stat(d.spent ? fmt$(d.spent).replace(/\.00$/, "") : "$0", "split, zero fights")}${stat(d.friends, d.friends === 1 ? "friend along" : "friends along")}</div>
   ${top ? `<a class="card yr-top" data-go="#/fs/${esc(top[0])}">${avatar(top[0], "lg")}<div style="flex:1;min-width:0"><span class="muted sm">Most plans with</span><b>${esc(nameOf(top[0]))} · ${top[1]} together</b><span class="hd-link">Our Friendlyship ›</span></div></a>` : ""}
   <div class="yr-two">${spot ? tile("Your spot", esc(spot[0]), spot[1] === 1 ? "Once. So far." : `${spot[1]} times. They know your order.`) : ""}${month ? tile("Busiest month", MONTH_NAMES[+month[0] - 1], `${month[1]} plan${month[1] === 1 ? "" : "s"}.`) : ""}</div>
   <div class="yr-two">${crew ? tile("Top crew", `${groupMini(crew)} ${esc(crew.name)}`, `${d.crews[0][1]} plan${d.crews[0][1] === 1 ? "" : "s"}`, "#/g/" + crew.id) : ""}${shooter ? tile("Camera roll MVP", esc(shooter[0] === me ? "You" : first(nameOf(shooter[0]))), `${shooter[1]} photo${shooter[1] === 1 ? "" : "s"} added`) : d.hosted ? tile("You hosted", d.hosted + (d.hosted === 1 ? " plan" : " plans"), "The crew owes you one.") : ""}</div>
@@ -1993,8 +1995,8 @@ async function shareYearCard(y) {
 }
 // A nudge toward the recap in December and the first two weeks of January.
 function yearCard() {
-  const m = new Date().getMonth(), day = new Date().getDate(); if (!(m === 11 || (m === 0 && day <= 15))) return "";
-  const y = m === 0 ? new Date().getFullYear() - 1 : new Date().getFullYear(); let hidden = ""; try { hidden = LS.get("friendlyYearHidden") || ""; } catch {}
+  if (!recapSeason()) return "";
+  const m = new Date().getMonth(), y = m === 0 ? new Date().getFullYear() - 1 : new Date().getFullYear(); let hidden = ""; try { hidden = LS.get("friendlyYearHidden") || ""; } catch {}
   if (hidden === String(y)) return ""; const d = yearData(y); if (d.plans.length < 3) return "";
   return `<a class="card yr-link" data-go="#/year/${y}"><button type="button" class="today-x" data-hide-year="${y}" aria-label="Hide this">✕</button>${dot("party", 34)}${coral("party", 34)}<span style="flex:1;min-width:0"><b>Your ${y} with the crew</b><span class="muted sm">${d.plans.length} plans, ${d.photos.length} photos. See the recap.</span></span><span class="chev">›</span></a>`;
 }
@@ -7065,7 +7067,7 @@ function photosPageBody() {
     <div class="photo-grid mem-grid">${(S.memories.get(ev.id) || []).map(p => `<div class="photo-tile"><img src="${esc(p.img)}" data-mem="${p.id}" data-mev="${ev.id}" alt="" loading="lazy">${photoBadges(p)}</div>`).join("")}</div>`;
   return `<button class="link-back" data-go="#/">‹ Back</button>
   <div class="section-head"><h2>Memories</h2><span class="muted sm">${(n => n + (n === 1 ? " photo" : " photos"))(evs.reduce((t, ev) => t + S.memories.get(ev.id).length, 0))}</span></div>
-  ${yearData().plans.length >= 2 ? `<a class="card yr-link" data-go="#/year">${dot("party", 34)}${coral("party", 34)}<span style="flex:1;min-width:0"><b>A year with the crew</b><span class="muted sm">${yearData().plans.length} plans so far in ${new Date().getFullYear()}</span></span><span class="chev">›</span></a>` : ""}
+  ${recapSeason() && yearData().plans.length >= 2 ? `<a class="card yr-link" data-go="#/year">${dot("party", 34)}${coral("party", 34)}<span style="flex:1;min-width:0"><b>A year with the crew</b><span class="muted sm">${yearData().plans.length} plans so far in ${new Date().getFullYear()}</span></span><span class="chev">›</span></a>` : ""}
   ${S._memLoading ? `<p class="muted">Gathering photos…</p>` : ""}
   ${ago1.map(ev => section(ev, "🕰️ One year ago")).join("")}
   ${evs.length ? evs.map(ev => section(ev)).join("") : (S._memLoading ? "" : emptyState("📸", "No photos yet", "Photos from your plans land here, newest first. Coral is ready for them.", "coral:idle"))}`;
