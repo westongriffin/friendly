@@ -1566,3 +1566,6 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 .blip-var .blip.idle .body{animation-duration:var(--idle-dur,2.8s);animation-delay:var(--idle-delay,0s)}
 .blip-var .blip.idle .eye{animation-delay:var(--idle-delay,0s)}
 .li .blip-var .blip{width:38px;height:38px}
+
+/* Home: the week's count and New event, like the top of Plans */
+.hd-tools{margin:2px 0 12px}.hd-tools h2{font-size:1.125rem;min-width:0}.hd-tools h2 .hd-plans{color:var(--ink);font-weight:inherit;text-decoration:none}.hd-tools .btn{flex:none}

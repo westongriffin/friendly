@@ -1823,11 +1823,14 @@ function homeBody() {
   const dateLine = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
   const plansLine = weekCount ? `${weekCount} plan${weekCount === 1 ? "" : "s"} this week` : "nothing on the calendar this week";
   // Weekends are Coral's: she takes the greeting.
-  const plansLink = `<a class="hd-plans" data-go="#/plans">${plansLine}</a>`, pair = `<span class="hd-mascots" id="hdMascots">${mascotBtn("dot")}${mascotBtn("coral")}</span>`;
-  const head = weekend ? `<div><h1>It's ${new Date().toLocaleDateString("en-US", { weekday: "long" })}, ${esc(first(S.profile.name))}.</h1><p class="muted sm">What are we doing? · ${plansLink}</p></div>${pair}`
-    : `<div><h1>${greet}, ${esc(first(S.profile.name))}</h1><p class="muted sm">${dateLine} · ${plansLink}</p></div>${pair}`;
+  const pair = `<span class="hd-mascots" id="hdMascots">${mascotBtn("dot")}${mascotBtn("coral")}</span>`;
+  const head = weekend ? `<div><h1>It's ${new Date().toLocaleDateString("en-US", { weekday: "long" })}, ${esc(first(S.profile.name))}.</h1><p class="muted sm">What are we doing?</p></div>${pair}`
+    : `<div><h1>${greet}, ${esc(first(S.profile.name))}</h1><p class="muted sm">${dateLine}</p></div>${pair}`;
+  // The same row Plans has up top: the week's count as the heading (tap for Plans), New event at the right.
+  const toolsRow = `<div class="section-head hd-tools"><h2><a class="hd-plans" data-go="#/plans">${weekCount ? `${weekCount} plan${weekCount === 1 ? "" : "s"} this week` : "No plans this week"}</a></h2><button class="btn primary small" data-go="#/new">＋ New event</button></div>`;
   return `
   <header class="hd-greet">${head}</header>
+  ${toolsRow}
   ${weekDigest(mine)}
   ${notifCard()}${hero && hero.date === t ? heroCard(hero) : ""}${todayCards}${afterCard()}${birthdayCard()}
   ${askBox()}${asksSection()}
