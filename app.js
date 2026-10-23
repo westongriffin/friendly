@@ -5117,7 +5117,7 @@ const appleCashLabel = () => /iPhone|iPad|Mac/.test(navigator.userAgent) ? `<spa
 function payBtns(to, cents, pre = "") {
   const o = payInfoOf(to), amt = `data-amt="${cents}"`;
   const btns = {
-    venmo: o.venmo ? `<button class="btn small venmo" data-${pre}venmo="${esc(to)}" ${amt}>Venmo</button>` : "",
+    venmo: o.venmo || (o.phone && (IOS || IS_ANDROID) && !isGuest(to)) ? `<button class="btn small venmo" data-${pre}venmo="${esc(to)}" ${amt}>Venmo</button>` : "",
     cashapp: o.cashapp ? `<button class="btn small cashapp" data-${pre}cashapp="${esc(to)}" ${amt}>Cash App</button>` : "",
     zelle: o.zelle ? `<button class="btn small zelle" data-${pre}zelle="${esc(to)}" ${amt} title="Zelle has no payment links: this copies their Zelle handle for your bank app">Zelle</button>` : "",
     apple: appleCashFor(to) ? `<button class="btn small apple" data-${pre}apple="${esc(to)}" ${amt} aria-label="Apple Cash">${appleCashLabel()}</button>` : ""
@@ -5187,7 +5187,7 @@ function openVenmo(user, txn, amount, note) {
   try { location.href = `venmo://paycharge?txn=${txn}&recipients=${encodeURIComponent(user)}&amount=${amount}&note=${encodeURIComponent(note)}`; } catch {}
   setTimeout(() => { document.removeEventListener("visibilitychange", onHide); if (!left && document.visibilityState === "visible") window.open(web, "_blank"); }, 1500);
 }
-function payVenmo(uid, cents, txn, expenseId) { const v = payInfoOf(uid).venmo; if (!v) return; const x = expenseId && S.expenses.get(expenseId); openVenmo(v.replace(/^@/, ""), txn, (cents / 100).toFixed(2), (x && x.desc ? x.desc + " · " : "") + "Friendly 🤝"); if (txn === "pay") askIfSent(uid, cents, "Venmo", expenseId); else toast("Request sent in Venmo."); }
+function payVenmo(uid, cents, txn, expenseId) { const o = payInfoOf(uid), v = o.venmo ? o.venmo.replace(/^@/, "") : (toE164(o.phone || "") || ""); if (!v) return; const x = expenseId && S.expenses.get(expenseId); openVenmo(v, txn, (cents / 100).toFixed(2), (x && x.desc ? x.desc + " · " : "") + "Friendly 🤝"); if (txn === "pay") askIfSent(uid, cents, "Venmo", expenseId); else toast("Request sent in Venmo."); }
 // Marks a payment as made. Undo is offered right away, and every settlement can
 // be removed later from the Activity list too.
 async function markPaid(from, to, cents, note, expenseId) {
