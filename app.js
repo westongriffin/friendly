@@ -2853,7 +2853,7 @@ async function leaveGroup(g) {
 const compose = { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji",
   title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false,
   questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "" };
-function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", endDate: "", stay: null, repeat: "", stops: [], _restored: false, _fromDraft: false, _plan: null, _draftId: null, plusOn: null, plusMax: 0, bring: [], bringOn: true, carOn: true, drive: false, seats: 3 }); clearTimeout(draftTimer); }
+function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", endDate: "", stay: null, editId: null, repeat: "", stops: [], _restored: false, _fromDraft: false, _plan: null, _draftId: null, plusOn: null, plusMax: 0, bring: [], bringOn: true, carOn: true, drive: false, seats: 3 }); clearTimeout(draftTimer); }
 // ---- "Let me plan it": say the plan, Dot drafts it, you review it in the composer. Nothing is created or sent until you tap Create.
 function planContext(text, mode, ctx) {
   const d = new Date(), pad = n => String(n).padStart(2, "0");
@@ -3548,7 +3548,7 @@ function composeBody() {
   const groups = [...S.groups.values()];
   const th = themeOf(compose.theme, compose.customTheme);
   return `
-  <button class="link-back" data-go="#/">‹ Cancel</button>
+  <button class="link-back" data-go="${compose.editId ? "#/e/" + esc(compose.editId) : "#/"}">‹ ${compose.editId ? "Back to the " + (compose.kind === "meeting" ? "meeting" : compose.kind === "trip" ? "trip" : "event") : "Cancel"}</button>${compose.editId ? `<p class="muted sm" style="margin:4px 0 10px">Editing. Everyone invited stays; add people here and change anything else.</p>` : ""}
   <div class="compose">
     <div class="seg kind-seg" id="kindSeg">
       <button type="button" class="${compose.kind !== "meeting" && compose.kind !== "trip" ? "on" : ""}" data-kind="event">🎉 Event</button>
@@ -3557,7 +3557,7 @@ function composeBody() {
     </div>
     ${!compose._draftId && (S.drafts || []).length ? `<p class="muted sm" style="margin:-4px 0 10px">You have ${S.drafts.length} saved draft${S.drafts.length === 1 ? "" : "s"} · <a data-go="#/drafts" style="color:var(--accent);font-weight:600">Open Drafts</a></p>` : ""}
     ${compose._fromDraft ? `<p class="muted sm" style="margin:-4px 0 10px">Restored your draft · <a id="discardDraft" style="color:var(--accent);font-weight:600">Discard</a></p>` : ""}
-    ${compose._plan ? planCard() : (window.Blip && !isDemo() && !compose._fromDraft && !compose.title ? `<button type="button" class="btn tell-dot" id="composeTell">${dot("happy", 26)} Or just tell Dot: “Taco night Friday at 7, invite the crew, bring a side.”</button>` : "")}
+    ${compose._plan ? planCard() : (window.Blip && !isDemo() && !compose._fromDraft && !compose.title && !compose.editId ? `<button type="button" class="btn tell-dot" id="composeTell">${dot("happy", 26)} Or just tell Dot: “Taco night Friday at 7, invite the crew, bring a side.”</button>` : "")}
     <p class="muted sm draft-status" id="draftStatus" style="margin:-4px 0 10px;min-height:1.4em"></p>
     ${compose.kind === "meeting" ? `<p class="muted sm" style="margin:-4px 0 12px">A plain calendar entry: title, time, place, who. Everyone gets a calendar invite by email.</p>` : compose.kind === "trip" ? `<p class="muted sm" style="margin:-4px 0 12px">A trip is a plan that spans more than one day. Set the first and last day and where everyone's staying here. Once it's created, the trip page adds a day-by-day plan with stops, rooms to pick, rides, packing, and one running tab for the whole trip.</p>` : ""}
     <div class="${compose.kind === "meeting" ? "hidden" : ""}">
@@ -3645,7 +3645,7 @@ function composeBody() {
     </div>
 
     </div>
-    <button class="btn primary lg full" id="createEventBtn">${compose.kind === "meeting" ? "Create meeting &amp; send invites" : "Create event &amp; send invites"}</button>
+    <button class="btn primary lg full" id="createEventBtn">${compose.editId ? "Save changes" : compose.kind === "meeting" ? "Create meeting &amp; send invites" : "Create event &amp; send invites"}</button>
     <button type="button" class="btn full" id="saveDraftBtn" style="margin-top:10px">📝 Save draft</button>
     <p class="muted sm" style="text-align:center;margin:6px 0 0">Drafts aren't sent to anyone. Find them under 📝 Drafts on the Events page.</p>
   </div>`;
@@ -3855,6 +3855,24 @@ async function createEvent() {
     invitedPhones, invitedPhoneNames, guestEmails: [], sequence: 0,
     createdAt: Date.now()
   };
+  if (compose.editId) {
+    const eid = compose.editId, cur = S.events.get(eid) || {};
+    const newUids = invitedUids.filter(u => !(cur.invitedUids || []).includes(u)), newPhones = invitedPhones.filter(p => !(cur.invitedPhones || []).includes(p));
+    const patch = { title: ev.title, emoji: ev.emoji, theme: ev.theme, customTheme: ev.customTheme, cover: ev.cover, date: ev.date, time: ev.time, endTime: ev.endTime, location: ev.location, stops: ev.stops, food: ev.food, notes: ev.notes,
+      capacity: ev.capacity, approval: ev.approval, allowPlus: ev.allowPlus, plusMax: ev.plusMax, questions: ev.questions, kind: ev.kind, endDate: ev.endDate, cohostUids, groupId: groupId || "", updatedBy: myUid(),
+      ...(ev.kind === "meeting" ? {} : { dayBring: ev.dayBring, dayCarpool: ev.dayCarpool }), ...(ev.stay ? { stay: ev.stay } : {}), ...readRepeat("c") };
+    if (newUids.length) { patch.invitedUids = arrayUnion(...newUids); newUids.forEach(u => { patch[`names.${u}`] = u === myUid() ? S.profile.name : nameOf(u); }); }
+    if (newPhones.length) { patch.invitedPhones = arrayUnion(...newPhones); newPhones.forEach(p => { patch[`invitedPhoneNames.${p}`] = invitedPhoneNames[p] || ""; }); }
+    S._lastEditPatch = patch;
+    try {
+      el("createEventBtn").disabled = true; el("createEventBtn").textContent = "Saving…";
+      await updateDoc(doc(db, "events", eid), patch);
+      composeStop(); resetCompose(); go("#/e/" + eid); toast("Saved", null, null, "happy");
+      const fresh = phoneInviteesSnapshot.filter(p => newPhones.includes(p.e164));
+      if (fresh.length) { const text = eventInviteText({ ...cur, ...ev, id: eid }); setTimeout(() => { if (fresh.length === 1) location.href = smsLink([fresh[0].e164], text); else openTextInviteDialog(fresh, text); }, 400); }
+    } catch (e) { toast("Couldn't save: " + e.message); el("createEventBtn").disabled = false; el("createEventBtn").textContent = "Save changes"; }
+    return;
+  }
   try {
     el("createEventBtn").disabled = true; el("createEventBtn").textContent = "Creating…";
     await setDoc(doc(db, "events", id), ev);
@@ -4575,7 +4593,7 @@ function wireEventPage(ev) {
   const join = $("[data-join]"); if (join) join.onclick = () => joinViaLink(ev, join);
   const cal = $("[data-cal]"); if (cal) cal.onclick = () => openCalendarDialog(ev);
   wireEvMoney(ev);
-  const edit = $("[data-edit]"); if (edit) edit.onclick = () => editEvent(ev);
+  const edit = $("[data-edit]"); if (edit) edit.onclick = () => openComposerForEdit(ev);
   const del = $("[data-del]"); if (del) del.onclick = () => delEvent(ev);
   wireWall(ev);
 }
@@ -4995,6 +5013,20 @@ document.addEventListener("click", e => {
   if (wrap) wrap.hidden = !trip; if (note) note.textContent = trip ? "A trip spans days: a day-by-day plan, where everyone's staying, rides, packing, and one running tab." : b.dataset.ekind === "meeting" ? "A plain calendar entry: title, time, place, who." : "Make it a trip to get day tabs, a place to stay, rooms, packing, and a running tab.";
   const dl = document.querySelector("#eDate") && document.querySelector("#eDate").closest("label").querySelector("span"); if (dl) dl.textContent = trip ? "First day" : "Date";
 });
+// Edit opens the full composer (theme, cover, emoji, people, everything), loaded from the event. Saving writes the
+// changes back to the same event: people can be added here, never removed (that stays on the guest list), and
+// RSVPs, reactions, photos, and the chat are untouched.
+function openComposerForEdit(ev) {
+  resetCompose(); compose._restored = true; compose.editId = ev.id;
+  const me = myUid();
+  Object.assign(compose, { title: ev.title || "", emoji: ev.emoji || "🎉", theme: ev.theme || DEFAULT_THEME, customTheme: ev.customTheme || null, cover: ev.cover || null, coverTab: ev.cover ? "upload" : "emoji",
+    date: ev.date || "", endDate: ev.endDate || "", time: ev.time || "", end: ev.endTime || "", where: ev.location || "", food: ev.food || "", notes: ev.notes || "", cap: ev.capacity ? String(ev.capacity) : "", approval: !!ev.approval,
+    questions: (ev.questions || []).map(q => ({ ...q })), invitees: new Set((ev.invitedUids || []).filter(u => u !== me)), phoneInvitees: (ev.invitedPhones || []).map(p => ({ e164: p, name: (ev.invitedPhoneNames || {})[p] || "" })),
+    cohosts: new Set(ev.cohostUids || []), groupId: ev.groupId || "", kind: ev.kind === "meeting" ? "meeting" : ev.kind === "trip" ? "trip" : "event",
+    repeat: ev.repeat || "", repeatEvery: ev.repeatEvery || 0, repeatUnit: ev.repeatUnit || "", repeatUntil: ev.repeatUntil || "",
+    stops: cleanStops(ev.stops).map(x => ({ ...x })), plusOn: !!ev.allowPlus, plusMax: ev.plusMax || 0, bringOn: ev.dayBring !== false, carOn: ev.dayCarpool !== false, stay: ev.stay ? { ...ev.stay } : null });
+  go("#/new");
+}
 function editEvent(ev) {
   const E = { stops: evStops(ev).map(x => ({ ...x })), time: ev.time || "", where: ev.location || "", emoji: ev.emoji || "📍", kind: ev.kind || "event" };
   const ectx = { h: E, card: "eStopsCard", head: "eStopsHead", time: "eTime", where: "eWhere", hide: "estops-hide", save: () => {}, before: null };
@@ -6943,7 +6975,7 @@ function wireMeeting(ev) {
   if (el("guestToggle")) el("guestToggle").onclick = () => { const c = el("guestCard"); const open = !c.classList.contains("open"); c.classList.toggle("open", open); el("guestToggle").setAttribute("aria-expanded", open); try { LS.set("friendlyGuestOpen:" + ev.id, open ? "1" : "0"); } catch {} };
   document.querySelectorAll("[data-uninvitephone]").forEach(b => b.onclick = () => uninviteEventPhone(ev, b.dataset.uninvitephone));
   const nd = $("[data-nudge]"); if (nd) nd.onclick = () => nudge(ev, nd, true);
-  const ed = $("[data-edit]"); if (ed) ed.onclick = () => editEvent(ev);
+  const ed = $("[data-edit]"); if (ed) ed.onclick = () => openComposerForEdit(ev);
   const dp = $("[data-dup]"); if (dp) dp.onclick = () => duplicateEvent(ev);
   const dl = $("[data-del]"); if (dl) dl.onclick = () => delEvent(ev);
   const pseudo = { id: ev.id, _col: ["events", ev.id], _manage: false, title: ev.title };
@@ -7135,6 +7167,7 @@ window.addEventListener("hashchange", () => {
   resetCompose(); compose._restored = true;
 });
 function saveDraft() {
+  if (compose.editId) return;   // editing an existing event is never a draft
   if (!(compose.title || "").trim() || !S.user) return;
   clearTimeout(draftTimer);
   draftTimer = setTimeout(() => {
