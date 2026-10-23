@@ -1366,7 +1366,7 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 .fs-pair .fsp-l,.fs-pair .fsp-r,.fs-pair .coral-pop{pointer-events:auto}
 
 /* Home: the dashboard */
-.hd-greet{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:4px 0 14px}.hd-greet h1{font-size:clamp(1.3rem,6.2vw,1.625rem);margin:0 0 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.hd-greet>div:first-child{flex:1;min-width:0}.hd-greet .blip{flex:none}
+.hd-greet{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:4px 0 14px}.hd-greet h1{font-size:clamp(1.1rem,5.5vw,1.625rem);margin:0 0 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.hd-greet>div:first-child{flex:1;min-width:0}.hd-greet .blip{flex:none}
 .hd-hero{position:relative;display:flex;flex-direction:column;justify-content:space-between;min-height:236px;border-radius:20px;overflow:hidden;color:var(--th-ink,#fff);box-shadow:var(--shadow-lg);isolation:isolate;margin:0 0 14px;cursor:pointer}
 .hd-hero .ev-card-bg,.hd-hero .cover-img{position:absolute;inset:0;z-index:-1}.hd-hero .cover-img{width:100%;height:100%;object-fit:cover}
 .hd-hero.has-cover{color:#fff}.hd-hero.has-cover::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.05),rgba(0,0,0,.6) 70%);z-index:-1}

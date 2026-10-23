@@ -1824,7 +1824,7 @@ function homeBody() {
   const plansLine = weekCount ? `${weekCount} plan${weekCount === 1 ? "" : "s"} this week` : "nothing on the calendar this week";
   // Weekends are Coral's: she takes the greeting.
   const pair = `<span class="hd-mascots" id="hdMascots">${mascotBtn("dot")}${mascotBtn("coral")}</span>`;
-  const head = weekend ? `<div><h1>It's ${new Date().toLocaleDateString("en-US", { weekday: "long" })}, ${esc(first(S.profile.name))}.</h1><p class="muted sm">What are we doing?</p></div>${pair}`
+  const head = weekend ? `<div><h1>It's ${new Date().toLocaleDateString("en-US", { weekday: "long" })}, ${esc(first(S.profile.name))}</h1><p class="muted sm">What are we doing?</p></div>${pair}`
     : `<div><h1>${greet}, ${esc(first(S.profile.name))}</h1><p class="muted sm">${dateLine}</p></div>${pair}`;
   // The same row Plans has up top: the week's count as the heading (tap for Plans), New event at the right.
   const toolsRow = `<div class="section-head hd-tools"><h2><a class="hd-plans" data-go="#/plans">${weekCount ? `${weekCount} plan${weekCount === 1 ? "" : "s"} this week` : "No plans this week"}</a></h2><button class="btn primary small" data-go="#/new">＋ New event</button></div>`;
@@ -1910,6 +1910,14 @@ const SHOW_BITS = (() => {
 })();
 // Home's time-based cards (today's plan, the live card, the morning after) redraw once a minute while it's on screen.
 setInterval(() => { if (document.hidden || !S.ready || (S.route || {}).name !== "home") return; if (document.querySelector(".lv-card, .hd-hero.today, .today-card, .lv-after")) renderSoon(); }, 60000);
+// The greeting stays on one line: a long name shrinks the type a few steps, and only a very long one wraps.
+function fitGreeting() {
+  const h = document.querySelector(".hd-greet h1"); if (!h) return;
+  h.style.fontSize = ""; h.style.whiteSpace = "";
+  let size = parseFloat(getComputedStyle(h).fontSize) || 24;
+  while (h.scrollWidth > h.clientWidth + 1 && size > 17) { size -= 1; h.style.fontSize = size + "px"; }
+  if (h.scrollWidth > h.clientWidth + 1) { h.style.whiteSpace = "normal"; h.style.textOverflow = "clip"; }
+}
 function startMascotShow() {
   clearTimeout(S._showTimer);
   // Name tags introduce them for about ten seconds, then fade; once seen this session they don't come back.
@@ -2255,7 +2263,7 @@ function crewsRow() {
   return `<div class="hd-h"><h3>Your crews</h3><a class="hd-link" data-go="#/groups">Groups ›</a></div><div class="hd-scroll hd-crews">${groups.map((g, i) => `<a class="hd-crew" data-go="#/g/${g.id}"><span class="hd-crew-ic" style="background:${esc(g.color || GROUP_COLORS[i % GROUP_COLORS.length])}">${groupMini(g)}</span><span>${esc(g.name)}</span></a>`).join("")}</div>`;
 }
 function wireHomeDash() {
-  wireBanners(); wireAsks(); wireLive(); wireDigest();
+  wireBanners(); wireAsks(); wireLive(); wireDigest(); fitGreeting();
   document.querySelectorAll("[data-mascot]").forEach(b => b.onclick = () => openMascot(b.dataset.mascot));
   startMascotShow();
   document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
