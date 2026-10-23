@@ -1569,3 +1569,7 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 
 /* Home: the week's count and New event, like the top of Plans */
 .hd-tools{margin:2px 0 12px}.hd-tools h2{font-size:1.125rem;min-width:0}.hd-tools h2 .hd-plans{color:var(--ink);font-weight:inherit;text-decoration:none}.hd-tools .btn{flex:none}
+
+/* Editor: room between the current cover and the replace controls under it */
+#coverPanel .cover-preview-img{margin-bottom:16px}
+#coverPanel .cover-preview-img+.cover-drop,#coverPanel .cover-preview-img+.ai-row,#coverPanel .cover-preview-img+.emoji-pick{margin-top:0}
