@@ -3117,9 +3117,10 @@ function curateBody() {
   if (d) markCuratedSeen();
   const phaseText = { starting: "Warming up", searching: "Searching what's on and pairing places to eat", sorting: "Sorting the good ones" }[S._curPhase] || "Looking around";
   const lead = !d && !S._curError ? `Give me a minute. ${phaseText} within ${myMiles()} miles of ${city}…` : S._curError ? "I couldn't look around just now (" + S._curError + "). Try again in a bit." : shown.length ? (filtered.length ? CURATE_LEADS[curFilter] : "Nothing tagged for that yet, so here's everything I found.") : "Nothing yet. Build your own and I'll go looking.";
-  return `<div class="section-head cur-head"><h2>${CURATE_LABEL}</h2><span class="cur-loc"><button type="button" class="cur-loc-city" id="curCityBtn" aria-label="Change city">📍 <span>${esc(city)}</span></button><button type="button" class="btn small near-me" id="nearMeBtn" aria-label="Use my location">Near me</button>${milesSelect("curMiles")}</span></div>${S.profile.cityGuess ? `<p class="muted sm cur-guess">Dot guessed your city from your phone number. Tap 📍 to change it.</p>` : ""}
+  return `<div class="section-head cur-head"><h2>${CURATE_LABEL}</h2>${milesSelect("curMiles")}</div>
+    <div class="cur-locbar"><button type="button" class="cur-loc-city" id="curCityBtn" aria-label="Change city">📍 <span>${esc(city)}</span><i class="chev">›</i></button><button type="button" class="btn small near-me" id="nearMeBtn" aria-label="Use my location"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>Near me</button></div>${S.profile.cityGuess ? `<p class="muted sm cur-guess">Dot guessed your city from your phone number. Tap 📍 to change it.</p>` : ""}
   <div class="dot-say cur-dot ${curFilter === "late" ? "coral-say" : ""}">${curFilter === "late" && d ? coral("party", 48) : dot(d ? "happy" : "thinking", 48)}<div class="say-bubble">${curFilter === "late" && d ? "Coral's picks. The night doesn't have to end at 10. Tap one and Dot will set it up." : esc(lead)}<div class="cur-acts"><button type="button" class="btn small primary" id="curBuild">✨ Build me a night</button><button type="button" class="btn small" id="curBrowse">🔎 Browse ideas</button></div></div></div>
-  <div class="chiprow">${CURATE_FILTERS.map(([k, l]) => `<button type="button" class="fchip ${curFilter === k ? "on" : ""}" data-cf="${k}">${l}</button>`).join("")}</div>
+  <div class="chiprow">${CURATE_FILTERS.map(([k, l]) => `<button type="button" class="fchip ${curFilter === k ? "on" : ""}" data-cf="${k}">${l}</button>`).join("")}${savedIdeas().length ? `<button type="button" class="fchip fchip-saved" id="curSavedChip">⭐ Saved (${savedIdeas().length})</button>` : ""}</div>
   ${!d && !S._curError ? `<div class="card empty compact">${dot("thinking", 64)}<p class="muted" style="margin:6px 0 0">Searching what's on, pairing dinners, checking the times. About half a minute the first time.</p></div>` : ""}
   ${S._curError ? `<div style="text-align:center;margin-bottom:12px"><button type="button" class="btn" id="curRetry">Try again</button></div>` : ""}
   <div id="nights">${shown.map((n, i) => nightCardHtml(n, "c" + i)).join("")}</div>
@@ -3135,7 +3136,7 @@ function ideaCardHtml(x, id, saved) {
   const when = x.date ? fmtDay({ date: x.date }) + (x.time ? " · " + fmtTime(x.time) : "") : "";
   return `<div class="card idea-card"><div class="idea-top"><span class="idea-em">${esc(x.emoji || "✨")}</span><div style="flex:1;min-width:0"><b>${esc(x.title)}</b><div class="muted sm">${esc([x.place, x.area].filter(Boolean).join(" · "))}</div>${when || x.price ? `<div class="muted sm">${esc([when, x.price].filter(Boolean).join(" · "))}</div>` : ""}</div></div>
     ${x.blurb ? `<p class="sm" style="margin:6px 0 8px">${esc(x.blurb)}</p>` : ""}
-    <div class="btnrow" style="gap:6px;flex-wrap:wrap"><button type="button" class="btn primary small" data-iplan="${id}">Make it a plan</button>${saved ? `<button type="button" class="btn ghost small" data-iunsave="${id}">Remove</button>` : `<button type="button" class="btn small" data-isave="${id}">☆ Save</button>`}${x.url ? `<a class="btn small" href="${esc(x.url)}" target="_blank" rel="noopener">Website</a>` : ""}</div></div>`;
+    <div class="btnrow" style="gap:6px;flex-wrap:wrap"><button type="button" class="btn primary small" data-iplan="${id}">Make it a plan</button>${saved ? `<button type="button" class="btn ghost small" data-iunsave="${id}">Remove</button>` : `<button type="button" class="btn small ${savedIdeas().some(y => y.title === x.title) ? "is-saved" : ""}" data-isave="${id}">${savedIdeas().some(y => y.title === x.title) ? "★ Saved" : "☆ Save"}</button>`}${x.url ? `<a class="btn small" href="${esc(x.url)}" target="_blank" rel="noopener">Website</a>` : ""}</div></div>`;
 }
 function ideaToPlan(x) {
   resetCompose(); compose._restored = true;
@@ -3148,7 +3149,9 @@ function ideaToPlan(x) {
 }
 function wireIdeaCards(root = document) {
   root.querySelectorAll("[data-iplan]").forEach(b => b.onclick = () => { const x = S._ideaById[b.dataset.iplan]; if (x) { closeDialog(); ideaToPlan(x); } });
-  root.querySelectorAll("[data-isave]").forEach(b => b.onclick = () => { const x = S._ideaById[b.dataset.isave]; if (!x) return; try { LS.set("friendlyIdeas", JSON.stringify([x, ...savedIdeas().filter(y => y.title !== x.title)].slice(0, 40))); } catch {} b.textContent = "★ Saved"; b.disabled = true; toast("Saved to Curate › Saved ideas"); });
+  root.querySelectorAll("[data-isave]").forEach(b => b.onclick = () => { const x = S._ideaById[b.dataset.isave]; if (!x) return;
+    if (b.classList.contains("is-saved")) { try { LS.set("friendlyIdeas", JSON.stringify(savedIdeas().filter(y => y.title !== x.title))); } catch {} b.classList.remove("is-saved"); b.textContent = "☆ Save"; toast("Removed from Saved"); const sv = el("savedIdeas"); if (sv) render(); return; }
+    try { LS.set("friendlyIdeas", JSON.stringify([x, ...savedIdeas().filter(y => y.title !== x.title)].slice(0, 40))); } catch {} b.textContent = "★ Saved"; b.classList.add("is-saved"); toast("Saved. Find it under ⭐ Saved on Curate; tap ★ again to remove it."); });
   root.querySelectorAll("[data-iunsave]").forEach(b => b.onclick = () => { const x = S._ideaById[b.dataset.iunsave]; if (!x) return; try { LS.set("friendlyIdeas", JSON.stringify(savedIdeas().filter(y => y.title !== x.title))); } catch {} S._ideasOpen = true; render(); });
 }
 function openIdeasBrowser() {
@@ -3197,6 +3200,7 @@ function wireCurate() {
   if (el("nearMeEmpty")) el("nearMeEmpty").onclick = () => nearMe(el("nearMeEmpty"));
   if (el("curMiles")) el("curMiles").onchange = e => { S._curMore = null; saveMiles(e.target.value); };
   if (el("curBuild")) el("curBuild").onclick = () => openNightBuilder();
+  if (el("curSavedChip")) el("curSavedChip").onclick = () => { S._ideasOpen = true; const d = el("savedIdeas"); if (d) { d.open = true; d.scrollIntoView({ block: "start" }); window.scrollBy(0, -100); } };
   if (el("curRetry")) el("curRetry").onclick = () => { S._curError = ""; curKey = ""; if (curSub) { curSub(); curSub = null; } render(); };
   document.querySelectorAll("[data-cf]").forEach(b => b.onclick = () => { curFilter = b.dataset.cf; S._curMore = null; render(); });
   if (el("curMore")) el("curMore").onclick = () => { S._curMore = curFilter; render(); };
