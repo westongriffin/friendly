@@ -3652,13 +3652,14 @@ function composeBody() {
 }
 function qRow(q) { return `<div class="q-row" data-q="${q.id}"><input value="${esc(q.q)}" data-qedit="${q.id}" maxlength="80" placeholder="Your question"><button class="btn ghost small" data-qdel="${q.id}">✕</button></div>`; }
 const COVER_EMOJIS = ["🎉", "🍕", "🌮", "🍻", "🎂", "🎬", "🎮", "🏖️", "🥾", "⚽", "🎲", "🍜", "🎃", "🎄", "🕺", "🔥"];
+// With a cover already on, each tab shows the current picture (✕ removes it) and, below it, that tab's way to replace it.
 function coverPanel() {
-  if (compose.cover) return `<div class="cover-preview-img"><img src="${compose.cover}" alt="cover"><button type="button" class="rm" id="coverRemove">✕</button></div>`;
-  if (compose.coverTab === "upload") return `<div class="cover-drop" id="coverDrop">📷 Tap to upload a photo</div>`;
-  if (compose.coverTab === "ai") return `<div class="ai-row"><input id="aiPrompt" placeholder="e.g. rooftop taco party at sunset"><button type="button" class="btn primary" id="aiGo">Generate</button></div>
+  const have = compose.cover ? `<div class="cover-preview-img"><img src="${compose.cover}" alt="cover"><button type="button" class="rm" id="coverRemove">✕</button></div>` : "";
+  if (compose.coverTab === "upload") return have + `<div class="cover-drop" id="coverDrop">📷 ${compose.cover ? "Tap to upload a different photo" : "Tap to upload a photo"}</div>`;
+  if (compose.coverTab === "ai") return have + `<div class="ai-row"><input id="aiPrompt" placeholder="e.g. rooftop taco party at sunset"><button type="button" class="btn primary" id="aiGo">Generate</button></div>
     <div class="style-chips" id="aiStyles">${COVER_STYLES.map(([k, l]) => `<button type="button" class="${(compose.coverStyle || "surprise") === k ? "on" : ""}" data-cstyle="${k}">${l}</button>`).join("")}</div>
     <p class="muted sm" style="margin:8px 0 0">Describe your vibe, pick a look, and AI makes a one-of-a-kind cover.</p>`;
-  return `<div class="emoji-pick" id="cEmoji">${COVER_EMOJIS.map(e => `<button type="button" class="${e === compose.emoji ? "on" : ""}" data-e="${e}">${e}</button>`).join("")}</div>`;
+  return have + `<div class="emoji-pick" id="cEmoji">${COVER_EMOJIS.map(e => `<button type="button" class="${e === compose.emoji ? "on" : ""}" data-e="${e}">${e}</button>`).join("")}</div>`;
 }
 const PARTICLE_LABELS = { confetti: "🎊 Confetti", petals: "🌸 Petals", stars: "✨ Stars", bubbles: "🫧 Bubbles", sparkles: "💫 Sparkles", embers: "🔥 Embers", none: "◯ None" };
 function openCustomThemeDialog() {
@@ -3797,7 +3798,7 @@ function refreshCoverUI() {
   wireCover();
 }
 function wireCover() {
-  document.querySelectorAll("[data-ctab]").forEach(b => b.onclick = () => { compose.coverTab = b.dataset.ctab; refreshCoverUI(); });
+  document.querySelectorAll("[data-ctab]").forEach(b => b.onclick = () => { compose.coverTab = b.dataset.ctab; document.querySelectorAll("[data-ctab]").forEach(x => x.classList.toggle("on", x === b)); refreshCoverUI(); });
   document.querySelectorAll("#cEmoji button").forEach(b => b.onclick = () => { compose.emoji = b.dataset.e; document.querySelectorAll("#cEmoji button").forEach(x => x.classList.remove("on")); b.classList.add("on"); const em = el("cPvEmoji"); if (em) em.textContent = b.dataset.e; });
   if (el("coverRemove")) el("coverRemove").onclick = () => { compose.cover = null; refreshCoverUI(); };
   if (el("coverDrop")) el("coverDrop").onclick = async () => {
@@ -3867,6 +3868,13 @@ async function createEvent() {
     try {
       el("createEventBtn").disabled = true; el("createEventBtn").textContent = "Saving…";
       await updateDoc(doc(db, "events", eid), patch);
+      // Show the change at once, before the listener catches up: apply the same patch to the copy on this phone.
+      const local = {}; for (const [k, v] of Object.entries(patch)) if (!k.includes(".") && !(v && typeof v === "object" && v._methodName)) local[k] = v;
+      local.invitedUids = [...new Set([...(cur.invitedUids || []), ...newUids])]; local.invitedPhones = [...new Set([...(cur.invitedPhones || []), ...newPhones])];
+      local.names = { ...(cur.names || {}) }; newUids.forEach(u => { local.names[u] = patch[`names.${u}`]; }); local.invitedPhoneNames = { ...(cur.invitedPhoneNames || {}) }; newPhones.forEach(p => { local.invitedPhoneNames[p] = patch[`invitedPhoneNames.${p}`]; });
+      for (const m of (S.evSrc || new Map()).values()) if (m.has(eid)) m.set(eid, { ...m.get(eid), ...local });
+      if (S.evSrc) mergeEvents(); else if (S.events.has(eid)) S.events.set(eid, { ...cur, ...local });
+      S._evShown = null;
       composeStop(); resetCompose(); go("#/e/" + eid); toast("Saved", null, null, "happy");
       const fresh = phoneInviteesSnapshot.filter(p => newPhones.includes(p.e164));
       if (fresh.length) { const text = eventInviteText({ ...cur, ...ev, id: eid }); setTimeout(() => { if (fresh.length === 1) location.href = smsLink([fresh[0].e164], text); else openTextInviteDialog(fresh, text); }, 400); }
