@@ -2834,7 +2834,7 @@ async function leaveGroup(g) {
 const compose = { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji",
   title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false,
   questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "" };
-function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", endDate: "", repeat: "", stops: [], _restored: false, _fromDraft: false, _plan: null, _draftId: null, plusOn: null, plusMax: 0, bring: [], bringOn: true, carOn: true, drive: false, seats: 3 }); clearTimeout(draftTimer); }
+function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", endDate: "", stay: null, repeat: "", stops: [], _restored: false, _fromDraft: false, _plan: null, _draftId: null, plusOn: null, plusMax: 0, bring: [], bringOn: true, carOn: true, drive: false, seats: 3 }); clearTimeout(draftTimer); }
 // ---- "Let me plan it": say the plan, Dot drafts it, you review it in the composer. Nothing is created or sent until you tap Create.
 function planContext(text, mode, ctx) {
   const d = new Date(), pad = n => String(n).padStart(2, "0");
@@ -3532,7 +3532,7 @@ function composeBody() {
   <button class="link-back" data-go="#/">‹ Cancel</button>
   <div class="compose">
     <div class="seg kind-seg" id="kindSeg">
-      <button type="button" class="${compose.kind !== "meeting" ? "on" : ""}" data-kind="event">🎉 Event</button>
+      <button type="button" class="${compose.kind !== "meeting" && compose.kind !== "trip" ? "on" : ""}" data-kind="event">🎉 Event</button>
       <button type="button" class="${compose.kind === "meeting" ? "on" : ""}" data-kind="meeting">📅 Meeting</button>
       <button type="button" class="${compose.kind === "trip" ? "on" : ""}" data-kind="trip">⛵ Trip</button>
     </div>
@@ -3540,7 +3540,7 @@ function composeBody() {
     ${compose._fromDraft ? `<p class="muted sm" style="margin:-4px 0 10px">Restored your draft · <a id="discardDraft" style="color:var(--accent);font-weight:600">Discard</a></p>` : ""}
     ${compose._plan ? planCard() : (window.Blip && !isDemo() && !compose._fromDraft && !compose.title ? `<button type="button" class="btn tell-dot" id="composeTell">${dot("happy", 26)} Or just tell Dot: “Taco night Friday at 7, invite the crew, bring a side.”</button>` : "")}
     <p class="muted sm draft-status" id="draftStatus" style="margin:-4px 0 10px;min-height:1.4em"></p>
-    ${compose.kind === "meeting" ? `<p class="muted sm" style="margin:-4px 0 12px">A plain calendar entry: title, time, place, who. Everyone gets a calendar invite by email.</p>` : compose.kind === "trip" ? `<p class="muted sm" style="margin:-4px 0 12px">A few days away. You get a day-by-day plan, where everyone's staying, rides, packing, and one running tab.</p>` : ""}
+    ${compose.kind === "meeting" ? `<p class="muted sm" style="margin:-4px 0 12px">A plain calendar entry: title, time, place, who. Everyone gets a calendar invite by email.</p>` : compose.kind === "trip" ? `<p class="muted sm" style="margin:-4px 0 12px">A trip is a plan that spans more than one day. Set the first and last day and where everyone's staying here. Once it's created, the trip page adds a day-by-day plan with stops, rooms to pick, rides, packing, and one running tab for the whole trip.</p>` : ""}
     <div class="${compose.kind === "meeting" ? "hidden" : ""}">
     <div class="compose-preview t-${th.id}" id="cPreview" style="--th-accent:${th.accent};--th-ink:${th.ink};--th-on-accent:${th.onAccent};font-family:${th.font},system-ui">
       ${compose.cover ? `<div class="preview-cover"><img src="${compose.cover}" alt=""></div>` : ""}
@@ -3576,6 +3576,11 @@ function composeBody() {
       <div class="two">
         <label class="field"><span>${compose.kind === "trip" ? "First day" : "Date"}</span><input id="cDate" type="date" value="${compose.date || todayStr()}">${compose.kind !== "meeting" && compose.kind !== "trip" && !compose._plan ? `<button type="button" class="link-btn when-hint" id="composeWhen">Not sure when? Ask first ›</button>` : ""}</label>
         ${compose.kind === "trip" ? `<label class="field"><span>Last day</span><input id="cEndDate" type="date" value="${compose.endDate || addDays(compose.date || todayStr(), 2)}" min="${compose.date || todayStr()}"></label>` : ""}
+      ${compose.kind === "trip" ? `</div>${(st => `<div class="field-label" style="margin:6px 0 6px">🏡 Where everyone's staying <span class="muted">(optional, you can add it later)</span></div>
+      <label class="field"><span>Place</span><input id="cStayName" maxlength="80" value="${esc(st.name || "")}" placeholder="Cedar Point Cabin"></label>
+      <label class="field"><span>Address</span><input id="cStayAddr" maxlength="160" value="${esc(st.address || "")}" placeholder="1250 Lakeshore Dr, Pottsboro"></label>
+      <div class="two"><label class="field"><span>Check-in</span><input id="cStayIn" maxlength="20" value="${esc(st.checkIn || "")}" placeholder="4 PM"></label><label class="field"><span>Check-out</span><input id="cStayOut" maxlength="20" value="${esc(st.checkOut || "")}" placeholder="11 AM"></label></div>
+      <div class="two"><label class="field"><span>Door or gate code</span><input id="cStayCode" maxlength="20" value="${esc(st.code || "")}"></label><label class="field"><span>Note</span><input id="cStayNote" maxlength="160" value="${esc(st.note || "")}" placeholder="Wifi: lakehouse / sunset24"></label></div>`)(compose.stay || {})}<div class="two" style="margin-top:4px">` : ""}
         <label class="field stops-hide ${(compose.stops || []).length >= 2 ? "hidden" : ""}"><span>Start</span><input id="cTime" type="time" value="${compose.time}"></label>
       </div>
       <div class="two">
@@ -3716,6 +3721,7 @@ function openComposeInviteDialog() {
 }
 function syncCompose() {
   compose.title = el("cTitle").value; compose.date = el("cDate").value; compose.time = el("cTime").value; if (el("cEndDate")) compose.endDate = el("cEndDate").value;
+  if (el("cStayName")) compose.stay = { name: el("cStayName").value.trim(), address: el("cStayAddr").value.trim(), checkIn: el("cStayIn").value.trim(), checkOut: el("cStayOut").value.trim(), code: el("cStayCode").value.trim(), note: el("cStayNote").value.trim() };
   compose.end = el("cEnd").value; compose.where = el("cWhere").value; compose.notes = el("cNotes").value; if (el("cFood")) compose.food = el("cFood").value;
   compose.cap = el("cCap").value; if (el("cApproval")) compose.approval = el("cApproval").checked;
   if (el("cRepeat")) Object.assign(compose, readRepeat("c"));
@@ -3825,7 +3831,8 @@ async function createEvent() {
     // The event's own unguessable id is the access token behind the "add people" flow
     // (anyone with the link can open + join), so it's always on now.
     openLink: true,
-    kind: compose.kind === "meeting" ? "meeting" : compose.kind === "trip" ? "trip" : "event", endDate: compose.kind === "trip" && el("cEndDate") && el("cEndDate").value > (el("cDate").value || "") ? el("cEndDate").value : "", ...readRepeat("c"),
+    kind: compose.kind === "meeting" ? "meeting" : compose.kind === "trip" ? "trip" : "event", endDate: compose.kind === "trip" && el("cEndDate") && el("cEndDate").value > (el("cDate").value || "") ? el("cEndDate").value : "",
+    ...(compose.kind === "trip" && el("cStayName") && el("cStayName").value.trim() ? { stay: { name: el("cStayName").value.trim(), address: el("cStayAddr").value.trim(), checkIn: el("cStayIn").value.trim(), checkOut: el("cStayOut").value.trim(), code: el("cStayCode").value.trim(), note: el("cStayNote").value.trim() } } : {}), ...readRepeat("c"),
     invitedPhones, invitedPhoneNames, guestEmails: [], sequence: 0,
     createdAt: Date.now()
   };
