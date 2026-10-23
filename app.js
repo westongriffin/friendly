@@ -306,12 +306,12 @@ const LOGO_TIPS = {
     "Tap a group chip up top to see just that crew's plans.",
     "Tap Calendar to see the month; tap a day to see what's on it.",
     "The Today card shows up on the morning of anything you're going to.",
-    "Past events keep their photos and their wall. Scroll down to revisit them.",
-    "Search finds events, places, notes, groups, and expenses in one box.",
+    "Past plans keep their photos and their wall. Scroll down to revisit them.",
+    "Search finds plans, places, notes, groups, and expenses in one box.",
     "The bell shows what's new: RSVPs, comments, invites, and reminders.",
-    "Tap me at the bottom corner to start an event, a meeting, or an expense.",
+    "Tap me at the bottom corner to start a plan, a meeting, or an expense.",
     "Meetings are the plain tiles: title, time, place, calendar invite. No theme needed.",
-    "Copy an old event to plan the next one: open it and tap Duplicate.",
+    "Copy an old plan to make the next one: open it and tap Duplicate.",
     "Add a friend's birthday and I'll bring it up a month out, with a Plan it button.",
     "Turn on notifications in your profile and I'll buzz you when plans change.",
     "Friends who join through your link land in your Activity feed."
@@ -325,9 +325,9 @@ const LOGO_TIPS = {
     "Add a poll with dates and the winning date can become the plan in one tap.",
     "Offer a ride under Carpool and people can grab a seat.",
     "On the day, tap On my way or Running late so the host isn't guessing.",
-    "Drop photos on the wall during the party; they stay with the event forever.",
+    "Drop photos on the wall during the party; they stay with the plan forever.",
     "Add songs to the playlist and the host gets one list to play.",
-    "Hype the event to show the host you're excited before you can commit.",
+    "Hype the plan to show the host you're excited before you can commit.",
     "Cap the guest list and I'll run a waitlist for you.",
     "Ask RSVP questions, like dietary needs, and read the answers in one place.",
     "Tap Add to calendar once and I'll keep the calendar entry updated.",
@@ -337,13 +337,13 @@ const LOGO_TIPS = {
     "Plan from inside a group and everyone's invited automatically.",
     "Group members see each other's birthdays a month out.",
     "The Crew tab shows what the group has spent together and who owes whom.",
-    "Group chat is for the ongoing thread; event walls are for the night itself.",
+    "Group chat is for the ongoing thread; a plan's wall is for the night itself.",
     "Add people by phone number; they get a text with the link to join.",
     "Anyone in the group can add a poll to help decide the next plan.",
-    "Give a group an emoji and a color so its events are easy to spot on the home screen.",
+    "Give a group an emoji and a color so its plans are easy to spot on the home screen.",
     "Filter the home screen by group with the chips under Upcoming.",
-    "Hosts can remove someone from a group; they lose access to its events too.",
-    "Leaving a group keeps the events you already RSVP'd to.",
+    "Hosts can remove someone from a group; they lose access to its plans too.",
+    "Leaving a group keeps the plans you already RSVP'd to.",
     "Add your own birthday in your profile so your groups can celebrate you."
   ],
   money: [
@@ -353,7 +353,7 @@ const LOGO_TIPS = {
     "Mark as paid logs a payback and updates the balances; you can undo it right after.",
     "Tap Pay and Venmo opens with the amount and the person already filled in.",
     "Add your Venmo in your profile so friends can pay you in one tap.",
-    "Expenses can live on an event or on a group, whichever fits.",
+    "Expenses can live on a plan or on a group, whichever fits.",
     "The You owe and Owed to you tiles net everything out across all your friends.",
     "Photos of receipts stay attached to the expense for later.",
     "Settling in cash? Mark it paid here so the balance clears for both of you.",
@@ -1304,7 +1304,7 @@ function replaySplash() {
 // What shows while the account is still loading: the real header and tabs, with soft placeholder cards.
 function loadingShell() {
   return `<header class="topbar"><div class="brand has-dot"><a class="brand-home" href="#/" aria-label="Friendly home">${WORDMARK}</a><span class="brand-dot" aria-hidden="true"></span></div><div class="topbar-right"><span class="skel skel-chip"></span></div></header>
-  <nav class="tabs"><button class="tab on" type="button">Events</button><button class="tab" type="button">Groups</button><button class="tab" type="button">Money</button><button class="tab" type="button"><span class="curate-lbl">${CURATE_LABEL}<i class="spark">✦</i></span></button></nav>
+  <nav class="tabs"><button class="tab on" type="button">Plans</button><button class="tab" type="button">Groups</button><button class="tab" type="button">Money</button><button class="tab" type="button"><span class="curate-lbl">${CURATE_LABEL}<i class="spark">✦</i></span></button></nav>
   <main class="wrap boot-skel" aria-busy="true" aria-label="Loading"><div class="skel skel-banner"></div><div class="skel skel-line"></div><div class="skel-grid"><div class="skel skel-tile"></div><div class="skel skel-tile"></div><div class="skel skel-tile"></div><div class="skel skel-tile"></div></div></main>`;
 }
 function renderNow() {
@@ -1605,21 +1605,21 @@ function edgeMenu() {
     if (mine) items.push(item("edit", "✨ Change something. Just tell me.", "plan-btn"));
     items.push(item("expense-here", "💸 An expense for this"));
     if (!mine) items.push(item("plan", "✨ Let me plan something new", "plan-btn"));
-    items.push(item("event", "🎉 A new event"));
+    items.push(item("event", "🎉 A new plan"));
     items.push(item("ask", "💬 Ask me anything"));
     return { title: mine ? "What should I do?" : "What are we making?", items };
   }
   if (r.name === "group") {
     const g = S.groups.get(r.id); if (!g) return null;
-    return { title: `For ${esc(g.name)}`, items: [item("plan", "✨ Let me plan it. Just tell me.", "plan-btn"), item("event", "🎉 An event for this group"), item("meeting", "📅 A meeting"), item("expense", "💸 An expense for this group"), item("ask", "💬 Ask me anything")] };
+    return { title: `For ${esc(g.name)}`, items: [item("plan", "✨ Let me plan it. Just tell me.", "plan-btn"), item("event", "🎉 A plan for this group"), item("meeting", "📅 A meeting"), item("expense", "💸 An expense for this group"), item("ask", "💬 Ask me anything")] };
   }
-  if (r.name === "groups") return { title: "What are we making?", items: [item("group", "👥 A new group"), item("plan", "✨ Let me plan something", "plan-btn"), item("event", "🎉 An event"), item("ask", "💬 Ask me anything")] };
-  return { title: "What are we making?", items: [item("plan", "✨ Let me plan it. Just tell me.", "plan-btn"), item("night", "🌆 Build me a night out"), item("event", "🎉 An event"), item("meeting", "📅 A meeting"), item("expense", "💸 An expense"), item("ask", "💬 Ask me anything")] };
+  if (r.name === "groups") return { title: "What are we making?", items: [item("group", "👥 A new group"), item("plan", "✨ Let me plan something", "plan-btn"), item("event", "🎉 A plan"), item("ask", "💬 Ask me anything")] };
+  return { title: "What are we making?", items: [item("plan", "✨ Let me plan it. Just tell me.", "plan-btn"), item("night", "🌆 Build me a night out"), item("event", "🎉 A plan"), item("meeting", "📅 A meeting"), item("expense", "💸 An expense"), item("ask", "💬 Ask me anything")] };
 }
 function edgeDotHtml() {
   if (S.route.name === "dm") return "";   // the chat's message box owns the bottom of the screen
   const m = edgeMenu();
-  if (!m) return window.Blip ? "" : `<div class="fab-scrim"></div><button class="fab" id="fabBtn" title="Create event">＋</button>`;
+  if (!m) return window.Blip ? "" : `<div class="fab-scrim"></div><button class="fab" id="fabBtn" title="Create plan">＋</button>`;
   return `<div class="fab-scrim"></div><div class="edge-dot" id="edgeDot" role="button" aria-label="Make something"><div class="edge-menu"><b>${m.title}</b>${m.items.join("")}</div><span class="edge-art">${dot("idle", 66)}</span></div>`;
 }
 function wireEdgeDot() {
@@ -1827,14 +1827,14 @@ function homeBody() {
   const head = weekend ? `<div><h1>It's ${new Date().toLocaleDateString("en-US", { weekday: "long" })}, ${esc(first(S.profile.name))}</h1><p class="muted sm">What are we doing?</p></div>${pair}`
     : `<div><h1>${greet}, ${esc(first(S.profile.name))}</h1><p class="muted sm">${dateLine}</p></div>${pair}`;
   // The same row Plans has up top: the week's count as the heading (tap for Plans), New event at the right.
-  const toolsRow = `<div class="section-head hd-tools"><h2><a class="hd-plans" data-go="#/plans">${weekCount ? `${weekCount} plan${weekCount === 1 ? "" : "s"} this week` : "No plans this week"}</a></h2><button class="btn primary small" data-go="#/new">＋ New event</button></div>`;
+  const toolsRow = `<div class="section-head hd-tools"><h2><a class="hd-plans" data-go="#/plans">${weekCount ? `${weekCount} plan${weekCount === 1 ? "" : "s"} this week` : "No plans this week"}</a></h2><button class="btn primary small" data-go="#/new">＋ New plan</button></div>`;
   return `
   <header class="hd-greet">${head}</header>
   ${toolsRow}
   ${weekDigest(mine)}
   ${notifCard()}${hero && hero.date === t ? heroCard(hero) : ""}${todayCards}${afterCard()}${birthdayCard()}
   ${askBox()}${asksSection()}
-  ${hero && hero.date !== t ? heroCard(hero) : hero || mine.length || todayEvs.length ? "" : `<div class="card empty">${dot("sleepy", 84)}<b>No plans yet</b><p class="muted">Tell Dot what you're thinking, or start one from scratch.</p><div class="btnrow" style="justify-content:center"><button class="btn primary" id="homeTell">Tell Dot</button><button class="btn" data-go="#/new">New event</button></div></div>`}
+  ${hero && hero.date !== t ? heroCard(hero) : hero || mine.length || todayEvs.length ? "" : `<div class="card empty">${dot("sleepy", 84)}<b>No plans yet</b><p class="muted">Tell Dot what you're thinking, or start one from scratch.</p><div class="btnrow" style="justify-content:center"><button class="btn primary" id="homeTell">Tell Dot</button><button class="btn" data-go="#/new">New plan</button></div></div>`}
   ${needsYou()}
   ${moneyGlance()}
   ${curateTray(upcoming, false)}
@@ -2295,11 +2295,11 @@ function plansBody() {
 
   return `
   ${askBox()}${asksSection()}
-  <div class="section-head"><h2>${homeView === "calendar" ? "Calendar" : "Upcoming"}</h2><span class="btnrow head-tools"><button class="icon-btn" id="viewToggle" title="${homeView === "calendar" ? "Show as cards" : "Show as a calendar"}" aria-label="${homeView === "calendar" ? "Show as cards" : "Show as a calendar"}">${homeView === "calendar" ? "🗂" : "📅"}</button><button class="icon-btn" data-go="#/drafts" title="Drafts" aria-label="Drafts${(S.drafts || []).length ? ", " + S.drafts.length + " saved" : ""}">📝${(S.drafts || []).length ? `<span class="badge">${S.drafts.length}</span>` : ""}</button><button class="btn primary small" data-go="#/new">＋ New event</button></span></div>
+  <div class="section-head"><h2>${homeView === "calendar" ? "Calendar" : "Upcoming"}</h2><span class="btnrow head-tools"><button class="icon-btn" id="viewToggle" title="${homeView === "calendar" ? "Show as cards" : "Show as a calendar"}" aria-label="${homeView === "calendar" ? "Show as cards" : "Show as a calendar"}">${homeView === "calendar" ? "🗂" : "📅"}</button><button class="icon-btn" data-go="#/drafts" title="Drafts" aria-label="Drafts${(S.drafts || []).length ? ", " + S.drafts.length + " saved" : ""}">📝${(S.drafts || []).length ? `<span class="badge">${S.drafts.length}</span>` : ""}</button><button class="btn primary small" data-go="#/new">＋ New plan</button></span></div>
   ${filterBar}
-  ${homeView === "calendar" ? calendarBody([...upcoming, ...past]) : `<div class="ev-grid">${upcoming.length ? upcoming.map(eventCard).join("") : emptyState("🗓️", "No plans yet", "Create your first event: pick a theme and invite the crew.", "sleepy") + (window.Blip && !isDemo() ? `<div style="text-align:center;margin:-6px 0 14px"><button type="button" class="btn tell-dot inline" id="homeTell">${dot("happy", 26)} Or just tell Dot the plan</button></div>` : "")}</div>
-  ${past.length || !S.pastLoaded ? `<button type="button" class="section-head past-head" id="pastToggle" aria-expanded="${!!S.pastOpen}"><h2>Past</h2><span class="muted sm">${S.pastLoaded ? past.length + (past.length === 1 ? " event" : " events") : ""}</span><span class="past-chev" aria-hidden="true">›</span></button>
-  ${S.pastOpen ? (S.pastLoaded ? `<div class="ev-grid dim">${past.map(eventCard).join("")}</div>` : `<p class="muted sm" style="margin:6px 2px">Loading past events…</p>`) : ""}` : ""}
+  ${homeView === "calendar" ? calendarBody([...upcoming, ...past]) : `<div class="ev-grid">${upcoming.length ? upcoming.map(eventCard).join("") : emptyState("🗓️", "No plans yet", "Make your first plan: pick a theme and invite the crew.", "sleepy") + (window.Blip && !isDemo() ? `<div style="text-align:center;margin:-6px 0 14px"><button type="button" class="btn tell-dot inline" id="homeTell">${dot("happy", 26)} Or just tell Dot the plan</button></div>` : "")}</div>
+  ${past.length || !S.pastLoaded ? `<button type="button" class="section-head past-head" id="pastToggle" aria-expanded="${!!S.pastOpen}"><h2>Past</h2><span class="muted sm">${S.pastLoaded ? past.length + (past.length === 1 ? " plan" : " plans") : ""}</span><span class="past-chev" aria-hidden="true">›</span></button>
+  ${S.pastOpen ? (S.pastLoaded ? `<div class="ev-grid dim">${past.map(eventCard).join("")}</div>` : `<p class="muted sm" style="margin:6px 2px">Loading past plans…</p>`) : ""}` : ""}
   ${declined.length ? `<button type="button" class="section-head past-head" id="declinedToggle" aria-expanded="${!!S.declinedOpen}"><h2>Declined</h2><span class="muted sm">${declined.length + (declined.length === 1 ? " plan" : " plans")} you can't make</span><span class="past-chev" aria-hidden="true">›</span></button>
   ${S.declinedOpen ? `<div class="ev-grid dim">${declined.map(eventCard).join("")}</div>` : ""}` : ""}`}`;
 }
@@ -2465,7 +2465,7 @@ function groupPageBody(gid) {
   ${(() => { const t = todayStr(); const evs = myEvents().filter(e => evInGroup(e, g));
     const up = evs.filter(e => e.date >= t).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
     const past = evs.filter(e => e.date < t).sort((a, b) => b.date.localeCompare(a.date));
-    return `<div class="section-head" style="margin-top:22px"><h2>Plans</h2>${evs.length ? `<button class="btn small" data-homefilter="${g.id}">Open in Events</button>` : ""}</div>
+    return `<div class="section-head" style="margin-top:22px"><h2>Plans</h2>${evs.length ? `<button class="btn small" data-homefilter="${g.id}">Open in Plans</button>` : ""}</div>
     <div class="card">${up.length ? up.map(planRow).join("") : `<p class="muted" style="padding:14px 16px;margin:0">Nothing planned yet. Tap “Plan for this group” to start one.</p>`}</div>
     ${past.length ? `<details class="adv" style="margin-top:8px"><summary>${past.length} past</summary><div class="card" style="margin-top:8px">${past.slice(0, 20).map(planRow).join("")}</div></details>` : ""}`; })()}
   ${(() => { const bs = upcomingBirthdays(90, g.id); const anySet = members.some(m => m.birthday); return `<div class="section-head" style="margin-top:22px"><h2>Birthdays</h2></div>
@@ -2779,7 +2779,7 @@ function openTextInviteDialog(texted, text, where = "event", title = "Text your 
     <div id="autoBox">${autoHtml()}</div>
     <button type="button" class="btn ${oneAtATime ? "" : "primary"}" id="textAll" style="width:100%;margin:10px 0 12px">💬 Send to all ${n}, one at a time${oneAtATime ? " instead" : ""}</button>
     <div class="stack" id="txtRows">${rowsHtml()}</div>
-    <p class="muted sm" style="margin:10px 0 0">${{ expense: `You can text anyone again from the expense: tap <b>Text</b> next to their name.`, friends: `You can always come back and text stragglers from <b>Friends › Invited</b>.`, group: `You can always come back and text stragglers from the group's <b>Invited</b> list or <b>Friends › Invited</b>.`, event: `You can always come back and text stragglers from the event's <b>Guest list</b> or <b>Friends › Invited</b>.` }[where]}</p>`, null, null);
+    <p class="muted sm" style="margin:10px 0 0">${{ expense: `You can text anyone again from the expense: tap <b>Text</b> next to their name.`, friends: `You can always come back and text stragglers from <b>Friends › Invited</b>.`, group: `You can always come back and text stragglers from the group's <b>Invited</b> list or <b>Friends › Invited</b>.`, event: `You can always come back and text stragglers from the plan's <b>Guest list</b> or <b>Friends › Invited</b>.` }[where]}</p>`, null, null);
   const currentText = () => el("txtMsg").value;
   const renderRows = () => { const box = el("txtRows"); if (box) box.innerHTML = rowsHtml(); wireRowButtons(); };
   function renderAuto() {
@@ -2836,7 +2836,7 @@ async function acceptInvite(gid, btn) {
 }
 async function uninvite(g, email) { try { await updateDoc(doc(db, "groups", g.id), { invitedEmails: (g.invitedEmails || []).filter(e => e !== email) }); } catch (e) { toast(e.message); } }
 async function uninvitePhone(g, e164) { try { await updateDoc(doc(db, "groups", g.id), { invitedPhones: (g.invitedPhones || []).filter(p => p !== e164), [`invitedPhoneNames.${e164}`]: deleteField() }); } catch (e) { toast(e.message); } }
-async function deleteGroup(g) { if (isDemo() && g.id === DEMO_GROUP) return toast("Deleting the demo group is off -- it resets nightly instead."); if (!confirm(`Delete “${g.name}”? Its events stay, but the group is removed.`)) return; try { await deleteDoc(doc(db, "groups", g.id)); go("#/groups"); toast("Group deleted"); } catch (e) { toast(e.message); } }
+async function deleteGroup(g) { if (isDemo() && g.id === DEMO_GROUP) return toast("Deleting the demo group is off -- it resets nightly instead."); if (!confirm(`Delete “${g.name}”? Its plans stay, but the group is removed.`)) return; try { await deleteDoc(doc(db, "groups", g.id)); go("#/groups"); toast("Group deleted"); } catch (e) { toast(e.message); } }
 async function leaveGroup(g) {
   if (isDemo() && g.id === DEMO_GROUP) return toast("Leaving the demo group is off -- it resets nightly instead.");
   if (!confirm(`Leave “${g.name}”?`)) return;
@@ -3519,7 +3519,7 @@ function wireStops() {
   root.querySelectorAll("[data-addstop]").forEach(b => b.onclick = () => {
     if (C.before) C.before(); const [emoji, name] = b.dataset.addstop.split("|");
     if ((H.stops || []).length < 2) H.stops = [{ time: (el(C.time) || {}).value || H.time || "", emoji: isMeetingCtx(C) ? "📅" : (H.emoji || "📍"), name: "", place: (el(C.where) || {}).value || H.where || "" }];
-    if (H.stops.length >= 8) return toast("Eight stops is the most one event can hold.");
+    if (H.stops.length >= 8) return toast("Eight stops is the most one plan can hold.");
     H.stops.push({ time: "", emoji, name, place: "" }); C.save(); refreshStops();
     if (!name) { const rows = el(C.card).querySelectorAll(".stop-edit"), last = rows[rows.length - 1]; if (last) last.querySelector(".st-name").focus(); }   // Custom: straight to naming it
   });
@@ -3550,7 +3550,7 @@ function composeBody() {
   const groups = [...S.groups.values()];
   const th = themeOf(compose.theme, compose.customTheme);
   return `
-  <button class="link-back" data-go="${compose.editId ? "#/e/" + esc(compose.editId) : "#/"}">‹ ${compose.editId ? "Back to the " + (compose.kind === "meeting" ? "meeting" : compose.kind === "trip" ? "trip" : "event") : "Cancel"}</button>${compose.editId ? `<p class="muted sm" style="margin:4px 0 10px">Editing. Everyone invited stays; add people here and change anything else.</p>` : ""}
+  <button class="link-back" data-go="${compose.editId ? "#/e/" + esc(compose.editId) : "#/"}">‹ ${compose.editId ? "Back to the " + (compose.kind === "meeting" ? "meeting" : compose.kind === "trip" ? "trip" : "plan") : "Cancel"}</button>${compose.editId ? `<p class="muted sm" style="margin:4px 0 10px">Editing. Everyone invited stays; add people here and change anything else.</p>` : ""}
   <div class="compose">
     <div class="seg kind-seg" id="kindSeg">
       <button type="button" class="${compose.kind !== "meeting" && compose.kind !== "trip" ? "on" : ""}" data-kind="event">🎉 Event</button>
@@ -3568,7 +3568,7 @@ function composeBody() {
       <canvas class="preview-canvas" id="cCanvas"></canvas>
       <div class="preview-body" style="${compose.cover ? "color:#fff" : ""}">
         ${compose.cover ? "" : `<div class="preview-emoji" id="cPvEmoji">${esc(compose.emoji)}</div>`}
-        <div class="preview-title" id="cPvTitle">Your event</div>
+        <div class="preview-title" id="cPvTitle">Your plan</div>
         <div class="preview-date" id="cPvDate">Pick a date</div>
       </div>
     </div>
@@ -3647,9 +3647,9 @@ function composeBody() {
     </div>
 
     </div>
-    <button class="btn primary lg full" id="createEventBtn">${compose.editId ? "Save changes" : compose.kind === "meeting" ? "Create meeting &amp; send invites" : "Create event &amp; send invites"}</button>
+    <button class="btn primary lg full" id="createEventBtn">${compose.editId ? "Save changes" : compose.kind === "meeting" ? "Create meeting &amp; send invites" : "Create plan &amp; send invites"}</button>
     <button type="button" class="btn full" id="saveDraftBtn" style="margin-top:10px">📝 Save draft</button>
-    <p class="muted sm" style="text-align:center;margin:6px 0 0">Drafts aren't sent to anyone. Find them under 📝 Drafts on the Events page.</p>
+    <p class="muted sm" style="text-align:center;margin:6px 0 0">Drafts aren't sent to anyone. Find them under 📝 Drafts on the Plans page.</p>
   </div>`;
 }
 function qRow(q) { return `<div class="q-row" data-q="${q.id}"><input value="${esc(q.q)}" data-qedit="${q.id}" maxlength="80" placeholder="Your question"><button class="btn ghost small" data-qdel="${q.id}">✕</button></div>`; }
@@ -3731,7 +3731,7 @@ function refreshComposePicked() {
 function openComposeInviteDialog() {
   pickPeopleDialog({
     title: "Add people",
-    blurb: "Pick them from your contacts. Friends already on Friendly are added when you create the event; everyone else gets texted a join link right after.",
+    blurb: "Pick them from your contacts. Friends already on Friendly are added when you create the plan; everyone else gets texted a join link right after.",
     exclude: new Set([...compose.invitees, myUid(), ...((compose.groupId && S.groups.get(compose.groupId) || {}).memberUids || [])]),
     submitLabel: "Add",
     onSubmit: async (direct, texted) => {
@@ -3759,7 +3759,7 @@ function wireCompose() {
   document.querySelectorAll("[data-idea]").forEach(b => b.onclick = () => applyIdea(+b.dataset.idea));
   composeStop = startParticles(el("cCanvas"), compose.theme, compose.customTheme);
   const upd = () => {
-    el("cPvTitle").textContent = el("cTitle").value.trim() || "Your event";
+    el("cPvTitle").textContent = el("cTitle").value.trim() || "Your plan";
     const dv = el("cDate").value, tv = el("cTime").value;
     el("cPvDate").textContent = dv ? evDate({ date: dv }).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }) + (tv ? " · " + fmtTime(tv) : "") : "Pick a date";
   };
@@ -3894,7 +3894,7 @@ async function createEvent() {
     if (myRide) addDoc(collection(db, "events", id, "comments"), { kind: "ride", seats: myRide, from: "", note: "", authorId: myUid(), authorName: S.profile.name, text: "", createdAt: Date.now() }).catch(() => {});
     for (const b of planBring) { try { await addDoc(collection(db, "events", id, "comments"), { kind: "bring", item: b.item, qty: b.qty, authorId: myUid(), authorName: S.profile.name, text: "", createdAt: Date.now() }); } catch {} }
     go("#/e/" + id);
-    const made = (ev.kind === "meeting" ? "Meeting" : "Event") + " created, invites are on their way";
+    const made = (ev.kind === "meeting" ? "Meeting" : ev.kind === "trip" ? "Trip" : "Plan") + " created, invites are on their way";
     // Hosts with Calendar sync get it automatically; everyone else gets a one-tap add.
     if (S.profile && S.profile.calToken) toast(made); else toast(made, "Add to my calendar", () => openCalendarDialog({ ...ev, id }));
     if (phoneInviteesSnapshot.length) {
@@ -3904,7 +3904,7 @@ async function createEvent() {
         else openTextInviteDialog(phoneInviteesSnapshot, text);
       }, 400);
     }
-  } catch (e) { toast("Couldn't create: " + e.message); el("createEventBtn").disabled = false; el("createEventBtn").textContent = "Create event & send invites"; }
+  } catch (e) { toast("Couldn't create: " + e.message); el("createEventBtn").disabled = false; el("createEventBtn").textContent = "Create plan & send invites"; }
 }
 
 // ---------- EVENT PAGE (the themed invite) ----------
@@ -3957,7 +3957,7 @@ function renderEventPage(root, id) {
   if (ev) noteNames(ev);   // the host's and guests' names ride on the event, for guests who don't know them
   S._evShown = ev ? { id, ev, profile: S.profile } : null;
   if (!ev) startPast();
-  if (!ev) { root.innerHTML = shell(`<div class="card empty">${dot("thinking", 72)}<b>Loading event…</b><p class="muted">If this stays, you may not have access.</p><button class="btn" data-go="#/">Home</button></div>`); wireShell(); getDoc(doc(db, "events", id)).then(d => { if (d.exists()) { S.events.set(id, { id, ...d.data() }); render(); } }).catch(() => {}); return; }
+  if (!ev) { root.innerHTML = shell(`<div class="card empty">${dot("thinking", 72)}<b>Loading plan…</b><p class="muted">If this stays, you may not have access.</p><button class="btn" data-go="#/">Home</button></div>`); wireShell(); getDoc(doc(db, "events", id)).then(d => { if (d.exists()) { S.events.set(id, { id, ...d.data() }); render(); } }).catch(() => {}); return; }
   if (ev.kind === "meeting") { root.innerHTML = shell(meetingBody(ev)); wireShell(); wireMeeting(ev); return; }
   const th = themeOf(ev.theme, ev.customTheme);
   root.innerHTML = `<div class="event-page t-${esc(th.id)}" id="evPage" style="--th-font:${esc(th.font)},system-ui;--th-ink:${esc(th.ink)};--th-sub:${esc(th.sub)};--th-accent:${esc(th.accent)};--th-on-accent:${esc(th.onAccent)};--th-chip:${esc(th.chip)};--th-card:${esc(th.card)}">
@@ -4022,8 +4022,8 @@ function eventInner(ev) {
       return Array.from({ length: myPlus }, (_, i) => `<input class="plus-name" data-plusidx="${i}" maxlength="40" placeholder="Guest ${i + 1}'s name" value="${esc(names[i] || "")}">`).join("");
     })() : ""}` : ""}
     ${myR === "pending" ? `<p class="pending-note">⏳ Waiting for the host to approve you.</p>` : ""}
-    ${full && myR !== "going" ? `<p class="full-note">This event is full. RSVP to join the waitlist.</p>` : ""}
-    ${questionsBlock(ev, me, myR)}` : ev.openLink ? `<p class="not-invited">You're invited! Join the guest list to RSVP.</p><div class="rsvp"><button class="rb going" data-join>Join this event</button></div>` : `<p class="not-invited">You're viewing this event but aren't on the guest list.</p>`;
+    ${full && myR !== "going" ? `<p class="full-note">This plan is full. RSVP to join the waitlist.</p>` : ""}
+    ${questionsBlock(ev, me, myR)}` : ev.openLink ? `<p class="not-invited">You're invited! Join the guest list to RSVP.</p><div class="rsvp"><button class="rb going" data-join>Join this plan</button></div>` : `<p class="not-invited">You're viewing this plan but aren't on the guest list.</p>`;
 
   const guestList = ["going", "maybe", "waitlist", "pending", "no", "none"].map(k => {
     const ph = ["going", "maybe", "no"].includes(k) ? phonesWith(ev, k) : [];
@@ -4534,8 +4534,8 @@ function openCalendarDialog(ev) {
   const dt = (d, t) => d.replace(/-/g, "") + "T" + (t || "09:00").replace(":", "") + "00";
   const [h, m] = (ev.time || "09:00").split(":").map(Number); const e = new Date(2000, 0, 1, h + 2, m);
   const g = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent((ev.emoji ? ev.emoji + " " : "") + ev.title)}&dates=${dt(ev.date, ev.time)}/${ev.endTime ? dt(ev.date, ev.endTime) : dt(ev.date, String(e.getHours()).padStart(2, "0") + ":" + String(e.getMinutes()).padStart(2, "0"))}&location=${encodeURIComponent(ev.location || "")}&details=${encodeURIComponent("https://officialfriendly.com/#/e/" + ev.id)}`;
-  dialog(`<h3>Add to calendar</h3><p class="muted" style="margin-top:-6px">Just this event. To keep every Friendly plan in your calendar automatically, use Calendar sync on your profile.</p>
-    <div class="stack"><button type="button" class="btn primary" id="calApple">📆 Apple / iPhone Calendar</button><a class="btn" href="${g}" target="_blank" rel="noopener">Google Calendar</a><button type="button" class="btn" data-go="#/profile">Calendar sync (all events)</button></div>`, null, null);
+  dialog(`<h3>Add to calendar</h3><p class="muted" style="margin-top:-6px">Just this plan. To keep every Friendly plan in your calendar automatically, use Calendar sync on your profile.</p>
+    <div class="stack"><button type="button" class="btn primary" id="calApple">📆 Apple / iPhone Calendar</button><a class="btn" href="${g}" target="_blank" rel="noopener">Google Calendar</a><button type="button" class="btn" data-go="#/profile">Calendar sync (all plans)</button></div>`, null, null);
   // The calendar file comes from the server, so iPhone (and the app on any phone) hands it to Safari or
   // the browser, which shows "Add to Calendar". A blob download did nothing inside the iPhone app.
   el("calApple").onclick = async () => {
@@ -5015,7 +5015,7 @@ function downloadIcs(ev) {
   const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Friendly//EN", "BEGIN:VEVENT", "UID:" + ev.id + "@officialfriendly.com", "DTSTAMP:" + new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z", dts, dte, "SUMMARY:" + esc2(ev.emoji + " " + ev.title), ev.location ? "LOCATION:" + esc2(ev.location) : "", "DESCRIPTION:" + esc2((stopsText(ev) ? "The plan:\n" + stopsText(ev) + "\n\n" : "") + (ev.notes || "") + "\nRSVP: " + location.origin + location.pathname + "#/e/" + ev.id), "END:VEVENT", "END:VCALENDAR"].filter(Boolean).join("\r\n");
   const a = document.createElement("a"); a.href = "data:text/calendar;charset=utf-8," + encodeURIComponent(ics); a.download = ev.title.replace(/[^a-z0-9]+/gi, "-") + ".ics"; a.click();
 }
-async function delEvent(ev) { if (isDemo() && DEMO_EVENTS.includes(ev.id)) return toast("Deleting this demo event is off -- it resets nightly instead."); if (!confirm(`Delete “${ev.title}”?`)) return; try { await deleteDoc(doc(db, "events", ev.id)); go("#/"); toast("Event deleted"); } catch (e) { toast(e.message); } }
+async function delEvent(ev) { if (isDemo() && DEMO_EVENTS.includes(ev.id)) return toast("Deleting this demo event is off -- it resets nightly instead."); if (!confirm(`Delete “${ev.title}”?`)) return; try { await deleteDoc(doc(db, "events", ev.id)); go("#/"); toast("Plan deleted"); } catch (e) { toast(e.message); } }
 document.addEventListener("click", e => {
   const b = e.target.closest("#eKind [data-ekind]"); if (!b) return;
   document.querySelectorAll("#eKind .fchip").forEach(x => x.classList.toggle("on", x === b));
@@ -5780,7 +5780,7 @@ function wirePick(id) {
   // I'm done: thank them and take them back where they came from (the event's Expenses, or Money); they can reopen it there.
   if (el("pkDone")) el("pkDone").onclick = () => { const x = cur(); const d = !!((x.done || {})[me]); updateDoc(doc(db, "receiptSplits", id), new FieldPath("done", me), d ? deleteField() : Date.now()).catch(e => toast(e.message));
     if (d) return; const back = x.eventId && S.events.has(x.eventId) ? "#/e/" + x.eventId + "?to=moneyCard" : "#/money";
-    toast(`Thanks! Your picks are saved. Change them anytime from ${back === "#/money" ? "Money" : "the event's Expenses"}.`, null, null, "happy"); go(back); };
+    toast(`Thanks! Your picks are saved. Change them anytime from ${back === "#/money" ? "Money" : "the plan's Expenses"}.`, null, null, "happy"); go(back); };
   if (el("pkLeft")) el("pkLeft").onclick = () => { const r = root.querySelector(".pk-item.open"); if (!r) return; r.scrollIntoView({ block: "center", behavior: "smooth" }); r.classList.remove("flash"); void r.offsetWidth; r.classList.add("flash"); toast("Tap a person above, then the lines that are theirs."); };
   if (el("pkFinish")) el("pkFinish").onclick = () => finishPick(id);
   if (el("pkAdd")) el("pkAdd").onclick = () => openPickPeople(id);
@@ -6050,7 +6050,7 @@ function profileBody() {
     ${NOTIF_CATS.map(c => `<label class="switch" style="margin:8px 0"><input type="checkbox" data-notifpref="${c.key}" ${(p.notifPrefs || {})[c.key] !== false ? "checked" : ""}><span>${esc(c.label)}</span></label>`).join("")}
   </div>` : ""}
   <div class="section-head" style="margin-top:22px"><h2>Calendar sync</h2></div>
-  <div class="card" style="padding:14px 16px"><p class="muted sm" style="margin:0 0 10px">Subscribe once and every event you're invited to appears in your calendar and stays up to date when plans change.</p>
+  <div class="card" style="padding:14px 16px"><p class="muted sm" style="margin:0 0 10px">Subscribe once and every plan you're invited to appears in your calendar and stays up to date when plans change.</p>
     <div class="btnrow"><button class="btn primary small" id="calSubscribe">Add to iPhone / Apple Calendar</button><button class="btn small" id="calCopy">Copy link for Google Calendar</button></div>
     <p class="muted sm" style="margin:8px 0 0">Google Calendar: Other calendars → ＋ → From URL → paste the link. Calendars refresh on their own schedule (usually within a few hours).</p></div>
   <div class="section-head" style="margin-top:22px"><h2>Account</h2></div>
@@ -6148,7 +6148,7 @@ function wireProfile() {
   document.querySelectorAll("[data-unblock]").forEach(b => b.onclick = async () => { try { await updateDoc(doc(db, "users", myUid()), { blockedUids: arrayRemove(b.dataset.unblock) }); toast("Unblocked"); } catch (e) { toast(e.message); } });
   if (el("deleteAccount")) el("deleteAccount").onclick = () => dialog(`
     <h2>Delete your account?</h2>
-    <p class="muted">This removes your profile, sign-in, and notifications, and takes you out of your groups. Events and expenses you were part of stay visible to the other people involved.</p>
+    <p class="muted">This removes your profile, sign-in, and notifications, and takes you out of your groups. Plans and expenses you were part of stay visible to the other people involved.</p>
     <label class="field"><span>Confirm your password</span><input type="password" id="delPw" autocomplete="current-password"></label>`,
     "Delete account", deleteAccount);
 }
@@ -6460,7 +6460,7 @@ function invitedRows() {
   return out;
 }
 function invitedBody(inv) {
-  if (!inv.length) return emptyState("✉️", "No open invites", "When you invite people to Friendly, a group, or an event, anyone who hasn't joined or answered yet shows up here.", "happy");
+  if (!inv.length) return emptyState("✉️", "No open invites", "When you invite people to Friendly, a group, or a plan, anyone who hasn't joined or answered yet shows up here.", "happy");
   const ghost = ico => `<span class="avatar lg" style="background:#CBB;opacity:.6">${ico}</span>`;
   const r = (lead, title, sub, right, find) => `<div class="member-row" data-find="${esc(String(find || title).toLowerCase())}">${lead}<div style="flex:1;min-width:0"><b>${title}</b><div class="muted sm">${sub}</div></div>${right}</div>`;
   const who = x => esc(x.name || (x.phone ? fmtPhone(x.phone) : x.email || ""));
@@ -7038,7 +7038,7 @@ async function renderPreview(root, id) {
   startParticles(el("authbg"), "confetti");
   let p = null; try { const d = await getDoc(doc(db, "previews", id)); p = d.exists() ? d.data() : null; } catch {}
   const card = $(".pv-card"); if (!card) return;
-  if (!p) { card.innerHTML = `<b>This invite needs a sign-in.</b><p class="muted" style="margin:6px 0 0">Sign in or create an account below and the event will open.</p>`; }
+  if (!p) { card.innerHTML = `<b>This invite needs a sign-in.</b><p class="muted" style="margin:6px 0 0">Sign in or create an account below and the plan will open.</p>`; }
   else {
     const when = fmtWhen({ date: p.date, time: p.time, endTime: p.endTime });
     card.innerHTML = `${p.cover ? `<img class="pv-cover" src="${esc(p.cover)}" alt="">` : ""}<div class="pv-body">
@@ -7136,14 +7136,14 @@ function searchResults(q) {
   const evs = [...S.events.values()].filter(ev => hit(ev.title) || hit(ev.location) || hit(ev.notes)).sort((a, b) => b.date.localeCompare(a.date));
   const gs = [...S.groups.values()].filter(g => hit(g.name));
   const xs = [...S.expenses.values()].filter(x => hit(x.desc) || hit(x.merchant)).sort((a, b) => b.createdAt - a.createdAt);
-  if (!evs.length && !gs.length && !xs.length) return emptyState("🔍", "Nothing matched", "Try a different word: event titles, places, notes, groups, and expenses are searchable.", "thinking");
-  return `${evs.length ? `<div class="section-head"><h2>Events</h2></div><div class="stack">${evs.map(ev => `<a class="card meet-card" data-ev="${ev.id}"><span class="li">${ev.kind === "meeting" ? "📅" : esc(ev.emoji || "🎉")}</span><div style="flex:1;min-width:0"><b>${esc(ev.title)}</b><div class="muted sm">${esc(fmtWhen(ev))}${ev.location ? " · " + esc(ev.location) : ""}</div></div><span class="chev">›</span></a>`).join("")}</div>` : ""}
+  if (!evs.length && !gs.length && !xs.length) return emptyState("🔍", "Nothing matched", "Try a different word: plan titles, places, notes, groups, and expenses are searchable.", "thinking");
+  return `${evs.length ? `<div class="section-head"><h2>Plans</h2></div><div class="stack">${evs.map(ev => `<a class="card meet-card" data-ev="${ev.id}"><span class="li">${ev.kind === "meeting" ? "📅" : esc(ev.emoji || "🎉")}</span><div style="flex:1;min-width:0"><b>${esc(ev.title)}</b><div class="muted sm">${esc(fmtWhen(ev))}${ev.location ? " · " + esc(ev.location) : ""}</div></div><span class="chev">›</span></a>`).join("")}</div>` : ""}
     ${gs.length ? `<div class="section-head"><h2>Groups</h2></div><div class="stack">${gs.map(groupRow).join("")}</div>` : ""}
     ${xs.length ? `<div class="section-head"><h2>Expenses</h2></div><div class="card">${xs.map(x => `<div class="ledger"><div class="li">🧾</div><div style="flex:1;min-width:0"><b>${esc(x.desc)}</b><div class="muted sm">${esc(first(nameOf(x.paidBy)))} paid · ${new Date(x.createdAt).toLocaleDateString()}</div></div><span class="amt sm">${fmt$(x.amountCents)}</span><button class="btn ghost small" data-xopen="${x.id}">💬</button></div>`).join("")}</div>` : ""}`;
 }
 function searchBody() {
   return `<div class="section-head"><h2>Search</h2></div>
-  <input class="search-box" id="searchBox" value="${esc(S.q)}" placeholder="Events, places, groups, expenses…" autocomplete="off">
+  <input class="search-box" id="searchBox" value="${esc(S.q)}" placeholder="Plans, places, groups, expenses…" autocomplete="off">
   <div id="searchResults">${searchResults(S.q)}</div>`;
 }
 function wireSearch() {
@@ -7162,7 +7162,7 @@ function wireSearch() {
 // change), so it's never "hidden" behind New event. Creating the event removes the draft.
 let draftTimer = null;
 // Leaving New event: anything with a name is saved to Drafts right away, and the form is cleared so the next
-// "+ New event" starts fresh (the half-finished one waits in 📝 Drafts).
+// "+ New plan" starts fresh (the half-finished one waits in 📝 Drafts).
 let prevHash = location.hash;
 window.addEventListener("hashchange", () => {
   const was = prevHash; prevHash = location.hash;
@@ -7172,7 +7172,7 @@ window.addEventListener("hashchange", () => {
     if (!compose._draftId) compose._draftId = newId();
     let json = composeJson(); if (json.length > 900000) json = JSON.stringify({ ...JSON.parse(json), cover: null, coverTab: "emoji" });
     setDoc(doc(db, "users", myUid(), "drafts", compose._draftId), { json, title: compose.title.trim(), emoji: compose.emoji || "🎉", date: compose.date || "", kind: compose.kind || "event", updatedAt: Date.now() }).catch(() => {});
-    toast("Saved to 📝 Drafts on the Events page");
+    toast("Saved to 📝 Drafts on the Plans page");
   }
   resetCompose(); compose._restored = true;
 });
@@ -7208,11 +7208,11 @@ function openDraft(d) {
 }
 function draftsBody() {
   const ds = S.drafts || [];
-  return `<button class="link-back" data-go="#/">‹ Events</button>
-  <div class="section-head"><h1 style="margin:0">Drafts</h1><button class="btn primary small" data-go="#/new">＋ New event</button></div>
-  <p class="muted sm" style="margin:-4px 0 14px">Plans you saved without sending. Nobody sees them until you create the event.</p>
+  return `<button class="link-back" data-go="#/">‹ Plans</button>
+  <div class="section-head"><h1 style="margin:0">Drafts</h1><button class="btn primary small" data-go="#/new">＋ New plan</button></div>
+  <p class="muted sm" style="margin:-4px 0 14px">Plans you saved without sending. Nobody sees them until you create the plan.</p>
   ${ds.length ? `<div class="card">${ds.map(d => `<div class="member-row"><span class="li">${esc(d.emoji || "📝")}</span><div style="flex:1;min-width:0"><b>${esc(d.title || "Untitled")}</b><div class="muted sm">${d.kind === "meeting" ? "Meeting · " : ""}${d.date ? esc(fmtDay({ date: d.date })) + " · " : ""}saved ${ago(d.updatedAt)}</div></div><span class="btnrow" style="gap:6px"><button class="btn small primary" data-opendraft="${d.id}">Continue</button><button class="btn ghost small" data-deldraft="${d.id}" title="Delete draft">✕</button></span></div>`).join("")}</div>`
-    : emptyState("📝", "No drafts", "Tap “Save draft” while making an event to finish it later.", "sleepy")}`;
+    : emptyState("📝", "No drafts", "Tap “Save draft” while making a plan to finish it later.", "sleepy")}`;
 }
 function wireDrafts() {
   document.querySelectorAll("[data-opendraft]").forEach(b => b.onclick = () => { const d = (S.drafts || []).find(x => x.id === b.dataset.opendraft); if (d) openDraft(d); });

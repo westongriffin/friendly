@@ -903,7 +903,7 @@ exports.onEventPhotoAdded = onDocumentCreated({ document: "events/{eid}/photos/{
   const x = ev.data(), count = snap.docs.filter(d => d.get("addedBy") === uid).length || 1;
   const going = (x.invitedUids || []).filter(v => (x.rsvps || {})[v] === "going");
   const to = [...new Set([x.hostId, ...going])].filter(v => isRealUid(v) && v !== uid);
-  await notify(to, `${firstName(u.exists && u.get("name"))} added ${count === 1 ? "a photo" : count + " photos"} to ${x.title || "your event"}`, "Tap to see them on the photo wall.",
+  await notify(to, `${firstName(u.exists && u.get("name"))} added ${count === 1 ? "a photo" : count + " photos"} to ${x.title || "your plan"}`, "Tap to see them on the photo wall.",
     `/#/e/${eid}?to=photosCard`, { type: "photo", actorId: uid });
 });
 // Reactions on a post or a photo: only the person who posted it hears, and reactions on the same thing within an
@@ -962,7 +962,7 @@ exports.onPhotoComment = onDocumentCreated({ document: "events/{eid}/photos/{pid
   const [p, ev] = await Promise.all([pref.get(), db.doc("events/" + eid).get()]);
   const owner = p.exists && p.get("addedBy");
   if (owner && owner !== c.authorId)
-    await notify([owner], `${firstName(c.authorName || "Someone")} commented on your photo`, `“${String(c.text || "").slice(0, 120)}” · ${ev.exists ? ev.get("title") : "your event"}`,
+    await notify([owner], `${firstName(c.authorName || "Someone")} commented on your photo`, `“${String(c.text || "").slice(0, 120)}” · ${ev.exists ? ev.get("title") : "your plan"}`,
       `/#/e/${eid}?photo=${pid}&c=${e.params.cid}`, { type: "comment", actorId: c.authorId });
 });
 exports.onPhotoCommentDeleted = onDocumentDeleted({ document: "events/{eid}/photos/{pid}/comments/{cid}" }, async e => {
@@ -1326,7 +1326,7 @@ async function notifyCanceled(id, ev) {
     if (ev.draft || !ev.date || ev.date < todayIn(ev.tz)) return;
     const by = ev.updatedBy || ev.hostId, byName = firstName((ev.names || {})[by]) || "The host";
     const to = (ev.invitedUids || []).filter(u => isRealUid(u) && u !== by);
-    await notify(to, `${ev.title || "An event"} was canceled`, `${byName} took it off the calendar.`, "/#/", { type: "event", actorId: by });
+    await notify(to, `${ev.title || "A plan"} was canceled`, `${byName} took it off the calendar.`, "/#/", { type: "event", actorId: by });
   } catch (err) { logger.warn("notifyCanceled " + id + ": " + err.message); }
 }
 // A new time or place for an upcoming event: everyone invited hears, with the new details.
@@ -2110,6 +2110,22 @@ exports.weeklyDigest = onSchedule({ schedule: "0 18 * * 0", timeZone: "America/C
     await notify([u], `Your week · ${b.plans.length ? b.plans.length + " plan" + (b.plans.length === 1 ? "" : "s") : "a birthday"}`, parts.join(" "), "/#/?to=digestCard", { type: "digest" }); sent++;
   }
   logger.info(`weeklyDigest: ${sent} sent for ${mon}..${sun}${only ? " (only " + [...only].join(",") + ")" : ""}`);
+});
+// ---- A year with the crew ----
+// Dec 10, 6 PM Central: everyone with three or more plans this year hears their recap is ready.
+exports.yearRecapNudge = onSchedule({ schedule: "0 18 10 12 *", timeZone: "America/Chicago", timeoutSeconds: 300, ...PUSH }, async () => {
+  const today = todayIn("America/Chicago"), year = today.slice(0, 4);
+  const evs = await db.collection("events").where("date", ">=", year + "-01-01").where("date", "<=", today).get();
+  const per = {};
+  evs.docs.forEach(d => { const ev = d.data(); if (ev.draft || ev.kind === "meeting") return;
+    const going = [...new Set([ev.hostId, ...(ev.invitedUids || []).filter(u => (ev.rsvps || {})[u] === "going")])].filter(u => isRealUid(u) && !u.startsWith("demo-"));
+    going.forEach(u => { const b = per[u] = per[u] || { plans: 0, friends: new Set() }; b.plans++; going.forEach(o => { if (o !== u) b.friends.add(o); }); }); });
+  let sent = 0;
+  for (const [u, b] of Object.entries(per)) {
+    if (b.plans < 3) continue;
+    await notify([u], `Your ${year} with the crew is ready 🎉`, `${b.plans} plans, ${b.friends.size} friend${b.friends.size === 1 ? "" : "s"} along for the ride. See who you planned the most with, your spot, and your firsts.`, "/#/year/" + year, { type: "digest" }); sent++;
+  }
+  logger.info(`yearRecapNudge: ${sent} sent for ${year}`);
 });
 exports.dailyReminders = onSchedule({ schedule: "0 9 * * *", timeZone: "America/Chicago", ...MAIL }, async () => {
   const d = new Date();
