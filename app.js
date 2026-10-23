@@ -7067,7 +7067,7 @@ function photosPageBody() {
     <div class="photo-grid mem-grid">${(S.memories.get(ev.id) || []).map(p => `<div class="photo-tile"><img src="${esc(p.img)}" data-mem="${p.id}" data-mev="${ev.id}" alt="" loading="lazy">${photoBadges(p)}</div>`).join("")}</div>`;
   return `<button class="link-back" data-go="#/">‹ Back</button>
   <div class="section-head"><h2>Memories</h2><span class="muted sm">${(n => n + (n === 1 ? " photo" : " photos"))(evs.reduce((t, ev) => t + S.memories.get(ev.id).length, 0))}</span></div>
-  ${recapSeason() && yearData().plans.length >= 2 ? `<a class="card yr-link" data-go="#/year">${dot("party", 34)}${coral("party", 34)}<span style="flex:1;min-width:0"><b>A year with the crew</b><span class="muted sm">${yearData().plans.length} plans so far in ${new Date().getFullYear()}</span></span><span class="chev">›</span></a>` : ""}
+  ${(recapSeason() || isAdmin()) && yearData().plans.length >= 2 ? `<a class="card yr-link" data-go="#/year">${dot("party", 34)}${coral("party", 34)}<span style="flex:1;min-width:0"><b>A year with the crew</b><span class="muted sm">${yearData().plans.length} plans so far in ${new Date().getFullYear()}${recapSeason() ? "" : " · admin preview, everyone else sees this Dec 10"}</span></span><span class="chev">›</span></a>` : ""}
   ${S._memLoading ? `<p class="muted">Gathering photos…</p>` : ""}
   ${ago1.map(ev => section(ev, "🕰️ One year ago")).join("")}
   ${evs.length ? evs.map(ev => section(ev)).join("") : (S._memLoading ? "" : emptyState("📸", "No photos yet", "Photos from your plans land here, newest first. Coral is ready for them.", "coral:idle"))}`;
