@@ -776,11 +776,14 @@ async function resolveCity(input) {
 }
 // ---------- state ----------
 // The intro is a flat 6 seconds, every time.
-const BOOT_AT = Date.now(), SPLASH_MIN = 6000, SPLASH_MAX = 6000; let splashTimer = null, splashHold = false;
-// Dot's intro plays on every fresh launch (the app was closed), and when the app comes back from the background
-// after 10 minutes or more; a quicker switch back goes straight in.
-const AWAY_FOR_INTRO = 6 * 60 * 60 * 1000;   // the welcome splash replays only after six hours away
-const markSeen = () => { try { LS.set("friendlyLastSeen", String(Date.now())); } catch {} };
+// Dot's intro plays on a fresh launch only when the app hasn't been open for six hours (same rule for coming back
+// from the background). iPhones close the app in the background all the time, so a cold start a few minutes later
+// goes straight in, no welcome.
+const AWAY_FOR_INTRO = 6 * 60 * 60 * 1000;
+// LS loads from the storage worker a moment after start, so the boot decision reads the synchronous copy.
+const LAST_SEEN = (() => { try { return +localStorage.getItem("friendlyLastSeen") || +LS.get("friendlyLastSeen") || 0; } catch { return 0; } })();
+const BOOT_AT = Date.now(), SPLASH_MIN = LAST_SEEN && Date.now() - LAST_SEEN < AWAY_FOR_INTRO ? 0 : 6000, SPLASH_MAX = 6000; let splashTimer = null, splashHold = false;
+const markSeen = () => { const t = String(Date.now()); try { LS.set("friendlyLastSeen", t); } catch {} try { localStorage.setItem("friendlyLastSeen", t); } catch {} };
 markSeen(); setInterval(() => { if (!document.hidden) markSeen(); }, 30000);
 window.addEventListener("pagehide", markSeen);
 const S = {
