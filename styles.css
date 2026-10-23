@@ -1558,4 +1558,4 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 /* When works? chip stands apart from Tonight */
 .uf-ask-chips .fchip[data-whenask]{background:#FFF1CC;border-color:#E7B64A;color:#8A5A00}
 /* Activity: mascots get a bigger, plain slot */
-.act-row .li:has(.blip){width:42px;height:42px;background:none;border-radius:0}
+.li:has(.blip){width:42px;height:42px;background:none;border-radius:0}
