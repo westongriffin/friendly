@@ -1280,7 +1280,8 @@ let hiddenAt = 0;
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) { hiddenAt = Date.now(); markSeen(); return; }
   const away = hiddenAt ? Date.now() - hiddenAt : 0; hiddenAt = 0; markSeen();
-  if (away >= AWAY_FOR_INTRO && S.ready && window.Blip && !document.querySelector(".splash")) replaySplash();   // away 10 minutes or more
+  if (away >= AWAY_FOR_INTRO && S.ready && window.Blip && !document.querySelector(".splash")) replaySplash();
+  else if (away > 30000 && S.ready && ["home", "plans"].includes((S.route || {}).name)) renderSoon();   // "in 12 min" and today's cards catch up   // away 10 minutes or more
 });
 // While it plays, the app underneath is hidden and its animations pause (body.replaying), so only Dot is moving:
 // replaying over a busy event page (theme animations, particles, a burst of updates) stalled iPhones. A tapped
@@ -1903,6 +1904,8 @@ const SHOW_BITS = (() => {
     [3600, () => { anim("dot", "m-lean-r", 900); at(600, () => say("coral", "wait wait", 1000)); at(1500, () => { anim("dot", "m-lean-r", 900); anim("coral", "m-lean-l", 900); }); at(1950, () => prop("dot", "✨", 900)); at(2400, () => { say("coral", "there", 900); face("dot", "party", 1200); face("coral", "party", 1200); }); }],
   ];
 })();
+// Home's time-based cards (today's plan, the live card, the morning after) redraw once a minute while it's on screen.
+setInterval(() => { if (document.hidden || !S.ready || (S.route || {}).name !== "home") return; if (document.querySelector(".lv-card, .hd-hero.today, .today-card, .lv-after")) renderSoon(); }, 60000);
 function startMascotShow() {
   clearTimeout(S._showTimer);
   // Name tags introduce them for about ten seconds, then fade; once seen this session they don't come back.
@@ -2030,7 +2033,8 @@ function liveWindow(ev) {
   if (!ev || !ev.date) return { phase: null };
   const [y, m, d] = ev.date.split("-").map(Number), [sh, sm] = (ev.time || "09:00").split(":").map(Number);
   const start = new Date(y, m - 1, d, sh, sm).getTime();
-  const end = ev.endTime ? new Date(y, m - 1, d, ...ev.endTime.split(":").map(Number)).getTime() : start + 4 * 3600e3;
+  let end = ev.endTime ? new Date(y, m - 1, d, ...ev.endTime.split(":").map(Number)).getTime() : start + 4 * 3600e3;
+  if (end <= start) end += 24 * 3600e3;
   const now = Date.now(), H = 3600e3;
   const phase = now < start - 3 * H ? null : now < start ? "soon" : now <= end ? "now" : now <= end + 20 * H ? "after" : null;
   return { start, end, phase };
