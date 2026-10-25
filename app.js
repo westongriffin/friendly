@@ -5330,7 +5330,7 @@ function askIfSent(to, cents, method, expenseId, onNo) {
   // Kept on the phone too: iOS may reload Friendly while Apple Pay or Venmo is open, and the question must still come.
   LS.set("friendlyPayPending", JSON.stringify({ to, cents, method, expenseId: expenseId || null, at: t0 }));
   const ask = () => { if (asked) return; asked = true; LS.remove("friendlyPayPending"); document.removeEventListener("visibilitychange", onVis); clearTimeout(timer);
-    dialog(`<h3>Did it go through?</h3><p>Did you send <b>${fmt$(cents)}</b> to <b>${esc(first(nameOf(to)))}</b> with ${esc(method)}?</p><p class="muted sm">It's marked paid only once you say so, for both of you.</p>`, "Yes, mark it paid", () => { closeDialog(); markPaid(myUid(), to, cents, method, expenseId); });
+    dialog(`<h3>Did it go through?</h3><p>Did you send <b>${fmt$(cents)}</b> to <b>${esc(first(nameOf(to)))}</b> with ${esc(method)}?</p><p class="muted sm">It's marked paid only once you say so, for both of you.</p>`, "Yes, mark it paid", () => { closeDialog(); if (method === "Apple Cash" && LS.get("friendlyPayShortcut") === "1") LS.set("friendlyPayOk", String((+LS.get("friendlyPayOk") || 0) + 1)); markPaid(myUid(), to, cents, method, expenseId); });
     const c = el("dlgCancel"); if (c) { c.textContent = "Not yet"; if (onNo) c.addEventListener("click", onNo); } };
   const onVis = () => { if (document.visibilityState === "visible" && Date.now() - t0 > 600) setTimeout(ask, 350); };
   document.addEventListener("visibilitychange", onVis);
@@ -5374,24 +5374,37 @@ function textGuest(id, cents, dir) {
 const PAY_SHORTCUT_URL = "https://www.icloud.com/shortcuts/b46dc76288a14df78c1c08dccb5ac36a";   // Friendly Pay v5 (verified via the iCloud records API Oct 18 2026). amt is sent as text: a JSON number crashes Send Payment (see shortcuts/build-pay.py)
 const payShortcutOn = () => NATIVE && IOS;   // live for everyone since v246 (Oct 18 2026)
 function payViaShortcut(uid, cents, expenseId) {
-  const to = toE164(payInfoOf(uid).phone || ""), x = expenseId && S.expenses.get(expenseId);
+  const to = toE164(payInfoOf(uid).phone || ""), x = expenseId && S.expenses.get(expenseId), who = first(nameOf(uid)), amt = fmt$(cents);
   // Apple's sheet shows the person as their number no matter what is sent (it rebuilds the payee from Siri matches
   // only); the amount must be text, a JSON number crashes the Send Payment step. See shortcuts/build-pay.py.
   const run = () => { location.href = "shortcuts://run-shortcut?name=" + encodeURIComponent("Friendly Pay") + "&input=text&text=" + encodeURIComponent(JSON.stringify({ to, amt: (Math.round(cents) / 100).toFixed(2), note: ((x && x.desc) || "Friendly") + " · Friendly" })); askIfSent(uid, cents, "Apple Cash", expenseId, () => LS.remove("friendlyPayShortcut")); };   // "Not yet" brings the setup back next time
-  if (LS.get("friendlyPayShortcut") === "1") return run();
+  // The hand-off, spelled out (Wes, Oct 25 2026): Shortcuts opens, Apple Pay shows the amount against the person's
+  // number, Face ID, and the shortcut's last step brings them back here. The run-time guide shows until two
+  // payments have gone through (LS friendlyPayOk, counted in askIfSent); after that Cash goes straight to Shortcuts.
+  const steps = `<ol class="steps">
+      <li><b>Shortcuts opens</b> and runs Friendly Pay. If it asks to allow something, tap <b>Allow</b>.</li>
+      <li><b>Apple Pay shows ${amt}</b> to ${esc(who)}'s number. Confirm with Face ID (double-click the side button).</li>
+      <li><b>You land back here.</b> Say it went through and it's marked paid for you both. If you cancel, tap <b>\u25C0 Friendly</b> at the top left to come back.</li></ol>`;
+  const guide = () => { dialog(`<h3>Paying ${esc(who)} ${amt}</h3>${steps}<div class="stack"><button type="button" class="btn primary" id="fpOpen">Open Shortcuts and pay</button><button type="button" class="btn ghost" id="fpCancel">Not now</button></div><p class="muted sm" style="margin:10px 0 0;text-align:center">These steps show the first couple of times.</p>`, null, null);
+    el("fpOpen").onclick = () => { closeDialog(); run(); }; el("fpCancel").onclick = () => closeDialog(); };
+  if (LS.get("friendlyPayShortcut") === "1") return (+LS.get("friendlyPayOk") || 0) >= 2 ? run() : guide();
   dialog(`<h3>Apple Cash in one tap</h3>
-    <p>Add the free <b>Friendly Pay</b> shortcut once. After that, Cash opens Apple Pay with <b>${fmt$(cents)}</b> to ${esc(first(nameOf(uid)))} already filled in. You confirm with Face ID.</p>
-    <div class="stack"><button type="button" class="btn" id="fpAdd">1. Add the shortcut</button><button type="button" class="btn primary" id="fpRun">2. Pay ${fmt$(cents)} now</button><button type="button" class="btn ghost" id="fpSms">Use Messages instead</button></div>`, null, null);
-  // Apple's Add Shortcut screen can't send anyone back, so when they return (the "◀ Friendly" corner link, or
-  // switching apps) this box is already on the next step: one button to pay.
+    <p>Add the free <b>Friendly Pay</b> shortcut once. After that, Cash opens Apple Pay with the amount and person filled in, and you confirm with Face ID.</p>
+    <div class="stack">
+      <div class="fp-step"><button type="button" class="btn primary" id="fpAdd">1. Add the shortcut</button><p class="muted sm fp-hint">Shortcuts opens and shows Friendly Pay. Tap <b>Add Shortcut</b>, then come back to Friendly (tap <b>\u25C0 Friendly</b> at the top left).</p></div>
+      <div class="fp-step"><button type="button" class="btn" id="fpRun">2. Pay ${amt} now</button><p class="muted sm fp-hint">Already added it? This runs it: Apple Pay shows ${amt} to ${esc(who)}, you confirm with Face ID, and it brings you back here.</p></div>
+      <button type="button" class="btn ghost" id="fpSms">Use Messages instead</button></div>`, null, null);
+  // Apple's Add Shortcut screen can't send anyone back, so when they return (the "\u25C0 Friendly" corner link, or
+  // switching apps) this box is already on the next step: the three things that happen when they pay, and a button.
   const ready = () => { const d = el("appDialog"); if (!d || !el("fpAdd")) return;
-    d.querySelector(".dlg-inner").innerHTML = `<h3>You're set up</h3><p>Friendly Pay is added. Next time, Cash goes straight to Apple Pay.</p>
-      <div class="stack"><button type="button" class="btn primary" id="fpGo">Pay ${esc(first(nameOf(uid)))} ${fmt$(cents)} now</button><button type="button" class="btn ghost" id="fpLater">Not now</button></div>`;
+    d.querySelector(".dlg-inner").innerHTML = `<h3>You're set up</h3><p>Friendly Pay is added. From now on, Cash goes straight to Apple Pay. Here's what happens when you pay:</p>${steps}
+      <div class="stack"><button type="button" class="btn primary" id="fpGo">Pay ${esc(who)} ${amt} now</button><button type="button" class="btn ghost" id="fpLater">Not now</button><button type="button" class="linkish" id="fpRetry">Didn't see Add Shortcut? Try again</button></div>`;
     el("fpGo").onclick = () => { LS.set("friendlyPayShortcut", "1"); closeDialog(); run(); };
-    el("fpLater").onclick = () => { LS.set("friendlyPayShortcut", "1"); closeDialog(); }; };
+    el("fpLater").onclick = () => { LS.set("friendlyPayShortcut", "1"); closeDialog(); };
+    el("fpRetry").onclick = () => { closeDialog(); payViaShortcut(uid, cents, expenseId); }; };
   const onBack = () => { if (document.visibilityState === "visible") { document.removeEventListener("visibilitychange", onBack); setTimeout(ready, 300); } };
   el("fpAdd").onclick = () => { document.addEventListener("visibilitychange", onBack); window.open(PAY_SHORTCUT_URL, "_blank"); };
-  el("fpRun").onclick = () => { LS.set("friendlyPayShortcut", "1"); closeDialog(); run(); };
+  el("fpRun").onclick = () => { LS.set("friendlyPayShortcut", "1"); closeDialog(); guide(); };
   el("fpSms").onclick = () => { closeDialog(); payApple(uid, cents, expenseId, true); };
 }
 function payApple(uid, cents, expenseId, plain) {
