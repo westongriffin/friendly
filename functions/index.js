@@ -1203,7 +1203,9 @@ exports.cal = onRequest({ region: "us-central1", invoker: "public", memory: "256
     if (!ev || !(ev.invitedUids || []).includes(u) || !ev.date || !ev.title) { res.status(404).send("not found"); return; }
     lines.push(...icsEvent(d.id, ev, u, stamp));
   } else {
-    lines.push("X-WR-CALNAME:Friendly", "REFRESH-INTERVAL;VALUE=DURATION:PT1H", "X-PUBLISHED-TTL:PT1H");
+    // Friendly's coral as the calendar colour: Apple Calendar reads X-APPLE-CALENDAR-COLOR when it subscribes (and on
+    // refresh unless the person picked their own); COLOR is the RFC 7986 form other apps read (CSS names only).
+    lines.push("X-WR-CALNAME:Friendly", "X-APPLE-CALENDAR-COLOR:#FF6B57", "COLOR:tomato", "REFRESH-INTERVAL;VALUE=DURATION:PT1H", "X-PUBLISHED-TTL:PT1H");
     const snap = await db.collection("events").where("invitedUids", "array-contains", u).get();
     snap.forEach(d => { const ev = d.data(); if (ev.date && ev.title) lines.push(...icsEvent(d.id, ev, u, stamp)); });
   }
