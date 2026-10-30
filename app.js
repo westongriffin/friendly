@@ -1838,7 +1838,7 @@ function homeBody() {
   ${needsYou()}
   ${moneyGlance()}
   ${curateTray(upcoming, false)}
-  ${week.length ? `<div class="hd-h"><h3>${weekLabel}</h3><a class="hd-link" data-go="#/plans">All plans ›</a></div><div class="card hd-list">${week.map(ev => `<a class="hd-ev" data-ev="${ev.id}"><span class="hd-date"><b>${ev.date === t ? "Today" : evDate(ev).toLocaleDateString("en-US", { weekday: "short" })}</b><span>${evDate(ev).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span></span><span class="hd-evt"><b>${esc(ev.emoji || "")} ${esc(ev.title)}</b><span class="muted sm">${esc(fmtTime(ev.time))}${placeName(ev.location) ? " · " + esc(placeName(ev.location)) : ""}</span></span>${hdFaces(ev)}</a>`).join("")}</div>` : ""}
+  ${week.length ? `<div class="hd-h"><h3>${weekLabel}</h3><a class="hd-link" data-go="#/plans">All plans ›</a></div><div class="card hd-list">${week.map(ev => `<a class="hd-ev" data-ev="${ev.id}"><span class="hd-date"><b>${ev.date === t ? "Today" : evDate(ev).toLocaleDateString("en-US", { weekday: "short" })}</b><span>${evDate(ev).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span></span><span class="hd-evt"><b>${esc(ev.emoji || "")} ${esc(ev.title)}</b><span class="muted sm">${ev.kind === "trip" && ev.endDate > ev.date ? `⛵ Trip · ${tripDays(ev).length} days` : esc(fmtTime(ev.time))}${placeName(ev.location) ? " · " + esc(placeName(ev.location)) : ""}</span></span>${hdFaces(ev)}</a>`).join("")}</div>` : ""}
   ${memoriesStrip()}${yearCard()}
   ${latestList()}
   ${crewsRow()}`;
@@ -2152,12 +2152,12 @@ function whenAskCard(a) {
   const count = id => Object.entries(votes).filter(([u, v]) => u !== a.by && (v || []).includes(id)).length;
   const best = [...(a.options || [])].sort((x, y) => count(y.id) - count(x.id))[0];
   return `<div class="uf-post" data-ask="${esc(a.id)}"><div class="uf-post-h">${avatar(a.by, "lg")}<div style="flex:1;min-width:0"><b>${mine ? "You're" : esc(first(nameOf(a.by))) + " is"} finding a time for ${esc(a.text)}</b><div class="muted sm">${voted} of ${people.length} answered · ${mine ? "lock one in when you're ready" : "tap the ones that work"}</div></div>${mine ? `<button type="button" class="btn ghost small" data-askdel="${esc(a.id)}" aria-label="Take this down">✕</button>` : ""}</div>
-    <div class="wa-opts">${(a.options || []).map(o => { const n = count(o.id), my = (votes[me] || []).includes(o.id); return `<button type="button" class="wa-opt ${best && o.id === best.id && n ? "best" : ""} ${my ? "mine" : ""}" data-wvote="${esc(a.id)}|${esc(o.id)}" ${mine ? "disabled" : ""}><span class="ww-tick">${my ? "✓" : ""}</span><span class="ww-mid"><b>${esc(twWhen(o))}</b><span class="ww-bar"><i style="width:${people.length ? n / people.length * 100 : 0}%"></i></span><small>${n} of ${people.length} can make it${best && o.id === best.id && n ? " · best so far" : ""}</small></span></button>`; }).join("")}</div>
+    <div class="wa-opts">${(a.options || []).map(o => { const n = count(o.id), my = (votes[me] || []).includes(o.id), busy = busyWords(o.date, o.time); return `<button type="button" class="wa-opt ${best && o.id === best.id && n ? "best" : ""} ${my ? "mine" : ""}" data-wvote="${esc(a.id)}|${esc(o.id)}" ${mine ? "disabled" : ""}><span class="ww-tick">${my ? "✓" : ""}</span><span class="ww-mid"><b>${esc(twWhen(o))}</b><span class="ww-bar"><i style="width:${people.length ? n / people.length * 100 : 0}%"></i></span><small>${n} of ${people.length} can make it${best && o.id === best.id && n ? " · best so far" : ""}</small>${busy ? `<small class="ww-busy">⚠️ ${esc(busy)}</small>` : ""}</span></button>`; }).join("")}</div>${(c => c ? `<div class="muted sm wa-cal">${c}</div>` : "")(calLine(a.options))}
     ${mine && best && count(best.id) ? `<div class="uf-post-f" style="padding-left:0;justify-content:flex-end"><button type="button" class="btn primary small" data-wlock="${esc(a.id)}|${esc(best.id)}">Lock in ${esc(twWhen(best).split(" · ")[0])}</button></div>` : ""}</div>`;
 }
 function openWhenAsk() {
   const t = todayStr(), groups = [...S.groups.values()], friends = myFriendUids(); let aud = "friends", waPk = { picked: new Set(), show() {} };
-  const row = i => `<div class="two"><label class="field"><span>Option ${i + 1}</span><input type="date" class="wa-d" min="${t}" ${i === 0 ? `value="${addDays(t, 2)}"` : ""}></label><label class="field"><span>Time</span><input type="time" class="wa-t" ${i === 0 ? 'value="19:00"' : ""}></label></div>`;
+  const row = i => `<div class="two"><label class="field"><span>Option ${i + 1}</span><input type="date" class="wa-d" min="${t}" ${i === 0 ? `value="${addDays(t, 2)}"` : ""}></label><label class="field"><span>Time</span><input type="time" class="wa-t" ${i === 0 ? 'value="19:00"' : ""}></label></div><div class="ww-pick-busy" data-wab="${i}" hidden></div>`;
   dialog(`<h3>When works?</h3><p class="muted" style="margin-top:-6px">Ask before you plan. Offer a few times, see who can make what, then lock one in and Dot makes it a plan.</p>
     <label class="field"><span>What's the plan?</span><input id="waText" maxlength="80" placeholder="Dinner at Sixty Vines"></label>
     ${[0, 1, 2, 3].map(row).join("")}
@@ -2174,7 +2174,7 @@ function openWhenAsk() {
       try { await setDoc(doc(db, "asks", newId()), { kind: "when", by: myUid(), byName: S.profile.name, text, options, votes: {}, date: options[0].date, part: "any", whenLabel: "finding a time", audience: aud, audienceName: aud === "friends" ? "friends" : (S.groups.get(aud) || {}).name || "", uids: [...new Set([myUid(), ...uids])], ins: [], status: "open", expiresAt: last.getTime(), createdAt: Date.now() }); closeDialog(); toast("Asked. Lock one in once the answers come.", null, null, "coral:happy"); }
       catch (e) { toast(e.message); }
     });
-  waPk = wirePickPeople("wa");
+  waPk = wirePickPeople("wa"); wirePickBusy("wa");
   document.querySelectorAll("[data-waa]").forEach(b => b.onclick = () => { document.querySelectorAll("[data-waa]").forEach(x => x.classList.remove("on")); b.classList.add("on"); aud = b.dataset.waa; waPk.show(aud === "pick"); });
 }
 function openAskSheet() {
@@ -2313,7 +2313,8 @@ function eventCard(ev) {
   const myR = (ev.rsvps || {})[myUid()];
   const rsvpDot = myR ? `<span class="you-pill ${myR}">${{ going: "You're going", maybe: "Maybe", no: "Can't go", waitlist: "Waitlisted", pending: "Pending" }[myR] || ""}</span>` : "";
   const dimCls = myR === "maybe" ? " maybe" : myR === "no" ? " declined" : "";
-  const pills = `${isNewEvent(ev) ? `<span class="new-pill">New</span>` : ""}${rsvpDot}`;
+  const trip = ev.kind === "trip" && ev.endDate && ev.endDate > ev.date, nDays = trip ? tripDays(ev).length : 0, e = trip ? evDate({ date: ev.endDate }) : null;
+  const pills = `${isNewEvent(ev) ? `<span class="new-pill">New</span>` : ""}${trip ? `<span class="trip-pill">⛵ Trip · ${nDays} days</span>` : ""}${rsvpDot}`;
   return `
   <a class="ev-card t-${esc(th.id)} ${ev.cover ? "has-cover" : ""} ${ev._unjoined ? "unjoined" : ""}${dimCls}" data-ev="${ev.id}" style="--th-accent:${esc(th.accent)};--th-ink:${esc(th.ink)};--th-on-accent:${esc(th.onAccent)}">
     ${ev.cover ? `<img class="cover-img" src="${esc(ev.cover)}" alt="">` : `<div class="ev-card-bg"></div>`}
@@ -2322,7 +2323,7 @@ function eventCard(ev) {
       ${ev.cover ? "" : `<div class="ev-card-emoji">${esc(ev.emoji || "🎉")}</div>`}
       <div class="ev-card-text">
         <div class="ev-card-title" style="font-family:${esc(th.font)},system-ui">${esc(ev.title)}</div>
-        <div class="ev-card-date">${MONTHS[d.getMonth()]} ${d.getDate()}${ev.time ? " · " + fmtTime(ev.time) : ""}${evStops(ev).length ? ` · <span class="ev-route">${evStops(ev).slice(0, 4).map(x => esc(x.emoji || "📍")).join("<i>›</i>")}</span>` : ""}</div>
+        <div class="ev-card-date">${trip ? `${MONTHS[d.getMonth()]} ${d.getDate()} to ${MONTHS[e.getMonth()]} ${e.getDate()}` : `${MONTHS[d.getMonth()]} ${d.getDate()}${ev.time ? " · " + fmtTime(ev.time) : ""}`}${evStops(ev).length ? ` · <span class="ev-route">${evStops(ev).slice(0, 4).map(x => esc(x.emoji || "📍")).join("<i>›</i>")}</span>` : ""}</div>
         <div class="ev-card-foot">
           <span class="mini-guests">${tf.faces}</span>
           <span class="count">${tf.label}</span>
@@ -2759,9 +2760,16 @@ function openTextInviteDialog(texted, text, where = "event", title = "Text your 
   let idx = -1, active = false, wasHidden = false;
   // auto-send states: "offer" (setup card), "added" (back from the Add Shortcut screen), "ready", "sent", "off"
   let auto = AUTO_SEND && texted.length > 1 ? (autoSendReady() ? "ready" : "offer") : "off", pending = null;
+  // Android: Messages can open one group thread with everyone on it (one sms: link, all numbers), so the host picks
+  // between that and one text per person. States: "offer", "sent", "off".
+  let group = IS_ANDROID && texted.length > 1 ? "offer" : "off";
   const n = texted.length;
   const rowsHtml = () => texted.map((p, i) => `<div class="member-row" data-row="${i}"><div style="flex:1;min-width:0"><b>${esc(p.name)}</b><div class="muted sm">${esc(fmtPhone(p.e164))}</div></div>${i < idx ? `<span class="sent-ok">✓ Sent</span>` : i === idx && active ? `<span class="sm" style="font-weight:700;color:var(--accent)">Sending…</span>` : `<button type="button" class="btn small" data-textone="${i}">Text</button>`}</div>`).join("");
-  const autoHtml = () => auto === "offer" ? `<div class="auto-card"><b>⚡ Send all ${n} at once</b><span class="new-tag">NEW</span>
+  const autoHtml = () => group === "offer" ? `<div class="auto-card"><b>💬 One group text to all ${n}</b>
+      <p>Messages opens one thread with everyone on it and you tap Send once. Everyone in it sees the others' numbers and replies.</p>
+      <button type="button" class="btn primary" id="groupSend" style="width:100%">Send one group text</button></div>`
+    : group === "sent" ? `<div class="sent-banner">✓ Group text sent to all ${n}</div><p class="muted sm" style="margin:6px 0 0">Replies land in that group thread. <button type="button" class="linkish" id="groupUndo">Didn't go through? Send one at a time</button></p>`
+    : auto === "offer" ? `<div class="auto-card"><b>⚡ Send all ${n} at once</b><span class="new-tag">NEW</span>
       <p>Add Friendly's free iPhone Shortcut one time (about 5 seconds). After that, every invite goes out in one tap, from your number.</p>
       <button type="button" class="btn primary" id="autoSetup" style="width:100%">Set up auto-send</button>
       <button type="button" class="linkish" id="autoSkip">Not now</button></div>`
@@ -2772,9 +2780,9 @@ function openTextInviteDialog(texted, text, where = "event", title = "Text your 
     : auto === "ready" ? `<button type="button" class="btn primary" id="autoRun" style="width:100%;margin-top:10px">⚡ Send all ${n} at once</button>`
     : auto === "sent" ? `<div class="sent-banner">✓ Sent to all ${n} from your number</div><p class="muted sm" style="margin:6px 0 0">They're in your Messages too, so replies come straight to you. <button type="button" class="linkish" id="autoUndo">Didn't go through? Send one at a time</button></p>`
     : "";
-  const oneAtATime = auto === "ready" || auto === "added" || auto === "offer";
+  const oneAtATime = auto === "ready" || auto === "added" || auto === "offer" || group === "offer";
   dialog(`<h3>${esc(title)}</h3>
-    <p class="muted" style="margin-top:-6px">${auto === "off" ? "Edit the message if you want, then send it to everyone one at a time -- iPhone only lets you send from Messages yourself, so this walks you through each person: it opens Messages, you tap Send, and coming back here opens the next one." : "Edit the message if you want, then send it to everyone. The texts come from your own number."}</p>
+    <p class="muted" style="margin-top:-6px">${group !== "off" ? "Edit the message if you want, then send it: one group text, or one text per person. Either way it comes from your own number." : auto === "off" ? "Edit the message if you want, then send it to everyone one at a time -- iPhone only lets you send from Messages yourself, so this walks you through each person: it opens Messages, you tap Send, and coming back here opens the next one." : "Edit the message if you want, then send it to everyone. The texts come from your own number."}</p>
     <label class="field"><span>Message</span><textarea id="txtMsg" maxlength="480">${esc(text)}</textarea></label>
     <div id="autoBox">${autoHtml()}</div>
     <button type="button" class="btn ${oneAtATime ? "" : "primary"}" id="textAll" style="width:100%;margin:10px 0 12px">💬 Send to all ${n}, one at a time${oneAtATime ? " instead" : ""}</button>
@@ -2784,7 +2792,9 @@ function openTextInviteDialog(texted, text, where = "event", title = "Text your 
   const renderRows = () => { const box = el("txtRows"); if (box) box.innerHTML = rowsHtml(); wireRowButtons(); };
   function renderAuto() {
     const box = el("autoBox"); if (!box) return; box.innerHTML = autoHtml();
-    const all = el("textAll"); if (all) { all.style.display = auto === "sent" ? "none" : ""; all.classList.toggle("primary", auto === "off"); if (!active && idx < 0) all.textContent = `💬 Send to all ${n}, one at a time${auto === "off" ? "" : " instead"}`; }
+    const all = el("textAll"); if (all) { all.style.display = auto === "sent" || group === "sent" ? "none" : ""; all.classList.toggle("primary", auto === "off" && group === "off"); if (!active && idx < 0) all.textContent = `💬 Send to all ${n}, one at a time${auto === "off" && group === "off" ? "" : " instead"}`; }
+    if (el("groupSend")) el("groupSend").onclick = () => { pending = "group"; location.href = smsLink(texted.map(p => p.e164), currentText()); };
+    if (el("groupUndo")) el("groupUndo").onclick = () => { group = "off"; idx = -1; renderRows(); renderAuto(); };
     if (el("autoSetup")) el("autoSetup").onclick = () => { pending = "setup"; location.href = INVITES_SHORTCUT_URL; };
     if (el("autoSkip")) el("autoSkip").onclick = () => { auto = "off"; renderAuto(); };
     if (el("autoRun")) el("autoRun").onclick = () => { pending = "run"; location.href = shortcutRunUrl(texted.map(p => p.e164), currentText()); };
@@ -2803,11 +2813,12 @@ function openTextInviteDialog(texted, text, where = "event", title = "Text your 
     wasHidden = false;
     if (pending === "setup") { pending = null; auto = "added"; renderAuto(); return; }
     if (pending === "run") { pending = null; autoSendReady(true); auto = "sent"; idx = texted.length; renderRows(); renderAuto(); return; }
+    if (pending === "group") { pending = null; group = "sent"; idx = texted.length; renderRows(); renderAuto(); return; }
     if (active) advance();
   };
   document.addEventListener("visibilitychange", onVis);
   const cancelBtn = el("dlgCancel"); if (cancelBtn) cancelBtn.addEventListener("click", () => document.removeEventListener("visibilitychange", onVis), { once: true });
-  el("textAll").onclick = () => { if (active) return; if (auto !== "off" && auto !== "sent") { auto = "off"; renderAuto(); } active = true; idx = -1; advance(); };
+  el("textAll").onclick = () => { if (active) return; if (auto !== "off" && auto !== "sent") { auto = "off"; renderAuto(); } if (group === "offer") { group = "off"; renderAuto(); } active = true; idx = -1; advance(); };
   wireRowButtons(); renderAuto();
 }
 async function acceptInvite(gid, btn) {
@@ -3404,7 +3415,7 @@ function applyPlan(p, said) {
   compose.where = String(p.location || "").slice(0, 200); compose.food = String(p.food || "").slice(0, 120); compose.notes = String(p.notes || "").slice(0, 1000);
   if (p.capacity > 0) compose.cap = String(Math.min(500, p.capacity));
   { const st = sortStops(cleanStops(p.stops)); if (st.length >= 2) { compose.stops = st; compose.time = (st.find(x => x.time) || {}).time || compose.time; compose.where = st[0].place || compose.where; compose.food = ""; defaultWrapUp(); } }
-  compose.questions = (p.questions || []).slice(0, 5).map(q => ({ id: newId().slice(0, 6), q: String(q).slice(0, 120) }));
+  compose.questions = (p.questions || []).slice(0, 5).map(q => ({ id: newId().slice(0, 6), q: String(q).slice(0, 120), req: true }));
   const gname = String(p.group || "").trim().toLowerCase();
   const g = gname && [...S.groups.values()].find(x => (x.name || "").trim().toLowerCase() === gname);
   if (g) compose.groupId = g.id;
@@ -3423,7 +3434,7 @@ function applyPlan(p, said) {
 function applyIdea(idx) {
   const p = compose._plan; if (!p) return; const idea = p.ideas[idx]; if (!idea) return;
   syncCompose();
-  if (idea.kind === "question") compose.questions.push({ id: newId().slice(0, 6), q: idea.value.slice(0, 120) });
+  if (idea.kind === "question") compose.questions.push({ id: newId().slice(0, 6), q: idea.value.slice(0, 120), req: true });
   else if (idea.kind === "bring") p.bring.push({ item: idea.value.slice(0, 60), qty: "" });
   else if (idea.kind === "note") compose.notes = (compose.notes ? compose.notes + "\n" : "") + idea.value;
   else if (idea.kind === "endTime" && /^\d{2}:\d{2}$/.test(idea.value)) compose.end = idea.value;
@@ -3700,7 +3711,7 @@ function composeBody() {
     <div class="form-card card">
       <div id="qList" class="stack">${compose.questions.map(q => qRow(q)).join("")}</div>
       <button class="btn ghost small" id="addQ">＋ Add a question</button>
-      <p class="muted sm" style="margin:8px 0 0">e.g. “What are you bringing?” · “Any dietary restrictions?”</p>
+      <p class="muted sm" style="margin:8px 0 0">e.g. “What are you bringing?” · “Any dietary restrictions?” Required questions have to be answered before someone can RSVP; untick Required to make one optional.</p>
     </div>
 
     </div>
@@ -3709,7 +3720,7 @@ function composeBody() {
     <p class="muted sm" style="text-align:center;margin:6px 0 0">Drafts aren't sent to anyone. Find them under 📝 Drafts on the Plans page.</p>
   </div>`;
 }
-function qRow(q) { return `<div class="q-row" data-q="${q.id}"><input value="${esc(q.q)}" data-qedit="${q.id}" maxlength="80" placeholder="Your question"><button class="btn ghost small" data-qdel="${q.id}">✕</button></div>`; }
+function qRow(q) { const req = q.req !== false; return `<div class="q-row" data-q="${q.id}"><input value="${esc(q.q)}" data-qedit="${q.id}" maxlength="80" placeholder="Your question"><label class="q-req ${req ? "on" : ""}" title="Guests must answer this before they RSVP"><input type="checkbox" data-qreq="${q.id}" ${req ? "checked" : ""}><span>Required</span></label><button class="btn ghost small" data-qdel="${q.id}" aria-label="Remove question">✕</button></div>`; }
 const COVER_EMOJIS = ["🎉", "🍕", "🌮", "🍻", "🎂", "🎬", "🎮", "🏖️", "🥾", "⚽", "🎲", "🍜", "🎃", "🎄", "🕺", "🔥"];
 // With a cover already on, each tab shows the current picture (✕ removes it) and, below it, that tab's way to replace it.
 function coverPanel() {
@@ -3838,7 +3849,7 @@ function wireCompose() {
   if (el("cAddPeople")) el("cAddPeople").onclick = openComposeInviteDialog;
   document.querySelectorAll("[data-cunpick-u]").forEach(b => b.onclick = () => { compose.invitees.delete(b.dataset.cunpickU); syncCompose(); render(); });
   document.querySelectorAll("[data-cunpick-p]").forEach(b => b.onclick = () => { compose.phoneInvitees.splice(+b.dataset.cunpickP, 1); syncCompose(); render(); });
-  el("addQ").onclick = () => { compose.questions.push({ id: newId().slice(0, 6), q: "" }); el("qList").insertAdjacentHTML("beforeend", qRow(compose.questions[compose.questions.length - 1])); wireQ(); };
+  el("addQ").onclick = () => { compose.questions.push({ id: newId().slice(0, 6), q: "", req: true }); el("qList").insertAdjacentHTML("beforeend", qRow(compose.questions[compose.questions.length - 1])); wireQ(); };
   wireQ();
   el("createEventBtn").onclick = () => createEvent();
   if (el("saveDraftBtn")) el("saveDraftBtn").onclick = () => saveDraftToAccount();
@@ -3878,6 +3889,7 @@ let composeStop = () => {};
 function wireQ() {
   document.querySelectorAll("[data-qdel]").forEach(b => b.onclick = () => { compose.questions = compose.questions.filter(q => q.id !== b.dataset.qdel); $(`.q-row[data-q="${b.dataset.qdel}"]`)?.remove(); });
   document.querySelectorAll("[data-qedit]").forEach(i => i.oninput = () => { const q = compose.questions.find(q => q.id === i.dataset.qedit); if (q) q.q = i.value; });
+  document.querySelectorAll("[data-qreq]").forEach(c => c.onchange = () => { const q = compose.questions.find(q => q.id === c.dataset.qreq); if (q) q.req = c.checked; c.closest(".q-req").classList.toggle("on", c.checked); });
 }
 async function createEvent() {
   const title = el("cTitle").value.trim(); if (!title) return toast("Add a title.");
@@ -3891,7 +3903,7 @@ async function createEvent() {
   invitedPhoneNames = Object.fromEntries(compose.phoneInvitees.map(p => [p.e164, p.name || ""]));
   const phoneInviteesSnapshot = [...compose.phoneInvitees];
   const cohostUids = [...document.querySelectorAll('input[name=coh]:checked')].map(i => i.value).filter(u => u !== myUid());
-  const questions = compose.questions.filter(q => q.q.trim());
+  const questions = compose.questions.filter(q => q.q.trim()).map(q => ({ id: q.id, q: q.q.trim(), req: q.req !== false }));
   const stopsOut = (() => { const st = sortStops(cleanStops(compose.stops)); return st.length >= 2 ? st : []; })();
   if (stopsOut.length) { const last = lastStopTime(stopsOut), end = el("cEnd").value; if (last && end && stopMins(end) < stopMins(last)) return toast("“Wraps up” is before the last stop. Pick a later time.", null, null, "thinking"); }
   const id = newId();
@@ -4171,11 +4183,11 @@ function eventInner(ev) {
 // in before the RSVP itself goes through (see attemptRsvp). Already-RSVP'd
 // guests can still come back and edit their answers with "Save answers".
 function questionsBlock(ev, me, myR) {
-  if (!(ev.questions || []).length) return "";
+  const qs = ev.questions || []; if (!qs.length) return "";
   const answered = myR === "going" || myR === "maybe" || myR === "waitlist" || myR === "pending";
-  const mine = (ev.answers || {})[me] || {};
-  return `<div class="q-answers" id="qAnswers"><div class="glass-head sm">${answered ? "A few questions from the host" : "Answer before you RSVP"}</div>
-    ${ev.questions.map(q => `<label class="qa"><span>${esc(q.q)}</span><input data-answer="${q.id}" value="${esc(mine[q.id] || "")}" placeholder="Your answer"></label>`).join("")}
+  const mine = (ev.answers || {})[me] || {}, anyReq = qs.some(q => q.req !== false);
+  return `<div class="q-answers" id="qAnswers"><div class="glass-head sm">${answered || !anyReq ? "A few questions from the host" : "Answer before you RSVP"}</div>
+    ${qs.map(q => `<label class="qa"><span>${esc(q.q)}${q.req === false ? ` <em class="q-opt">optional</em>` : ""}</span><input data-answer="${q.id}" data-req="${q.req === false ? "0" : "1"}" value="${esc(mine[q.id] || "")}" placeholder="${q.req === false ? "Optional" : "Your answer"}"></label>`).join("")}
     ${answered ? `<button class="btn-th ghost small" id="saveAnswers">Save answers</button>` : ""}</div>`;
 }
 // Reactions: the five original short names plus any emoji from the keyboard,
@@ -4590,7 +4602,9 @@ function eventIcs(ev) {
 function openCalendarDialog(ev) {
   const dt = (d, t) => d.replace(/-/g, "") + "T" + (t || "09:00").replace(":", "") + "00";
   const [h, m] = (ev.time || "09:00").split(":").map(Number); const e = new Date(2000, 0, 1, h + 2, m);
-  const g = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent((ev.emoji ? ev.emoji + " " : "") + ev.title)}&dates=${dt(ev.date, ev.time)}/${ev.endTime ? dt(ev.date, ev.endTime) : dt(ev.date, String(e.getHours()).padStart(2, "0") + ":" + String(e.getMinutes()).padStart(2, "0"))}&location=${encodeURIComponent(ev.location || "")}&details=${encodeURIComponent("https://officialfriendly.com/#/e/" + ev.id)}`;
+  const trip = ev.endDate && ev.endDate > ev.date;
+  const span = trip ? `${ev.date.replace(/-/g, "")}/${addDays(ev.endDate, 1).replace(/-/g, "")}` : `${dt(ev.date, ev.time)}/${ev.endTime ? dt(ev.date, ev.endTime) : dt(ev.date, String(e.getHours()).padStart(2, "0") + ":" + String(e.getMinutes()).padStart(2, "0"))}`;
+  const g = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent((ev.emoji ? ev.emoji + " " : "") + ev.title)}&dates=${span}&location=${encodeURIComponent(ev.location || "")}&details=${encodeURIComponent("https://officialfriendly.com/#/e/" + ev.id)}`;
   dialog(`<h3>Add to calendar</h3><p class="muted" style="margin-top:-6px">Just this plan. To keep every Friendly plan in your calendar automatically, use Calendar sync on your profile.</p>
     <div class="stack"><button type="button" class="btn primary" id="calApple">📆 Apple / iPhone Calendar</button><a class="btn" href="${g}" target="_blank" rel="noopener">Google Calendar</a><button type="button" class="btn" data-go="#/profile">Calendar sync (all plans)</button></div>`, null, null);
   // The calendar file comes from the server, so iPhone (and the app on any phone) hands it to Safari or
@@ -4725,23 +4739,80 @@ function wireTrip(ev) {
 // ---------- WHEN WORKS? (the host offers a few times; everyone taps the ones that work) ----------
 // events/{id}.timePoll: { options: [{id, date, time}], votes: {uid: [optionIds]}, lockedId }
 const twWhen = o => `${evDate({ date: o.date }).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}${o.time ? " · " + fmtTime(o.time) : ""}`;
+// Free/busy for When works. From the plans Friendly already knows about: anything of mine on that day (declined plans
+// don't count), and for a timed option anything that overlaps it (a plan with no end time runs two hours). Plus, in the
+// app, the phone's own calendar once the person has allowed it (calendar plugin; see loadCalBusy).
+const toMins = t => { const [h, m] = String(t || "0:0").split(":").map(Number); return (h || 0) * 60 + (m || 0); };
+const overlaps = (t, start, end) => { const a0 = toMins(t), a1 = a0 + 120, b0 = toMins(start), b1 = end ? toMins(end) : b0 + 120; return !(a1 <= b0 || b1 <= a0); };
+function myBusy(date, time, exceptId) {
+  const me = myUid(), out = [];
+  for (const ev of S.events.values()) {
+    if (!ev.date || ev.id === exceptId || ev._unjoined || (ev.rsvps || {})[me] === "no") continue;
+    const last = ev.endDate && ev.endDate > ev.date ? ev.endDate : ev.date;
+    if (date < ev.date || date > last) continue;
+    if (time && ev.time && last === ev.date && !overlaps(time, ev.time, ev.endTime)) continue;
+    out.push(ev);
+  }
+  for (const c of ((S._calBusy || {})[date] || [])) if (!time || c.allDay || !c.time || overlaps(time, c.time, c.endTime)) out.push(c);
+  // Timed clashes first; an all-day calendar entry (a holiday, a birthday) is context, not a hard conflict.
+  return out.sort((x, y) => (x.time ? 0 : 1) - (y.time ? 0 : 1));
+}
+const busyWords = (date, time, exceptId) => { const b = myBusy(date, time, exceptId); if (!b.length) return ""; const x = b[0], allDay = !x.time || (x.endDate && x.endDate > x.date); return `${x.cal ? "Your calendar has" : "You have"} ${x.title}${allDay ? " that day" : " at " + fmtTime(x.time)}${b.length > 1 ? ` and ${b.length - 1} more` : ""}`; };
+// The phone's calendar (iPhone/Android app with the CapacitorCalendar plugin). One tap allows it; the device remembers.
+// S._calBusy = { "YYYY-MM-DD": [{ title, time, endTime, allDay }] } for the days a When works card asks about.
+const calPlugin = () => plugin("CapacitorCalendar");
+const hhmm = d => String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+async function loadCalBusy(dates, onDone) {
+  const cal = calPlugin(); if (!cal || !dates.length) return false;
+  try {
+    let st = (((await cal.checkAllPermissions()) || {}).result || {}).readCalendar;
+    if (st !== "granted") st = ((await cal.requestPermission({ scope: "readCalendar" })) || {}).result;
+    if (st !== "granted") { LS.remove("friendlyCalCheck"); toast("Friendly can't see your calendar. You can allow it under Settings › Friendly."); return false; }
+    LS.set("friendlyCalCheck", "1"); S._calBusy = S._calBusy || {};
+    for (const d of dates) {
+      const from = evDate({ date: d }).getTime(), to = from + 86400000;
+      const r = await cal.listEventsInRange({ from, to });
+      S._calBusy[d] = (r && r.result || []).filter(c => String(c.availability || "").toLowerCase() !== "free").map(c => { const allDay = !!c.isAllDay || c.startDate <= from || c.endDate >= to; return { title: c.title || "Busy", allDay, time: allDay ? "" : hhmm(new Date(c.startDate)), endTime: allDay ? "" : hhmm(new Date(c.endDate)), cal: true }; });
+    }
+    if (onDone) onDone(); return true;
+  } catch (e) { toast("Couldn't read the calendar: " + (e.message || e)); return false; }
+}
+// Footer line for a When works card: offer the calendar check in the app, and quietly keep it current once allowed.
+function calLine(options) {
+  if (!calPlugin()) return "";
+  const dates = [...new Set((options || []).map(o => o.date).filter(Boolean))];
+  if (LS.get("friendlyCalCheck") === "1") {
+    const need = dates.filter(d => !((S._calBusy || {})[d]));
+    if (need.length && !S._calLoading) { S._calLoading = true; loadCalBusy(need, render).finally(() => { S._calLoading = false; }); }
+    return ` <span class="ww-calon">📅 Checked against your calendar</span>`;
+  }
+  return ` <button type="button" class="linkish ww-cal" data-calcheck="${esc(dates.join(","))}">📅 Check my calendar too</button>`;
+}
+document.addEventListener("click", e => { const b = e.target.closest && e.target.closest("[data-calcheck]"); if (b) loadCalBusy(b.dataset.calcheck.split(",").filter(Boolean), render); });
+// Under each date/time row of a When works sheet: what the host already has then.
+function wirePickBusy(cls, exceptId) {
+  const ds = [...document.querySelectorAll("." + cls + "-d")], ts = [...document.querySelectorAll("." + cls + "-t")];
+  const upd = () => ds.forEach((d, i) => { const n = document.querySelector(`[data-${cls}b="${i}"]`); if (!n) return; const w = d.value ? busyWords(d.value, ts[i] && ts[i].value, exceptId) : ""; n.textContent = w ? "⚠️ " + w : ""; n.hidden = !w; });
+  [...ds, ...ts].forEach(i => { i.onchange = upd; i.oninput = upd; }); upd();
+}
 function whenInner(ev) {
   const tp = ev.timePoll, me = myUid(), votes = tp.votes || {}, people = (ev.invitedUids || []), manage = canManage(ev);
   const count = id => Object.values(votes).filter(v => (v || []).includes(id)).length, voted = Object.keys(votes).length;
   const best = [...tp.options].sort((a, b) => count(b.id) - count(a.id))[0];
   if (tp.lockedId) { const o = tp.options.find(x => x.id === tp.lockedId); return `<div class="glass-head">When works?</div><p class="muted-th">Locked in: <b>${o ? esc(twWhen(o)) : "set"}</b>. ${voted} of ${people.length} answered.</p>`; }
   return `<div class="glass-head">When works? <span>${voted} of ${people.length} answered</span></div>
-    ${tp.options.map(o => { const n = count(o.id), mine = (votes[me] || []).includes(o.id); return `<button type="button" class="ww-opt ${o.id === best.id && n ? "best" : ""} ${mine ? "mine" : ""}" data-tw="${esc(o.id)}"><span class="ww-tick">${mine ? "✓" : ""}</span><span class="ww-mid"><b>${esc(twWhen(o))}</b><span class="ww-bar"><i style="width:${people.length ? n / people.length * 100 : 0}%"></i></span><small>${n} of ${people.length} can make it${o.id === best.id && n ? " · best so far" : ""}</small></span></button>`; }).join("")}
-    <div class="ww-foot"><span class="muted-th">Tap the times that work for you.</span>${manage && best && count(best.id) ? `<button type="button" class="btn-th accent small" id="lockWhen" data-lock="${esc(best.id)}">Lock in ${esc(twWhen(best).split(" · ")[0])}</button>` : ""}</div>`;
+    ${tp.options.map(o => { const n = count(o.id), mine = (votes[me] || []).includes(o.id), busy = busyWords(o.date, o.time, ev.id); return `<button type="button" class="ww-opt ${o.id === best.id && n ? "best" : ""} ${mine ? "mine" : ""}" data-tw="${esc(o.id)}"><span class="ww-tick">${mine ? "✓" : ""}</span><span class="ww-mid"><b>${esc(twWhen(o))}</b><span class="ww-bar"><i style="width:${people.length ? n / people.length * 100 : 0}%"></i></span><small>${n} of ${people.length} can make it${o.id === best.id && n ? " · best so far" : ""}</small>${busy ? `<small class="ww-busy">⚠️ ${esc(busy)}</small>` : ""}</span></button>`; }).join("")}
+    <div class="ww-foot"><span class="muted-th">Tap the times that work for you.${calLine(tp.options)}</span>${manage && best && count(best.id) ? `<button type="button" class="btn-th accent small" id="lockWhen" data-lock="${esc(best.id)}">Lock in ${esc(twWhen(best).split(" · ")[0])}</button>` : ""}</div>`;
 }
 function openWhenDialog(ev) {
-  const row = i => `<div class="two"><label class="field"><span>Option ${i + 1}</span><input type="date" class="tw-d" min="${todayStr()}"></label><label class="field"><span>Time</span><input type="time" class="tw-t"></label></div>`;
+  const row = i => `<div class="two"><label class="field"><span>Option ${i + 1}</span><input type="date" class="tw-d" min="${todayStr()}"></label><label class="field"><span>Time</span><input type="time" class="tw-t"></label></div><div class="ww-pick-busy" data-twb="${i}" hidden></div>`;
   dialog(`<h3>When works?</h3><p class="muted" style="margin-top:-6px">Offer a few times. Everyone taps the ones they can make, and you lock in the winner.</p>${[0, 1, 2, 3].map(row).join("")}`, "Ask everyone", async () => {
     const ds = [...document.querySelectorAll(".tw-d")], ts = [...document.querySelectorAll(".tw-t")];
     const options = ds.map((d, i) => d.value ? { id: "o" + i + Math.random().toString(36).slice(2, 6), date: d.value, time: ts[i].value || "" } : null).filter(Boolean);
     if (options.length < 2) return toast("Give people at least two options.");
     try { await updateDoc(doc(db, "events", ev.id), { timePoll: { options, votes: {}, lockedId: "" } }); closeDialog(); toast("Asked. You'll see the answers come in.", null, null, "happy"); } catch (e) { toast(e.message); }
   });
+  wirePickBusy("tw", ev.id);
 }
 function wireWhen(ev) {
   if (el("addWhen")) el("addWhen").onclick = () => openWhenDialog(ev);
@@ -4867,15 +4938,14 @@ async function setRsvp(ev, status) {
 async function attemptRsvp(ev, status) {
   if (status !== "no" && (ev.questions || []).length) {
     const inputs = [...document.querySelectorAll("[data-answer]")];
-    const empty = inputs.filter(i => !i.value.trim());
+    const empty = inputs.filter(i => i.dataset.req !== "0" && !i.value.trim());   // optional questions can stay blank
     if (empty.length) {
-      toast("Answer the host's questions first.");
+      toast(empty.length === inputs.length ? "Answer the host's questions first." : "Answer the host's required questions first.");
       empty[0].focus(); const box = el("qAnswers"); if (box) box.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
     const a = {}; inputs.forEach(i => a[i.dataset.answer] = i.value.trim());
-    try { await updateDoc(doc(db, "events", ev.id), { [`answers.${myUid()}`]: a }); }
-    catch (e) { return toast(e.message); }
+    if (Object.values(a).some(Boolean)) { try { await updateDoc(doc(db, "events", ev.id), { [`answers.${myUid()}`]: a }); } catch (e) { return toast(e.message); } }
   }
   setRsvp(ev, status);
 }
@@ -5216,6 +5286,7 @@ function expenseBody(id) {
   <div class="group-hero"><span class="li" style="width:52px;height:52px;font-size:24px">${x.pitch ? "🎁" : "🧾"}</span>
     <div><h1>${esc(x.desc || "Expense")}</h1><div class="muted">${x.pitch ? `${esc(first(nameOf(x.paidBy)))} is collecting · ${fmt$(x.pitch.each)} each${x.pitch.closes ? " · " + (x.pitch.closes < todayStr() ? "closed " : "closes ") + esc(fmtDay({ date: x.pitch.closes })) : ""}` : `${fmt$(x.amountCents)} · ${esc(nameOf(x.paidBy))} paid`}${ev ? " · " + esc(ev.title) : ""} · ${new Date(x.createdAt).toLocaleDateString()}</div></div></div>
   ${x.pitch ? pitchProgress(x) : ""}
+  ${x.pitch && x.addedBy === myUid() ? `<div class="btnrow pi-share" style="margin-top:12px"><button class="btn small" id="pitchShare">🔗 ${x.pitch.link ? "Share the link" : "Share a link"}</button>${x.pitch.link ? `<button class="btn ghost small" id="pitchLinkOff">Turn the link off</button>` : `<span class="muted sm">For friends who aren't on Friendly.</span>`}</div>` : ""}
   ${x.receipt ? `<div class="btnrow" style="margin-top:12px"><button class="btn small" id="viewReceipt">🧾 View receipt</button></div>` : ""}
   ${x.addedBy !== myUid() ? "" : x.pitch ? (Object.keys(x.paid || {}).length ? "" : `<div class="btnrow" style="margin-top:12px"><button class="btn small danger-ghost" id="xDelete">Delete</button></div>`) : Object.keys(x.paid || {}).some(u => u !== x.paidBy) ? `<p class="muted sm" style="margin-top:10px">Someone has already paid, so this can't be changed. Mark their payment unpaid first if it needs fixing.</p>`
     : `<div class="btnrow" style="margin-top:12px"><button class="btn small" id="xReopen">${(x.items || []).length ? "✏️ Reopen to make changes" : "✏️ Change who's splitting"}</button>${Object.keys(x.paid || {}).length ? "" : `<button class="btn small danger-ghost" id="xDelete">Delete</button>`}</div>`}
@@ -5225,7 +5296,7 @@ function expenseBody(id) {
     const status = payer ? `<span class="pill ok">${x.pitch ? "Collecting" : "Paid the bill"}</span>` : paid ? `<span class="pill ok">Paid${paid.at ? " · " + new Date(paid.at).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : ""}</span>` : `<span class="pill due">Unpaid</span>`;
     const acts = payer || !cents ? "" : paid ? (canManage || paid.by === me ? `<button class="btn ghost small" data-munpaid="${esc(u)}">Mark unpaid</button>` : "")
       : `${canManage && u !== me ? `<button class="btn small" data-remind="${esc(u)}">${isGuest(u) ? "💬 Text" : "🔔 Remind"}</button>` : ""}${canManage && u !== me ? `<button class="btn small" data-mpaid="${esc(u)}">Mark paid</button>` : ""}`;
-    return `<div class="member-row x-person" data-xperson="${esc(u)}">${avatar(u, "lg")}<div style="flex:1;min-width:0"><b>${esc(nameOf(u))}${u === me ? " (you)" : ""}</b><div class="x-status">${status}</div></div><div class="x-acts"><span class="amt sm">${fmt$(cents)}</span>${acts ? `<div class="btnrow" style="gap:6px;justify-content:flex-end">${acts}</div>` : ""}</div></div>${u === me && !payer && !paid && cents ? payBar(x.paidBy, cents) : ""}`; }).join("")}</div>
+    return `<div class="member-row x-person" data-xperson="${esc(u)}">${avatar(u, "lg")}<div style="flex:1;min-width:0"><b>${esc(nameOf(u))}${u === me ? " (you)" : ""}</b><div class="x-status">${status}</div></div><div class="x-acts"><span class="amt sm">${fmt$(cents)}</span>${acts ? `<div class="btnrow" style="gap:6px;justify-content:flex-end">${acts}</div>` : ""}</div></div>${u === me && !payer && !paid && cents ? payBar(x.paidBy, cents) : ""}`; }).join("")}${x.pitch ? pitchOutsideRows(x) : ""}</div>
   ${(x.items || []).length ? `<div class="section-head" style="margin-top:22px"><h2>Receipt${x.merchant ? " · " + esc(x.merchant) : ""}</h2></div>
   <div class="card">${x.items.map(it => `<div class="member-row"><div style="flex:1;min-width:0"><b>${esc(it.name)}</b><div class="muted sm">${(it.uids || []).map(u => esc(first(nameOf(u))) + (it.w && it.w[u] > 1 ? " ×" + it.w[u] : "")).join(", ") || "unassigned"}</div></div><span class="amt sm">${fmt$(it.cents)}</span></div>`).join("")}
     ${x.tax ? `<div class="member-row"><div style="flex:1"><b>Tax</b><div class="muted sm">split in proportion</div></div><span class="amt sm">${fmt$(x.tax)}</span></div>` : ""}
@@ -5263,6 +5334,9 @@ function wireExpensePage() {
   const pseudo = { id: x.id, _col: ["expenses", x.id], _manage: false, title: x.desc };
   if (el("viewReceipt")) el("viewReceipt").onclick = () => lightbox(x.receipt);
   if (el("xReopen")) el("xReopen").onclick = () => (x.items || []).length ? reopenAsPick(x) : changeSplitPeople(x);
+  if (el("pitchShare")) el("pitchShare").onclick = async () => { try { if (!x.pitch.link) await updateDoc(doc(db, "expenses", x.id), { "pitch.link": true }); } catch (e) { return toast(e.message); } sharePitch(x); };
+  if (el("pitchLinkOff")) el("pitchLinkOff").onclick = async () => { try { await updateDoc(doc(db, "expenses", x.id), { "pitch.link": false }); toast("Link turned off. Anyone opening it now sees it's not active."); } catch (e) { toast(e.message); } };
+  document.querySelectorAll("[data-pioutx]").forEach(b => b.onclick = async () => { const o = pitchOut(x).find(o => o.id === b.dataset.pioutx); if (!o || !confirm(`Remove ${o.name}? Their ${fmt$(x.pitch.each)} stops counting.`)) return; try { await updateDoc(doc(db, "expenses", x.id), { "pitch.outside": pitchOut(x).filter(z => z.id !== o.id) }); } catch (e) { toast(e.message); } });
   if (el("xDelete")) el("xDelete").onclick = () => { if (!confirm(`Delete “${x.desc || "this expense"}”? Nobody has paid on it yet.`)) return; deleteWithUndo("expenses", x.id, x, "expense"); go("#/money"); };
   if (el("pitchNudge")) el("pitchNudge").onclick = async () => { const b = el("pitchNudge"), left = pitchLeft(x).filter(u => !isGuest(u)); b.disabled = true;
     try { await Promise.all(left.map(u => addDoc(collection(db, "nudges"), { expenseId: x.id, to: u, by: myUid(), createdAt: Date.now() }))); b.textContent = "Reminded ✓"; toast(`${left.length} ${left.length === 1 ? "person gets" : "people get"} a reminder.`, null, null, "coral:happy"); } catch (e) { toast(e.message); b.disabled = false; } };
@@ -6000,19 +6074,32 @@ const pitchPaid = x => (x.split || []).filter(u => u !== x.paidBy && (x.paid || 
 const pitchLeft = x => (x.split || []).filter(u => u !== x.paidBy && !(x.paid || {})[u]);
 const pitchTotal = x => (x.split || []).filter(u => u !== x.paidBy).length * x.pitch.each;
 const pitchOpen = x => x.pitch && (pitchLeft(x).length > 0) && (!x.pitch.closes || x.pitch.closes >= addDays(todayStr(), -14));
+// People who pitched in through the public link (/pitch/{id}, served by the pitch function): they count toward the goal,
+// and the collector can remove one that never landed. The link is live only while pitch.link is true.
+const pitchOut = x => Array.isArray(x.pitch && x.pitch.outside) ? x.pitch.outside : [];
+const pitchUrl = x => FN_BASE + "/pitch/" + x.id;
+function pitchOutsideRows(x) {
+  const mine = x.addedBy === myUid();
+  return pitchOut(x).map(o => `<div class="member-row x-person"><span class="li">🔗</span><div style="flex:1;min-width:0"><b>${esc(o.name)}</b><div class="x-status"><span class="pill ok">Via the link${o.at ? " · " + new Date(o.at).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : ""}</span></div></div><div class="x-acts"><span class="amt sm">${fmt$(x.pitch.each)}</span>${mine ? `<div class="btnrow" style="gap:6px;justify-content:flex-end"><button class="btn ghost small" data-pioutx="${esc(o.id)}">Remove</button></div>` : ""}</div></div>`).join("");
+}
+function sharePitch(x) {
+  const url = pitchUrl(x), text = `Pitch in for ${x.desc}: ${fmt$(x.pitch.each)} each. Pay and add your name here:`;
+  if (navigator.share) navigator.share({ title: "Pitch in: " + x.desc, text, url }).catch(() => {});
+  else navigator.clipboard.writeText(text + " " + url).then(() => toast("Link copied")).catch(() => prompt("Copy link:", url));
+}
 function pitchProgress(x) {
-  const got = pitchPaid(x).length * x.pitch.each, goal = x.pitch.goal || pitchTotal(x), pct = goal ? Math.min(100, Math.round(got / goal * 100)) : 0, people = (x.split || []).filter(u => u !== x.paidBy);
-  return `<div class="card pi-card"><div class="pi-bar"><i style="width:${pct}%"></i></div><div class="pi-stats"><b>${fmt$(got)} of ${fmt$(goal)}</b><span class="muted sm">${pitchPaid(x).length} of ${people.length} have pitched in</span></div>
+  const got = (pitchPaid(x).length + pitchOut(x).length) * x.pitch.each, goal = x.pitch.goal || pitchTotal(x), pct = goal ? Math.min(100, Math.round(got / goal * 100)) : 0, people = (x.split || []).filter(u => u !== x.paidBy);
+  return `<div class="card pi-card"><div class="pi-bar"><i style="width:${pct}%"></i></div><div class="pi-stats"><b>${fmt$(got)} of ${fmt$(goal)}</b><span class="muted sm">${pitchPaid(x).length} of ${people.length} have pitched in${pitchOut(x).length ? ` · +${pitchOut(x).length} via the link` : ""}</span></div>
     <div class="pi-people">${people.map(u => `<span class="pi-p ${(x.paid || {})[u] ? "paid" : ""}" title="${esc(nameOf(u))}">${avatar(u, "sm")}<i>${(x.paid || {})[u] ? "✓" : ""}</i></span>`).join("")}</div></div>`;
 }
 function pitchCards() {
   const me = myUid(), list = [...S.expenses.values()].filter(x => x.pitch && pitchOpen(x) && (x.involved || []).includes(me)).sort((a, b) => b.createdAt - a.createdAt).slice(0, 4);
   if (!list.length) return "";
   return `<div class="section-head"><h2>Pitch in</h2></div><div class="stack" id="pitchCard">${list.map(x => {
-    const mine = x.paidBy === me, got = pitchPaid(x).length * x.pitch.each, goal = x.pitch.goal || pitchTotal(x), pct = goal ? Math.min(100, Math.round(got / goal * 100)) : 0, people = (x.split || []).filter(u => u !== x.paidBy), iPaid = !!(x.paid || {})[me], left = pitchLeft(x);
+    const mine = x.paidBy === me, got = (pitchPaid(x).length + pitchOut(x).length) * x.pitch.each, goal = x.pitch.goal || pitchTotal(x), pct = goal ? Math.min(100, Math.round(got / goal * 100)) : 0, people = (x.split || []).filter(u => u !== x.paidBy), iPaid = !!(x.paid || {})[me], left = pitchLeft(x);
     const when = x.pitch.closes ? (x.pitch.closes < todayStr() ? " · closed " : " · closes ") + esc(fmtDay({ date: x.pitch.closes })) : "";
     return `<div class="card pi-card" data-pitch="${esc(x.id)}"><div class="pi-h">${avatar(x.paidBy, "lg")}<div style="flex:1;min-width:0"><b>${esc(x.desc)}</b><div class="muted sm">${mine ? "You're" : esc(first(nameOf(x.paidBy))) + " is"} collecting · ${fmt$(x.pitch.each)} each${when}</div></div></div>
-      <div class="pi-bar"><i style="width:${pct}%"></i></div><div class="pi-stats"><b>${fmt$(got)} of ${fmt$(goal)}</b><span class="muted sm">${pitchPaid(x).length} of ${people.length} have pitched in</span></div>
+      <div class="pi-bar"><i style="width:${pct}%"></i></div><div class="pi-stats"><b>${fmt$(got)} of ${fmt$(goal)}</b><span class="muted sm">${pitchPaid(x).length} of ${people.length} have pitched in${pitchOut(x).length ? ` · +${pitchOut(x).length} via the link` : ""}</span></div>
       <div class="pi-people">${people.slice(0, 10).map(u => `<span class="pi-p ${(x.paid || {})[u] ? "paid" : ""}" title="${esc(nameOf(u))}">${avatar(u, "sm")}<i>${(x.paid || {})[u] ? "✓" : ""}</i></span>`).join("")}${people.length > 10 ? `<span class="muted sm">+${people.length - 10}</span>` : ""}</div>
       <div class="settle-actions pi-acts">${mine ? `${left.length ? `<button class="btn small" data-pinudge="${esc(x.id)}">🔔 Nudge the ${left.length} left</button>` : `<span class="pill ok">Everyone's in 🎉</span>`}<button class="btn small" data-xopen="${esc(x.id)}">Open</button>`
         : iPaid ? `<span class="pill ok">You pitched in ✓</span><button class="btn small" data-xopen="${esc(x.id)}">Open</button>` : `${payBtns(x.paidBy, x.pitch.each).replace(/>(Venmo|Cash App|Zelle)</g, (m, k) => `>${k} ${fmt$(x.pitch.each)}<`)}<button class="btn small" data-pipaid="${esc(x.id)}">Paid in cash</button>`}</div></div>`; }).join("")}</div>`;
@@ -6050,7 +6137,7 @@ function openPitchIn(groupId) {
     <div class="muted sm" style="margin:4px 0 6px">Who's in</div><div class="chiprow" id="piWho" style="flex-wrap:wrap;overflow:visible;padding-bottom:0">${groups.map(g => `<button type="button" class="fchip ${who === g.id ? "on" : ""}" data-piw="${esc(g.id)}">${groupMini(g)} ${esc(g.name)} (${((g.memberUids || []).filter(u => u !== me)).length})</button>`).join("")}<button type="button" class="fchip ${who === "friends" ? "on" : ""}" data-piw="friends">All friends (${friends.length})</button><button type="button" class="fchip" data-piw="pick">Pick people</button></div>
     ${pickPeopleField("pi")}
     <div class="muted sm" id="piSum" style="margin-top:6px"></div>
-    <p class="muted sm" style="margin:10px 0 0">Everyone gets a nudge with your pay buttons. Money lands with you directly; you tick people off as it does, or they mark it themselves.</p>`,
+    <p class="muted sm" style="margin:10px 0 0">Everyone gets a nudge with your pay buttons. Money lands with you directly; you tick people off as it does, or they mark it themselves. Friends who aren't on Friendly can pitch in through a link you share from the pitch-in page.</p>`,
     "Send it", async () => {
       const desc = el("piDesc").value.trim(), each = parseAmount(el("piEach").value), split = people();
       if (!desc) return toast("Say what it's for."); if (!each) return toast("Enter what each person pays."); if (!split.length) return toast("Pick who's in.");

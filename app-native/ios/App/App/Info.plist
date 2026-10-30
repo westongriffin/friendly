@@ -26,12 +26,16 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Friendly uses your location only when you tap Near me, to find nights out close by. It is never stored or shared.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Friendly checks your calendar for conflicts when someone asks When works. It only reads; it never adds or changes events.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Friendly checks your calendar for conflicts when someone asks When works. It only reads; it never adds or changes events.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Friendly lets you take photos for your event covers and party photo wall.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>Friendly uses your contacts so you can quickly invite friends to your groups.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Friendly uses your location only when you tap Near me, to find nights out close by. It is never stored or shared.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Friendly uses the microphone only when you record a voice message to send to a friend.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

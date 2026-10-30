@@ -1045,6 +1045,99 @@ ${ogTags}
 <meta http-equiv="refresh" content="0;url=${target}"><script>location.replace(${JSON.stringify(target)});</script></head>
 <body style="font-family:-apple-system,system-ui,sans-serif;padding:24px;color:#2A2019"><p>Opening your invite… <a href="${target}">Tap here if it doesn't open.</a></p></body></html>`);
 });
+// ---- Pitch in by link: a public page for people who aren't on Friendly ----
+// /pitch/{expenseId}. The collector turns the link on from the pitch-in page (pitch.link = true). The page shows what's
+// being collected, the collector's pay buttons, and an "I pitched in" button that adds a name to pitch.outside, which the
+// app counts toward the goal (the collector can remove one that never landed).
+const pitchBudget = { minute: 0, byIp: new Map() };
+const ymdUtc = () => new Date().toISOString().slice(0, 10);
+exports.pitch = onRequest({ region: "us-central1", invoker: "public", memory: "256MiB", maxInstances: 3 }, async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const m = /^\/([A-Za-z0-9_-]{8,64})\/?$/.exec(req.path || "");
+  if (!m) { res.redirect(302, SITE); return; }
+  const ref = db.doc("expenses/" + m[1]); const snap = await ref.get(); const x = snap.exists ? snap.data() : null;
+  if (!(x && x.pitch && x.pitch.each && x.pitch.link === true)) { res.status(404).type("html").send(pitchPageHtml({ gone: true })); return; }
+  const user = await db.doc("users/" + x.paidBy).get().catch(() => null);
+  const who = firstName(user && user.exists ? user.get("name") : "");
+  const outside = Array.isArray(x.pitch.outside) ? x.pitch.outside : [];
+  const closed = !!(x.pitch.closes && x.pitch.closes < ymdUtc());
+  if (req.method === "POST") {
+    const now = Date.now(), minute = Math.floor(now / 60000); if (pitchBudget.minute !== minute) { pitchBudget.minute = minute; pitchBudget.byIp.clear(); }
+    const ip = String(req.headers["x-forwarded-for"] || req.ip || "").split(",")[0].trim();
+    if ((pitchBudget.byIp.get(ip) || 0) >= 5) { res.status(429).json({ error: "Slow down a little and try again." }); return; }
+    pitchBudget.byIp.set(ip, (pitchBudget.byIp.get(ip) || 0) + 1);
+    let body = req.body; if (typeof body === "string") { try { body = JSON.parse(body); } catch { body = {}; } }
+    const name = String((body && body.name) || "").replace(/\s+/g, " ").trim().slice(0, 40);
+    if (!name) { res.status(400).json({ error: "Add your name so " + who + " knows who's in." }); return; }
+    if (closed) { res.status(409).json({ error: "This pitch-in has closed." }); return; }
+    if (outside.length >= 80) { res.status(409).json({ error: "This pitch-in is full." }); return; }
+    const entry = { id: Math.random().toString(36).slice(2, 10), name, at: now };
+    await ref.update({ "pitch.outside": FieldValue.arrayUnion(entry) });
+    await notify([x.paidBy], `${name} pitched in ${dollars(x.pitch.each)}`, `For ${x.desc || "your pitch-in"}, through your link. It counts toward the goal; remove it from the pitch-in if it never lands.`, "/#/x/" + snap.id, { type: "money" }).catch(() => {});
+    res.json({ ok: true });
+    return;
+  }
+  const pay = (x.pay || {})[x.paidBy] || payOf(user && user.exists ? user.data() : null);
+  const paidCount = (x.split || []).filter(u => u !== x.paidBy && (x.paid || {})[u]).length, friends = (x.split || []).filter(u => u !== x.paidBy).length;
+  const inCount = paidCount + outside.length, got = inCount * x.pitch.each, goal = x.pitch.goal || friends * x.pitch.each || x.pitch.each;
+  const title = `Pitch in: ${x.desc || "a gift"}`, sub = `${dollars(x.pitch.each)} each · ${who} is collecting · ${inCount} in so far`;
+  const og = `<meta property="og:type" content="website"><meta property="og:site_name" content="Friendly"><meta property="og:title" content="${htmlEsc(title)}"><meta property="og:description" content="${htmlEsc(sub)}"><meta property="og:image" content="${SITE}/icons/icon-512.png"><meta property="og:url" content="${FN_BASE}/pitch/${snap.id}"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="${htmlEsc(title)}"><meta name="twitter:description" content="${htmlEsc(sub)}">`;
+  res.type("html").send(pitchPageHtml({ id: snap.id, who, what: x.desc || "a gift", each: x.pitch.each, got, goal, inCount, closes: x.pitch.closes || "", closed, pay, og }));
+});
+function pitchPageHtml(o) {
+  const H = htmlEsc, css = `
+  :root{--coral:#FF6B57;--coral2:#F2543F;--ink:#2A2019;--muted:#7A6B5F;--cream:#FFFEFC;--line:#F1E9DF;--sage:#7CC79B;--good:#25A56A}
+  *{box-sizing:border-box}body{font-family:-apple-system,system-ui,"Segoe UI",sans-serif;background:var(--cream);color:var(--ink);margin:0;padding:28px 20px 40px;line-height:1.4}
+  .wrap{max-width:420px;margin:0 auto;text-align:center}.brand{font-size:22px;font-weight:800;margin:0 0 18px}.brand .tilt{color:var(--coral)}
+  .gift{font-size:52px;line-height:1;margin:6px 0 10px}h1{font-size:21px;margin:0 0 6px;text-wrap:balance}p.sub{color:var(--muted);margin:0 0 20px;font-size:15px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:16px;text-align:left;margin:0 0 14px;box-shadow:0 6px 24px rgba(42,32,25,.06)}
+  .bar{height:10px;border-radius:5px;background:var(--line);overflow:hidden}.bar i{display:block;height:100%;background:var(--coral);border-radius:5px}
+  .stats{display:flex;justify-content:space-between;gap:10px;margin:10px 0 0;font-size:15px}.stats b{font-size:17px}.stats span{color:var(--muted)}
+  h2{font-size:16px;margin:0 0 10px}.btn{display:flex;align-items:center;justify-content:center;width:100%;border:0;border-radius:14px;padding:14px 18px;font-weight:700;font-size:16px;margin:0 0 10px;text-decoration:none;color:#fff;background:var(--ink);cursor:pointer;font-family:inherit}
+  .btn.venmo{background:#008CFF}.btn.cashapp{background:#00D632}.btn.coral{background:var(--coral)}.btn.ghost{background:#FFF3E6;color:var(--ink)}.btn:disabled{opacity:.6}
+  .zelle{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#F7F2EC;border-radius:14px;padding:12px 14px;margin:0 0 10px}.zelle b{font-size:15px}.zelle button{border:0;background:var(--ink);color:#fff;border-radius:10px;padding:8px 12px;font-weight:700;font-family:inherit}
+  label{display:block;font-size:13px;font-weight:700;color:var(--muted);margin:0 0 6px}input{width:100%;border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:16px;font-family:inherit;margin:0 0 10px;background:#fff;color:var(--ink)}
+  .ok{background:#EAF7EF;border:1px solid #CDEBD8;color:#1F6B3A;border-radius:14px;padding:14px;font-weight:700}.err{color:#B3261E;font-size:14px;margin:0 0 8px}
+  .foot{color:var(--muted);font-size:13px;margin:22px 0 0}.foot a{color:var(--coral2);font-weight:700;text-decoration:none}.muted{color:var(--muted);font-size:14px;margin:0 0 10px}`;
+  const head = (t, extra = "") => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${H(t)}</title><meta name="viewport" content="width=device-width, initial-scale=1">${extra}<style>${css}</style></head><body><div class="wrap"><div class="brand">Friend<span class="tilt">l</span>y</div>`;
+  const foot = `<p class="foot">Friendly is a crew's home base for plans, invites, photos, and settling up. <a href="${APP_STORE_URL}">Get the app</a></p></div></body></html>`;
+  if (o.gone) return head("This pitch-in isn't open") + `<div class="gift">🎁</div><h1>This link isn't active</h1><p class="sub">Ask whoever sent it to turn the link back on from the pitch-in in Friendly.</p>` + foot;
+  const amt = (o.each / 100).toFixed(2), note = encodeURIComponent("Pitch in: " + o.what);
+  const pay = o.pay || {}, venmo = String(pay.venmo || "").replace(/^@/, ""), cash = String(pay.cashapp || "").replace(/^\$/, ""), zelle = String(pay.zelle || "");
+  const pct = Math.min(100, Math.round(o.got / (o.goal || 1) * 100));
+  const closesDay = o.closes ? new Date(o.closes + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : "";
+  const payBtns = [
+    venmo ? `<a class="btn venmo" href="https://venmo.com/${encodeURIComponent(venmo)}?txn=pay&amount=${amt}&note=${note}" data-venmo="${H(venmo)}">Venmo ${H(dollars(o.each))}</a>` : "",
+    cash ? `<a class="btn cashapp" href="https://cash.app/$${encodeURIComponent(cash)}/${amt}">Cash App ${H(dollars(o.each))}</a>` : "",
+    zelle ? `<div class="zelle"><div><label style="margin:0">Zelle</label><b>${H(zelle)}</b></div><button type="button" data-copy="${H(zelle)}">Copy</button></div>` : "",
+  ].join("");
+  return head(`Pitch in: ${o.what}`, o.og) + `
+  <div class="gift">🎁</div><h1>${H(o.who)} is collecting for ${H(o.what)}</h1>
+  <p class="sub">${H(dollars(o.each))} each${closesDay ? ` · ${o.closed ? "closed" : "closes"} ${H(closesDay)}` : ""}</p>
+  <div class="card"><div class="bar"><i style="width:${pct}%"></i></div><div class="stats"><b>${H(dollars(o.got))} of ${H(dollars(o.goal))}</b><span>${o.inCount} ${o.inCount === 1 ? "person is" : "people are"} in</span></div></div>
+  ${o.closed ? `<div class="card"><p class="muted" style="margin:0">This pitch-in has closed. Reach ${H(o.who)} directly if you still want in.</p></div>` : `
+  <div class="card"><h2>1. Pay ${H(o.who)} ${H(dollars(o.each))}</h2>${payBtns || `<p class="muted" style="margin:0">${H(o.who)} hasn't added Venmo, Cash App, or Zelle yet. Pay them however you usually do.</p>`}</div>
+  <div class="card" id="pledge"><h2>2. Let ${H(o.who)} know you're in</h2><p class="muted">Once you've sent it, add your name. It counts toward the goal right away.</p>
+    <label for="nm">Your name</label><input id="nm" maxlength="40" autocomplete="name" placeholder="Sam Rivera"><div class="err" id="err" hidden></div>
+    <button type="button" class="btn coral" id="go">I pitched in ${H(dollars(o.each))}</button></div>`}
+  <script>
+  (function(){
+    var v = document.querySelector("[data-venmo]"); if (v && /iPhone|iPad|Android/i.test(navigator.userAgent)) v.addEventListener("click", function(){ var u = "venmo://paycharge?txn=pay&recipients=" + encodeURIComponent(v.dataset.venmo) + "&amount=${amt}&note=${note}"; setTimeout(function(){ location.href = u; }, 0); });
+    var c = document.querySelector("[data-copy]"); if (c) c.addEventListener("click", function(){ var t = c.dataset.copy; (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function(){ c.textContent = "Copied"; }, function(){ prompt("Copy this Zelle handle:", t); }); });
+    var go = document.getElementById("go"); if (!go) return;
+    go.addEventListener("click", function(){
+      var nm = document.getElementById("nm").value.trim(), err = document.getElementById("err"); err.hidden = true;
+      if (!nm) { err.textContent = "Add your name first."; err.hidden = false; return; }
+      go.disabled = true; go.textContent = "Adding you…";
+      fetch(location.pathname, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: nm }) }).then(function(r){ return r.json().then(function(j){ return [r.ok, j]; }); }).then(function(a){
+        if (!a[0]) throw new Error(a[1] && a[1].error || "Something went wrong.");
+        document.getElementById("pledge").innerHTML = '<div class="ok">You\'re in. Thanks, ' + nm.replace(/[<>&]/g, "") + '! ${H(o.who)} will see it.</div>';
+      }).catch(function(e){ err.textContent = e.message; err.hidden = false; go.disabled = false; go.textContent = "I pitched in ${H(dollars(o.each))}"; });
+    });
+  })();
+  </script>` + foot;
+}
+
 // Shown instead of the instant redirect on a phone: there's no Universal Link
 // registered (see comment above), so we can't tell if Friendly is installed.
 // Offer the App Store as the clear first move, with the web invite one tap away.
@@ -1177,16 +1270,30 @@ function zonedUtc(date, mins, tz) {
   let utc = wall - tzOffsetMs(wall, tz); utc = wall - tzOffsetMs(utc, tz);   // second pass settles DST edges
   return new Date(utc).toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
 }
+// Trips (endDate after date) in words, for calendar notes and reminders.
+const stayLine = ev => ev && ev.stay && ev.stay.name ? ev.stay.name + (ev.stay.address ? ", " + ev.stay.address : "") : "";
+const daysBetween = (a, b) => Math.round((new Date(b + "T12:00:00Z") - new Date(a + "T12:00:00Z")) / 86400000);
+const t12 = x => { const [h, mi] = String(x).split(":").map(Number); return ((h % 12) || 12) + (mi ? ":" + String(mi).padStart(2, "0") : "") + (h >= 12 ? " PM" : " AM"); };
+const isTrip = ev => !!(ev && ev.endDate && ev.date && ev.endDate > ev.date);
+const tripLine = ev => {
+  const day = d => new Date(d + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  let s = `${daysBetween(ev.date, ev.endDate) + 1}-day trip, ${day(ev.date)} to ${day(ev.endDate)}`;
+  if (ev.time) s += `\nKickoff ${t12(ev.time)}`;
+  if (stayLine(ev)) s += `\nStaying: ${stayLine(ev)}${ev.stay.checkIn ? ` · check-in ${ev.stay.checkIn}` : ""}${ev.stay.checkOut ? ` · check-out ${ev.stay.checkOut}` : ""}`;
+  return s;
+};
 function icsEvent(id, ev, u, stamp) {
   const my = (ev.rsvps || {})[u] || "no answer yet";
   let tz = ev.tz || DEFAULT_TZ; try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); } catch { tz = DEFAULT_TZ; }
   let dt;
-  if (!ev.time) dt = `DTSTART;VALUE=DATE:${ev.date.replace(/-/g, "")}\r\nDTEND;VALUE=DATE:${nextDay(ev.date).replace(/-/g, "")}`;
+  // A trip spans its days as one all-day entry (Sat to Mon); the kickoff time and where everyone's staying go in the notes.
+  if (isTrip(ev)) dt = `DTSTART;VALUE=DATE:${ev.date.replace(/-/g, "")}\r\nDTEND;VALUE=DATE:${nextDay(ev.endDate).replace(/-/g, "")}`;
+  else if (!ev.time) dt = `DTSTART;VALUE=DATE:${ev.date.replace(/-/g, "")}\r\nDTEND;VALUE=DATE:${nextDay(ev.date).replace(/-/g, "")}`;
   else { const s0 = minutes(ev.time); let e = ev.endTime ? minutes(ev.endTime) : s0 + 120; if (e <= s0) e = e + 1440 > s0 + 1440 ? s0 + 120 : e + 1440; dt = `DTSTART:${zonedUtc(ev.date, s0, tz)}\r\nDTEND:${zonedUtc(ev.date, e, tz)}`; }
   return ["BEGIN:VEVENT", "UID:" + id + "@officialfriendly.com", "DTSTAMP:" + stamp, dt,
     "SUMMARY:" + icsEsc((ev.kind === "meeting" ? "" : (ev.emoji ? ev.emoji + " " : "")) + ev.title),
-    ev.location ? "LOCATION:" + icsEsc(ev.location) : null,
-    "DESCRIPTION:" + icsEsc("Your RSVP: " + my + (ev.hostName ? "\nHost: " + ev.hostName : "") + (stopsText(ev) ? "\n\n" + stopsText(ev).trim() : "") + (ev.notes ? "\n\n" + ev.notes : "") + "\n\n" + SITE + "/#/e/" + id),
+    (ev.location || stayLine(ev)) ? "LOCATION:" + icsEsc(ev.location || stayLine(ev)) : null,
+    "DESCRIPTION:" + icsEsc("Your RSVP: " + my + (ev.hostName ? "\nHost: " + ev.hostName : "") + (isTrip(ev) ? "\n" + tripLine(ev) : "") + (stopsText(ev) ? "\n\n" + stopsText(ev).trim() : "") + (ev.notes ? "\n\n" + ev.notes : "") + "\n\n" + SITE + "/#/e/" + id),
     "URL:" + SITE + "/#/e/" + id, "STATUS:" + (my === "no" ? "CANCELLED" : "CONFIRMED"), "END:VEVENT"];
 }
 exports.cal = onRequest({ region: "us-central1", invoker: "public", memory: "256MiB" }, async (req, res) => {
@@ -2136,9 +2243,21 @@ exports.dailyReminders = onSchedule({ schedule: "0 9 * * *", timeZone: "America/
   for (const doc of snap.docs) {
     const ev = doc.data();
     const going = (ev.invitedUids || []).filter(u => ["going", "maybe"].includes((ev.rsvps || {})[u]));
-    await notify(going, "Today: " + ev.title, (ev.time ? "Starts " + ev.time + ". " : "") + (ev.location || "See you there!"), "/#/e/" + doc.id + "?to=dayCard", { type: "reminder" });
+    const trip = isTrip(ev);
+    await notify(going, (trip ? `Day 1 of ${daysBetween(ev.date, ev.endDate) + 1}: ` : "Today: ") + ev.title, (ev.time ? "Starts " + ev.time + ". " : "") + (ev.location || (trip && stayLine(ev)) || "See you there!"), "/#/e/" + doc.id + (trip ? "?to=tripCard" : "?to=dayCard"), { type: "reminder" });
   }
-  logger.info("Sent reminders for " + snap.size + " events");
+  // Trips get a note on each later day too ("Day 2 of 3"), with that day's stops.
+  const trips = await db.collection("events").where("endDate", ">=", today).get();
+  let tripDays = 0;
+  for (const doc of trips.docs) {
+    const ev = doc.data(); if (!isTrip(ev) || ev.date >= today || today > ev.endDate) continue;
+    const going = (ev.invitedUids || []).filter(u => ["going", "maybe"].includes((ev.rsvps || {})[u])); if (!going.length) continue;
+    const n = daysBetween(ev.date, today) + 1, total = daysBetween(ev.date, ev.endDate) + 1;
+    const stops = (Array.isArray(ev.stops) ? ev.stops : []).filter(s => s && s.day === today && (s.name || s.place)).map(s => (s.time ? t12(s.time) + " " : "") + (s.name || s.place));
+    await notify(going, `Day ${n} of ${total}: ${ev.title}`, stops.length ? stops.join(" · ") : n === total ? "Last day. Safe travels home." : "Have a great day out there.", "/#/e/" + doc.id + "?to=tripCard", { type: "reminder" });
+    tripDays++;
+  }
+  logger.info("Sent reminders for " + snap.size + " events and " + tripDays + " trip days");
 
   // Birthdays: a month out, tell the rest of each group so someone can plan.
   const target = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 30);

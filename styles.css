@@ -1405,7 +1405,7 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 /* ---- Audit, Oct 2026: readability, centered buttons, tap targets, motion ---- */
 .hd-link,.link-btn,.cur-tray .link-btn{color:#B4412F}
 :focus-visible{outline:2px solid #F2543F;outline-offset:2px;box-shadow:0 0 0 2px var(--bg)}
-.you-pill,.new-pill,.badge,.night-when,.fs-stat span,.hd-faces .more,.ev-card .more{font-size:.75rem}
+.you-pill,.new-pill,.trip-pill,.badge,.night-when,.fs-stat span,.hd-faces .more,.ev-card .more{font-size:.75rem}
 .btn:not(select),.btn-th,.fchip,.hm-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;line-height:1.2;text-align:center;vertical-align:middle}
 .btn.full,.btn.scan{display:flex}
 .bell{width:44px;height:44px}.bell .peb{inset:3px;width:calc(100% - 6px);height:calc(100% - 6px)}
@@ -1457,7 +1457,7 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 /* Pitch in */
 .pi-h{display:flex;gap:10px;align-items:center;margin-bottom:10px}
 .pi-bar{height:10px;border-radius:5px;background:var(--surface2);overflow:hidden}.pi-bar i{display:block;height:100%;background:var(--accent);border-radius:5px;transition:width .4s}
-.pi-stats{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px}
+.pi-stats{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:2px 8px;margin-top:6px}.pi-stats b{white-space:nowrap}.pi-stats span{min-width:0}
 .pi-people{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;align-items:center}.pi-p{position:relative;display:inline-flex;opacity:.55}.pi-p.paid{opacity:1}
 .pi-p i{position:absolute;right:-3px;bottom:-3px;width:16px;height:16px;border-radius:50%;background:#25A56A;color:#fff;font-size:.65rem;font-style:normal;font-weight:800;display:none;place-items:center;border:2px solid var(--surface)}.pi-p.paid i{display:grid}
 .pi-acts{margin-top:12px}
@@ -1597,3 +1597,22 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 
 /* Apple Cash hand-off steps (v314) */
 .steps{margin:10px 0 14px;padding-left:24px;display:grid;gap:8px}.steps li{line-height:1.38;padding-left:2px}.steps li::marker{color:var(--accent-strong);font-weight:800}.fp-step{display:flex;flex-direction:column;gap:6px}.fp-step .btn{width:100%}.fp-hint{margin:0 4px}
+
+/* RSVP questions: the host's Required toggle (composer) and the optional tag (event page) */
+.q-row input[data-qedit]{min-width:0}
+.q-req{display:flex;align-items:center;gap:5px;font-size:.78rem;font-weight:700;color:var(--muted);white-space:nowrap;cursor:pointer;padding:0 2px;flex:none}
+.q-req.on{color:var(--accent-strong)}.q-req input{width:17px;height:17px;margin:0;accent-color:var(--accent)}
+.q-opt{font-style:normal;font-weight:600;opacity:.8}
+/* Trip badge on plan cards */
+.trip-pill{font-size:0.6562rem;font-weight:700;padding:3px 9px;border-radius:999px;background:rgba(255,255,255,.88);color:#2a2a2a;white-space:nowrap}
+/* When works: what you already have at that time (Friendly plans, or the phone's calendar in the app) */
+.ww-busy{display:block;font-weight:700;opacity:1!important;color:#FFE1B8}
+.wa-opt .ww-busy{color:#B4412F}
+.ww-cal{font-size:.82rem;font-weight:700;color:inherit;text-decoration:underline;text-underline-offset:2px;background:none;border:0;padding:0;font-family:inherit;cursor:pointer}
+.ww-calon{opacity:.85}.wa-cal{margin-top:8px;padding-left:50px}
+.ww-pick-busy{margin:-8px 0 12px;font-size:.82rem;font-weight:700;color:#B4412F}
+/* Pitch in: share link row */
+.pi-share{flex-wrap:wrap;gap:8px;align-items:center}
+/* Expense and pitch-in people rows: at bigger text sizes the amount + buttons column was squeezing the name column to a sliver
+   (name and the Unpaid pill clipped). Keep the name column at least 130px; the amount and buttons drop to their own line, right-aligned. */
+.x-person{flex-wrap:wrap}.x-person>:nth-child(2){flex:1 1 130px!important;min-width:0}.x-person .x-acts{margin-left:auto}
