@@ -571,7 +571,22 @@ const nearArea = (city, miles) => { const m = milesOf(miles); return m <= 5 ? `i
 const KEYS = { at: 0, v: {} };
 async function apiKey(name) {
   if (Date.now() - KEYS.at > 600e3) { try { const snap = await db.doc("config/keys").get(); KEYS.v = snap.exists ? snap.data() : {}; } catch { KEYS.v = {}; } KEYS.at = Date.now(); }
-  const k = KEYS.v[name]; return k && k !== "unset" ? String(k).trim() : "";
+  let k = KEYS.v[name];
+  // The Places key is created in the Cloud Console under the name "Friendly Places"; the first time it's needed, the
+  // function reads its value through the API Keys API (its own service account) and keeps it in config/keys.
+  if (!k && name === "places" && !KEYS.triedLookup) { KEYS.triedLookup = true; try { k = await findPlacesKey(); if (k) { await db.doc("config/keys").set({ places: k }, { merge: true }); KEYS.v.places = k; } } catch (err) { logger.warn("places key lookup: " + err.message); } }
+  return k && k !== "unset" ? String(k).trim() : "";
+}
+async function findPlacesKey() {
+  const token = (await (await gauth.getClient()).getAccessToken()).token, hdr = { Authorization: "Bearer " + token };
+  const r = await fetch(`https://apikeys.googleapis.com/v2/projects/${PROJECT}/locations/global/keys?pageSize=100`, { headers: hdr });
+  if (!r.ok) throw new Error("list keys " + r.status + " " + (await r.text()).slice(0, 120));
+  const keys = ((await r.json()).keys || []).filter(x => !x.deleteTime);
+  const pick = keys.find(x => /friendly places/i.test(x.displayName || "")) || keys.find(x => ((((x.restrictions || {}).apiTargets) || []).some(t => /places/i.test(t.service || ""))));
+  if (!pick) return "";
+  const r2 = await fetch(`https://apikeys.googleapis.com/v2/${pick.name}/keyString`, { headers: hdr });
+  if (!r2.ok) throw new Error("key string " + r2.status + " " + (await r2.text()).slice(0, 120));
+  const ks = (await r2.json()).keyString || ""; if (ks) logger.info("places key picked up from " + (pick.displayName || pick.uid)); return ks;
 }
 const PRICE_WORDS = { PRICE_LEVEL_FREE: "Free", PRICE_LEVEL_INEXPENSIVE: "$", PRICE_LEVEL_MODERATE: "$$", PRICE_LEVEL_EXPENSIVE: "$$$", PRICE_LEVEL_VERY_EXPENSIVE: "$$$$" };
 const factsKey = (name, near) => (venueKey(name) + "|" + venueKey(near)).replace(/[^a-z0-9|]+/g, "-").slice(0, 120) || "x";
