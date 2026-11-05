@@ -1616,3 +1616,26 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 /* Expense and pitch-in people rows: at bigger text sizes the amount + buttons column was squeezing the name column to a sliver
    (name and the Unpaid pill clipped). Keep the name column at least 130px; the amount and buttons drop to their own line, right-aligned. */
 .x-person{flex-wrap:wrap}.x-person>:nth-child(2){flex:1 1 130px!important;min-width:0}.x-person .x-acts{margin-left:auto}
+/* Real facts (Google) under Curate cards and on plan pages */
+.facts{display:flex;flex-wrap:wrap;gap:4px 10px;margin:8px 0 2px;font-size:.78rem;color:var(--muted);font-weight:600}
+.ev-card-glass .facts,.tl-ev .facts{color:inherit;opacity:.85}
+.photo-strip{display:flex;gap:6px;margin:10px 0 2px}.photo-strip img{flex:1;min-width:0;aspect-ratio:4/3;object-fit:cover;border-radius:10px;background:var(--surface2)}
+.night .checked{display:flex;align-items:center;gap:6px;margin:8px 0 2px;font-size:.78rem;color:var(--muted)}.night .checked .link-btn{font-weight:700}
+/* Ride buttons: Uber and Lyft marks on white pills, whatever theme the card sits on */
+.ride-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 2px}.ride-lbl{white-space:nowrap}
+.btn.ride{background:#fff;border:1px solid rgba(0,0,0,.08);color:#000;padding:8px 14px;min-height:36px;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.btn.ride svg{display:block;width:auto}.ride-uber svg{height:13px}.ride-lyft svg{height:18px}
+/* Book it */
+.bk-row{padding:6px 0 4px;border-top:1px solid rgba(255,255,255,.12)}.bk-row:first-of-type{border-top:0}
+.th-plain .bk-row{border-top-color:var(--line)}
+.tl-go{padding:2px 0 2px 74px;font-weight:600;opacity:.85}
+.pill{display:inline-block}.pill.due{background:#FFF0EC;color:#B4412F}
+.ev-card-glass .pill.due{background:rgba(255,255,255,.14);color:#FFD9A8}.ev-card-glass .pill.ok{background:rgba(37,165,106,.28);color:#D9F6E6}
+/* Concierge chat */
+.chat{display:flex;flex-direction:column;gap:10px;margin:0 0 10px}.chat-u{align-self:flex-end;background:var(--accent);color:#fff;border-radius:14px 14px 4px 14px;padding:9px 12px;max-width:84%;font-size:.875rem;line-height:1.35}
+.chat-opt{display:flex;gap:8px;padding:7px 0;border-top:1px solid var(--line);align-items:flex-start}.chat-opt:first-child{border-top:0}.chat-opt b.n{width:18px;flex:none;color:var(--accent-strong)}.chat-opt .m{flex:1;min-width:0}
+/* Crew picks, saved by the crew, your spots */
+.crew-card{padding:12px 14px;margin:0 0 12px}.crew-card .section-head{margin:0 0 6px}.crew-card h2{font-size:1.05rem}
+.crew-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line)}.crew-row:first-of-type{border-top:0}.crew-row>span:first-child{flex:1;min-width:0}
+.faces-sm{display:inline-flex;vertical-align:middle}.faces-sm .av,.faces-sm img{width:20px;height:20px;font-size:.6rem}.faces-sm>*+*{margin-left:-6px}
+.lv-after-how{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:8px 0 2px;padding:8px 0 0;border-top:1px solid var(--line)}

@@ -23,6 +23,10 @@ service cloud.firestore {
     match /previews/{eventId} { allow read: if true; }
     // Full-size event covers (the event itself carries a small preview); written only by the slimEventCover function.
     match /eventCovers/{eventId} { allow read: if request.auth != null; allow write: if false; }
+    // Google Places facts, cached by the facts function; the app reads them through that function only.
+    match /placeFacts/{id} { allow read, write: if false; }
+    // Optional API keys (Google Places, Ticketmaster), read by the functions only.
+    match /config/{id} { allow read, write: if false; }
 
     // ---- Nudges: a host asks the function to remind non-responders ----
     match /nudges/{nudgeId} {
@@ -186,6 +190,8 @@ service cloud.firestore {
       allow update: if signedIn() && (
         isGroupHost()
         || (uid() in resource.data.memberUids && memberSelfEdit())
+        // Saved by the crew: members may add to or trim the shared `saves` map, nothing else.
+        || (uid() in resource.data.memberUids && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['saves']))
         || ((email() in resource.data.invitedEmails || phoneInvited()) && acceptInvite())
       ) && (!isDemoUser() || demoGroupOk(request.resource.data));
 
@@ -238,6 +244,10 @@ service cloud.firestore {
         return request.resource.data.diff(resource.data).affectedKeys().hasOnly([field])
           && request.resource.data[field].diff(resource.data.get(field, {})).affectedKeys().hasOnly([uid()]);
       }
+      // Book it: any invited guest may claim or record a booking (the whole `booking` map, nothing else).
+      function onlyBooking() {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['booking']);
+      }
 
       function canReadEvent() {
         let e = get(/databases/$(database)/documents/events/$(eventId)).data;
@@ -280,7 +290,7 @@ service cloud.firestore {
       allow create: if signedIn() && request.resource.data.hostId == uid()
         && (!isDemoUser() || demoEventOk(request.resource.data));
       allow update: if (isHost()
-        || (isInvited() && (onlyOwn('rsvps') || onlyOwn('plusOnes') || onlyOwn('plusNames') || onlyOwn('hypes') || onlyOwn('answers') || onlyOwnVote()))
+        || (isInvited() && (onlyOwn('rsvps') || onlyOwn('plusOnes') || onlyOwn('plusNames') || onlyOwn('hypes') || onlyOwn('answers') || onlyOwn('spotVotes') || onlyOwnVote() || onlyBooking()))
         || ((openLink() || viaGroup()) && selfJoin()))
         && (!isDemoUser() || demoEventOk(request.resource.data));
       allow delete: if signedIn() && uid() == resource.data.hostId

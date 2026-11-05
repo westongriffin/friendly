@@ -2035,6 +2035,7 @@ function weekDigest(mine) {
     <div class="wk-head">${dot("happy", 40)}<div><b>Your week</b><div class="muted sm">Sunday night rundown · ${range}</div></div></div>
     ${rows.length ? `<div class="wk-list">${rows.map(r => r.html).join("")}</div>` : `<p class="muted sm" style="margin:8px 0 0">Nothing on the calendar yet. Post an Up for it and see who bites.</p>`}
     ${money}${picks}
+    ${(ns => ns.length ? `<div class="wk-nights"><div class="muted sm" style="margin:10px 0 4px"><b>Nights worth planning</b> · from Curate</div>${ns.map((n, i) => { const id = "wk" + i; S._nightById = S._nightById || {}; S._nightById[id] = n; return `<div class="wk-row"><div class="hd-evt" style="flex:1;min-width:0"><b>${esc(n.emoji || [...(n.emojis || "✨")][0] || "✨")} ${esc(n.title)}</b><span class="muted sm">${esc(nightWhen(n))}</span></div><button type="button" class="btn small" data-nfloat="${id}">Float it</button></div>`; }).join("")}</div>` : "")(typeof topPicks === "function" ? topPicks(3) : [])}
     <p class="muted sm wk-foot">Dot sends this every Sunday at 6 PM. <a class="hd-link" data-go="#/profile?to=notifPrefs">Change</a></p></div>`;
 }
 function wireDigest() {
@@ -2116,6 +2117,7 @@ function afterCard() {
   return `<div class="card lv-after">
     <div class="lv-after-grid">${coral("party", 40)}<div class="lv-after-text"><b>${evening ? "Last night was a good one!" : "That was a good one!"}</b><p>Add your photos from ${esc(ev.title)}.${others.length ? ` ${esc(andNames(others.map(u => first(nameOf(u)))))} already added ${pics.length}.` : ""}</p></div><button type="button" class="today-x lv-after-x" data-hide-after="${esc(ev.id)}" aria-label="Hide this">✕</button></div>
     ${pics.length ? `<div class="hd-scroll hd-mems lv-after-pics">${pics.slice(0, 6).map(p => `<img src="${esc(p.img)}" data-hdmem="${esc(ev.id)}|${esc(p.id)}" alt="" loading="lazy">`).join("")}</div>` : ""}
+    ${(v => v && !((ev.spotVotes || {})[me] || {})[v.key] ? `<div class="lv-after-how"><span class="sm"><b>How was ${esc(v.name)}?</b> <span class="muted">A tap helps Dot pick for this crew.</span></span><span class="btnrow" style="gap:6px"><button type="button" class="btn small" data-spot="${esc(ev.id)}|${esc(v.key)}|1">👍 Go again</button><button type="button" class="btn small" data-spot="${esc(ev.id)}|${esc(v.key)}|-1">👎 Not for us</button></span></div>` : "")(bookableStops(ev)[0])}
     <div class="lv-after-btns">${owe ? `<a class="btn ghost small" data-go="#/money?to=settleCard">Settle up ${fmt$(owe)}</a>` : `<a class="btn ghost small" data-go="#/e/${esc(ev.id)}?to=wall">Say thanks</a>`}<a class="btn primary small" data-go="#/e/${esc(ev.id)}?to=photosCard">Add photos</a></div></div>`;
 }
 // ---------- UP FOR IT? (low-stakes "I'm free Thursday, who's in?" posts) ----------
@@ -2155,7 +2157,8 @@ function whenAskCard(a) {
     <div class="wa-opts">${(a.options || []).map(o => { const n = count(o.id), my = (votes[me] || []).includes(o.id), busy = busyWords(o.date, o.time); return `<button type="button" class="wa-opt ${best && o.id === best.id && n ? "best" : ""} ${my ? "mine" : ""}" data-wvote="${esc(a.id)}|${esc(o.id)}" ${mine ? "disabled" : ""}><span class="ww-tick">${my ? "✓" : ""}</span><span class="ww-mid"><b>${esc(twWhen(o))}</b><span class="ww-bar"><i style="width:${people.length ? n / people.length * 100 : 0}%"></i></span><small>${n} of ${people.length} can make it${best && o.id === best.id && n ? " · best so far" : ""}</small>${busy ? `<small class="ww-busy">⚠️ ${esc(busy)}</small>` : ""}</span></button>`; }).join("")}</div>${(c => c ? `<div class="muted sm wa-cal">${c}</div>` : "")(calLine(a.options))}
     ${mine && best && count(best.id) ? `<div class="uf-post-f" style="padding-left:0;justify-content:flex-end"><button type="button" class="btn primary small" data-wlock="${esc(a.id)}|${esc(best.id)}">Lock in ${esc(twWhen(best).split(" · ")[0])}</button></div>` : ""}</div>`;
 }
-function openWhenAsk() {
+function openWhenAsk(pre) {
+  pre = pre && typeof pre === "object" && !(pre instanceof Event) ? pre : null;
   const t = todayStr(), groups = [...S.groups.values()], friends = myFriendUids(); let aud = "friends", waPk = { picked: new Set(), show() {} };
   const row = i => `<div class="two"><label class="field"><span>Option ${i + 1}</span><input type="date" class="wa-d" min="${t}" ${i === 0 ? `value="${addDays(t, 2)}"` : ""}></label><label class="field"><span>Time</span><input type="time" class="wa-t" ${i === 0 ? 'value="19:00"' : ""}></label></div><div class="ww-pick-busy" data-wab="${i}" hidden></div>`;
   dialog(`<h3>When works?</h3><p class="muted" style="margin-top:-6px">Ask before you plan. Offer a few times, see who can make what, then lock one in and Dot makes it a plan.</p>
@@ -2176,8 +2179,10 @@ function openWhenAsk() {
     });
   waPk = wirePickPeople("wa"); wirePickBusy("wa");
   document.querySelectorAll("[data-waa]").forEach(b => b.onclick = () => { document.querySelectorAll("[data-waa]").forEach(x => x.classList.remove("on")); b.classList.add("on"); aud = b.dataset.waa; waPk.show(aud === "pick"); });
+  if (pre) { if (pre.text) el("waText").value = String(pre.text).slice(0, 80); if (pre.aud) { const c = document.querySelector(`[data-waa="${pre.aud}"]`); if (c) c.click(); } if (pre.date) { const d = document.querySelector(".wa-d"); if (d) { d.value = pre.date; d.dispatchEvent(new Event("change")); } } }
 }
-function openAskSheet() {
+function openAskSheet(pre) {
+  pre = pre && typeof pre === "object" && !(pre instanceof Event) ? pre : null;
   const t = todayStr(), dow = new Date().getDay();
   const dayName = d => evDate({ date: d }).toLocaleDateString("en-US", { weekday: "long" });
   const sat = addDays(t, (6 - dow + 7) % 7 || 7), days = [1, 2, 3, 4].map(n => addDays(t, n));
@@ -2207,6 +2212,12 @@ function openAskSheet() {
   document.querySelectorAll("[data-askp]").forEach(b => b.onclick = () => { document.querySelectorAll("[data-askp]").forEach(x => x.classList.remove("on")); b.classList.add("on"); pick.part = b.dataset.askp; });
   askPk = wirePickPeople("ask");
   document.querySelectorAll("[data-aska]").forEach(b => b.onclick = () => { document.querySelectorAll("[data-aska]").forEach(x => x.classList.remove("on")); b.classList.add("on"); pick.aud = b.dataset.aska; askPk.show(pick.aud === "pick"); });
+  if (pre) {   // from a Curate card: the night, its day, and who to ask
+    if (pre.text) el("askText").value = String(pre.text).slice(0, 140);
+    if (pre.date) { const c = document.querySelector(`#askWhen [data-askd="${pre.date}"]`); if (c) c.click(); else { el("askPickDay").click(); el("askDate").value = pre.date; el("askDate").onchange(); el("askDate").blur(); } }
+    if (pre.part) { const c = document.querySelector(`[data-askp="${pre.part}"]`); if (c) c.click(); }
+    if (pre.aud) { const c = document.querySelector(`[data-aska="${pre.aud}"]`); if (c) c.click(); }
+  }
 }
 function wireAsks() {
   if (el("askBox")) el("askBox").onclick = e => e.target.closest("[data-whenask]") ? openWhenAsk() : openAskSheet();
@@ -2261,10 +2272,11 @@ function latestList() {
   return `<div class="hd-h"><h3>Latest from your crew</h3><a class="hd-link" data-go="#/activity">Activity ›</a></div><div class="card hd-list">${acts.map((a, i) => `<a class="hd-act" data-act="${esc(a.url || "#/")}"><span class="li">${actIcon(a, i)}</span><span class="hd-evt"><b>${esc(a.title)}</b><span class="muted sm">${esc(a.body || "")}</span></span><span class="muted sm">${ago(a.createdAt)}</span></a>`).join("")}</div>`;
 }
 function crewsRow() {
-  const groups = [...S.groups.values()].slice(0, 8); if (!groups.length) return "";
-  return `<div class="hd-h"><h3>Your crews</h3><a class="hd-link" data-go="#/groups">Groups ›</a></div><div class="hd-scroll hd-crews">${groups.map((g, i) => `<a class="hd-crew" data-go="#/g/${g.id}"><span class="hd-crew-ic" style="background:${esc(g.color || GROUP_COLORS[i % GROUP_COLORS.length])}">${groupMini(g)}</span><span>${esc(g.name)}</span></a>`).join("")}</div>`;
+  const groups = [...S.groups.values()].slice(0, 8); if (!groups.length) return spotsCardHtml(3, false);
+  return spotsCardHtml(3, false) + `<div class="hd-h"><h3>Your crews</h3><a class="hd-link" data-go="#/groups">Groups ›</a></div><div class="hd-scroll hd-crews">${groups.map((g, i) => `<a class="hd-crew" data-go="#/g/${g.id}"><span class="hd-crew-ic" style="background:${esc(g.color || GROUP_COLORS[i % GROUP_COLORS.length])}">${groupMini(g)}</span><span>${esc(g.name)}</span></a>`).join("")}</div>`;
 }
 function wireHomeDash() {
+  wireNightCards();   // Float it on the digest's Curate nights
   wireBanners(); wireAsks(); wireLive(); wireDigest(); fitGreeting();
   document.querySelectorAll("[data-mascot]").forEach(b => b.onclick = () => openMascot(b.dataset.mascot));
   startMascotShow();
@@ -2462,6 +2474,7 @@ function groupPageBody(gid) {
   <div class="btnrow">
     <button class="btn primary" data-go="#/new">＋ Plan for this group</button>
     ${host ? `<button class="btn" id="inviteBtn">＋ Add people</button>` : ""}
+    <button class="btn" data-crewpicks="${esc(g.id)}">✨ Picks for this crew</button>
   </div>
   ${(() => { const t = todayStr(); const evs = myEvents().filter(e => evInGroup(e, g));
     const up = evs.filter(e => e.date >= t).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
@@ -2651,7 +2664,7 @@ function pickPeopleDialog({ title, blurb, exclude, excludeKeys = new Map(), pend
     const ql = String(q || "").toLowerCase().trim(), digits = ql.replace(/\D/g, "");
     const hits = book.filter(c => !ql || c.name.toLowerCase().includes(ql) || (digits.length >= 3 && c.e164.includes(digits))).slice(0, 250);
     box.innerHTML = hits.length ? hits.map(c => { const on = picked.some(p => p.e164 === c.e164), friendly = knownE164.has(c.e164);
-      return `<label class="book-row"><input type="checkbox" data-book="${esc(c.e164)}" ${on ? "checked" : ""}><span class="book-name"><b>${esc(c.name || c.phone)}</b><span class="muted sm">${esc(c.phone)}${friendly ? ` · <span class="book-on">On Friendly</span>` : ""}</span></span></label>`; }).join("")
+      return `<label class="bk-row"><input type="checkbox" data-book="${esc(c.e164)}" ${on ? "checked" : ""}><span class="book-name"><b>${esc(c.name || c.phone)}</b><span class="muted sm">${esc(c.phone)}${friendly ? ` · <span class="book-on">On Friendly</span>` : ""}</span></span></label>`; }).join("")
       : `<p class="muted sm" style="padding:8px 4px;margin:0">${book.length ? "Nobody by that name." : "No contacts with phone numbers."}</p>`;
     box.querySelectorAll("[data-book]").forEach(cb => cb.onchange = async () => {
       const c = book.find(x => x.e164 === cb.dataset.book); if (!c) return;
@@ -2927,8 +2940,8 @@ function matchFriends(names, extra) {
 // ---- Curate: Dot finds real nights out near your city (server-side, web-grounded, cached nightly per city),
 //      pairs each with a place to eat, and turns a pick into a plan, a poll, tickets or a table.
 const CURATE_LABEL = "Curate";
-const CURATE_FILTERS = [["weekend", "This weekend"], ["tonight", "Tonight"], ["late", "Late night"], ["date", "Date night"], ["group", "Group of 6+"], ["cheap", "Under $40"], ["family", "Family"]];
-const CURATE_LEADS = { weekend: "A few nights worth leaving the house for this weekend. Tap one and I'll set it up.", tonight: "Short notice, still good.", date: "For just the two of you.", group: "Big group? These places handle it.", cheap: "Good nights that won't hurt.", family: "Kid-friendly, and you'll like it too." };
+const CURATE_FILTERS = [["weekend", "This weekend"], ["tonight", "Tonight"], ["late", "Late night"], ["date", "Date night"], ["group", "Group of 6+"], ["cheap", "Under $40"], ["family", "Family"], ["tickets", "🎟️ Tickets"]];
+const CURATE_LEADS = { tickets: "Real tickets at real prices, from Ticketmaster. Grab them, or start a pitch-in so everyone chips in.", weekend: "A few nights worth leaving the house for this weekend. Tap one and I'll set it up.", tonight: "Short notice, still good.", date: "For just the two of you.", group: "Big group? These places handle it.", cheap: "Good nights that won't hurt.", family: "Kid-friendly, and you'll like it too." };
 let curFilter = "weekend", curSub = null, curCoverSub = null, curKey = "";
 const cityKeyOf = c => String(c || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
 const pad2 = n => String(n).padStart(2, "0");
@@ -3018,20 +3031,26 @@ function wireNightList(root, nights, pre, state, repaint) {
 function nightCardHtml(n, id) {
   n = mergeNightStops(n);
   S._nightById = S._nightById || {}; S._nightById[id] = n;
-  const eat = n.stops.find(x => x.kind === "eat"), tix = n.ticketUrl || (n.stops.find(x => x.kind === "do" && x.url) || {}).url;
-  const th = themeOf(n.theme || "midnight"), cover = coverUrl(n);
+  const eat = n.stops.find(x => x.kind === "eat"), main = n.stops.find(x => x.kind === "do") || n.stops[0], tix = n.ticketUrl || (n.stops.find(x => x.kind === "do" && x.url) || {}).url;
+  const th = themeOf(n.theme || "midnight"), cover = coverUrl(n) || n.img || "", t = n.ticket, f = (eat || main || {}).facts;
+  const price = t && t.min ? `from $${t.min}${t.max && t.max !== t.min ? ` to $${t.max}` : ""}` : "";
   return `<div class="card night t-${esc(th.id)} ${cover ? "has-cover" : ""}" data-nk="${esc(nightKey(n))}">
     <div class="night-head" style="--th-ink:${cover ? "#fff" : esc(th.ink)};font-family:${esc(th.font)},system-ui">${cover ? `<img class="night-cover" src="${esc(cover)}" alt="">` : `<div class="ev-card-bg"></div>`}<div class="night-head-in"><span class="night-emoji">${esc(n.emojis || n.emoji || "🌆")}</span><div class="night-when">${esc(nightWhen(n))}</div><h3>${esc(n.title)}</h3></div></div>
     <div class="night-body">
     <div class="stops">${n.stops.map(x => `<div class="stop"><span class="t">${esc(x.time)}</span><span><b>${esc(x.name)}</b>${x.note ? `<small>${esc(x.note)}</small>` : ""}</span></div>`).join("")}</div>
     ${n.why ? `<p class="why">${esc(n.why)}</p>` : ""}
     <div class="meta">${[n.cost, n.size, n.parking].filter(Boolean).map(m => `<span>${esc(m)}</span>`).join("")}</div>
-    <div class="acts"><button type="button" class="btn primary small" data-nplan="${id}">Make it a plan</button><button type="button" class="btn small" data-npoll="${id}">Poll the group</button>${tix ? `<a class="btn small" href="${esc(tix)}" target="_blank" rel="noopener">Get tickets</a>` : ""}${eat ? `<a class="btn small" href="https://www.opentable.com/s?term=${encodeURIComponent(eat.name + " " + (S.profile.city || ""))}" target="_blank" rel="noopener">Book a table</a>` : ""}</div>
+    ${f ? factsStrip(f, n.date) : ""}${f || n.checkedAt ? `<div class="checked">✓ ${esc((eat || main).name)} checked against Google${n.checkedAt ? " " + agoWords(n.checkedAt) : ""} · <button type="button" class="link-btn" data-ndetails="${id}">Details ›</button></div>` : ""}
+    <div class="acts" style="flex-wrap:wrap;gap:6px"><button type="button" class="btn primary small" data-nplan="${id}">Make it a plan</button>${t ? `<a class="btn small" href="${esc(t.url)}" target="_blank" rel="noopener">🎟️ Get tickets${price ? " · " + esc(price) : ""}</a>${t.min ? `<button type="button" class="btn small" data-npitch="${id}">🎁 Pitch in $${t.min} each</button>` : ""}` : `<button type="button" class="btn small" data-npoll="${id}">Poll the group</button>${tix ? `<a class="btn small" href="${esc(tix)}" target="_blank" rel="noopener">Get tickets</a>` : ""}${eat ? `<a class="btn small" href="${esc(reserveUrl(eat.facts, eat.name))}" target="_blank" rel="noopener">📅 Reserve a table</a>` : ""}`}<button type="button" class="btn small" data-nfloat="${id}">Float it</button>${S.groups.size ? `<button type="button" class="btn small" data-nsave="${id}">☆ Save for the crew</button>` : ""}</div>
     </div></div>`;
 }
 function wireNightCards(root = document) {
   root.querySelectorAll("[data-nplan]").forEach(b => b.onclick = e => { e.stopPropagation(); const n = S._nightById[b.dataset.nplan]; if (n) { closeDialog(); nightToPlan(n); } });
   root.querySelectorAll("[data-npoll]").forEach(b => b.onclick = e => { e.stopPropagation(); const n = S._nightById[b.dataset.npoll]; if (n) pollNights([n]); });
+  root.querySelectorAll("[data-ndetails]").forEach(b => b.onclick = e => { e.stopPropagation(); const n = S._nightById[b.dataset.ndetails]; if (!n) return; const x = n.stops.find(y => y.kind === "eat") || n.stops[0]; if (x) openFactsSheet(x.name, (S.profile && S.profile.city) || "", x.facts); });
+  root.querySelectorAll("[data-nfloat]").forEach(b => b.onclick = e => { e.stopPropagation(); const n = S._nightById[b.dataset.nfloat]; if (n) { closeDialog(); openAskSheet({ text: n.title + "?", date: n.date, part: dayPartOf(n.start) }); } });
+  root.querySelectorAll("[data-nsave]").forEach(b => b.onclick = e => { e.stopPropagation(); const n = S._nightById[b.dataset.nsave]; if (n) pickGroupThen(gid => saveForCrew(n, gid)); });
+  root.querySelectorAll("[data-npitch]").forEach(b => b.onclick = e => { e.stopPropagation(); const n = S._nightById[b.dataset.npitch]; if (n && n.ticket) { closeDialog(); openPitchIn(null, { desc: n.title + " tickets", each: n.ticket.min }); } });
 }
 function nightToPlan(n) {
   resetCompose(); compose._restored = true;
@@ -3042,6 +3061,7 @@ function nightToPlan(n) {
   // Curate's stops become the event's timeline ("5:30 PM" → "17:30"); their tips go in the details.
   const to24 = t => { const m = /^(\d{1,2})(?::(\d{2}))?\s*([AP]M)$/i.exec(String(t || "").trim()); if (!m) return ""; let h = +m[1] % 12; if (/p/i.test(m[3])) h += 12; return String(h).padStart(2, "0") + ":" + (m[2] || "00"); };
   const kindEmoji = { eat: "🍽️", do: "🎟️", go: "🚶" }, city = (S.profile.city || "").trim();
+  n.stops.forEach(x => { if (x.facts) seedFacts(x.name, city, x.facts); });   // the plan's booking rows and transitions start with what Dot already checked
   const st = sortStops(cleanStops(n.stops.map(x => ({ time: to24(x.time), emoji: kindEmoji[x.kind] || "📍", name: x.name, place: city, note: x.note || "" }))));
   if (st.length >= 2) { compose.stops = st; compose.time = st[0].time || compose.time; compose.where = st[0].name + (city ? ", " + city : ""); compose.food = ""; defaultWrapUp(); }
   compose.notes = [st.length >= 2 ? "" : n.stops.map(x => `${x.time} · ${x.name}${x.note ? " (" + x.note + ")" : ""}`).join("\n"), n.parking ? "Parking: " + n.parking : "", n.cost ? "Cost: " + n.cost : "", n.ticketUrl ? "Tickets: " + n.ticketUrl : ""].filter(Boolean).join("\n").slice(0, 1000);
@@ -3130,14 +3150,16 @@ function curateBody() {
   const lead = !d && !S._curError ? `Give me a minute. ${phaseText} within ${myMiles()} miles of ${city}…` : S._curError ? "I couldn't look around just now (" + S._curError + "). Try again in a bit." : shown.length ? (filtered.length ? CURATE_LEADS[curFilter] : "Nothing tagged for that yet, so here's everything I found.") : "Nothing yet. Build your own and I'll go looking.";
   return `<div class="section-head cur-head"><h2>${CURATE_LABEL}</h2>${milesSelect("curMiles")}</div>
     <div class="cur-locbar"><button type="button" class="cur-loc-city" id="curCityBtn" aria-label="Change city">📍 <span>${esc(city)}</span><i class="chev">›</i></button><button type="button" class="btn small near-me" id="nearMeBtn" aria-label="Use my location"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>Near me</button></div>${S.profile.cityGuess ? `<p class="muted sm cur-guess">Dot guessed your city from your phone number. Tap 📍 to change it.</p>` : ""}
-  <div class="dot-say cur-dot ${curFilter === "late" ? "coral-say" : ""}">${curFilter === "late" && d ? coral("party", 48) : dot(d ? "happy" : "thinking", 48)}<div class="say-bubble">${curFilter === "late" && d ? "Coral's picks. The night doesn't have to end at 10. Tap one and Dot will set it up." : esc(lead)}<div class="cur-acts"><button type="button" class="btn small primary" id="curBuild">✨ Build me a night</button><button type="button" class="btn small" id="curBrowse">🔎 Browse ideas</button></div></div></div>
-  <div class="chiprow">${CURATE_FILTERS.map(([k, l]) => `<button type="button" class="fchip ${curFilter === k ? "on" : ""}" data-cf="${k}">${l}</button>`).join("")}${savedIdeas().length ? `<button type="button" class="fchip fchip-saved" id="curSavedChip">⭐ Saved (${savedIdeas().length})</button>` : ""}</div>
+  <div class="dot-say cur-dot ${curFilter === "late" ? "coral-say" : ""}">${curFilter === "late" && d ? coral("party", 48) : dot(d ? "happy" : "thinking", 48)}<div class="say-bubble">${curFilter === "late" && d ? "Coral's picks. The night doesn't have to end at 10. Tap one and Dot will set it up." : esc(lead)}<div class="cur-acts"><button type="button" class="btn small primary" id="curBuild">✨ Build me a night</button><button type="button" class="btn small" id="curAsk">💬 Ask Dot</button><button type="button" class="btn small" id="curBrowse">🔎 Browse ideas</button></div></div></div>
+  <div class="chiprow">${CURATE_FILTERS.filter(([k]) => k !== "tickets" || ticketNights().length).map(([k, l]) => `<button type="button" class="fchip ${curFilter === k ? "on" : ""}" data-cf="${k}">${l}</button>`).join("")}${savedIdeas().length ? `<button type="button" class="fchip fchip-saved" id="curSavedChip">⭐ Saved (${savedIdeas().length})</button>` : ""}</div>
   ${!d && !S._curError ? `<div class="card empty compact">${dot("thinking", 64)}<p class="muted" style="margin:6px 0 0">Searching what's on, pairing dinners, checking the times. About half a minute the first time.</p></div>` : ""}
   ${S._curError ? `<div style="text-align:center;margin-bottom:12px"><button type="button" class="btn" id="curRetry">Try again</button></div>` : ""}
+  ${crewCardHtml(curGroup())}${crewSavesHtml()}
   <div id="nights">${shown.map((n, i) => nightCardHtml(n, "c" + i)).join("")}</div>
   ${extra > 0 ? `<div style="text-align:center;margin:4px 0 12px"><button type="button" class="btn" id="curMore">More ideas (${extra})</button></div>` : ""}
   ${(() => { const b = builtStore().filter(n => !n.date || n.date >= todayStr()); S._recentState = S._recentState || { open: null }; return b.length ? `<details class="adv built-nights" ${S._builtOpen ? "open" : ""} id="builtNights"><summary>🕘 Recent builds (${b.length})</summary><div id="recentList">${nightListHtml(b, "s", S._recentState)}</div><div style="text-align:right"><button type="button" class="btn ghost small" id="clearBuilt">Clear</button></div></details>` : ""; })()}
   ${(() => { const ideas = savedIdeas(); return ideas.length ? `<details class="adv built-nights" ${S._ideasOpen ? "open" : ""} id="savedIdeas"><summary>⭐ Saved ideas (${ideas.length})</summary>${ideas.map((x, i) => ideaCardHtml(x, "v" + i, true)).join("")}</details>` : ""; })()}
+  ${spotsCardHtml(99, true)}
   ${d ? `<p class="muted sm" style="margin:6px 4px 0">Found by Dot with web search and refreshed nightly. Double-check times before you go; things change.</p>` : ""}`;
 }
 // ---- Browse ideas: single activities (not a sequenced night), by category or anything you type ("book a massage").
@@ -3172,7 +3194,8 @@ const rememberIdeaSearch = (q, ideas) => { try { const rest = recentIdeaSearches
   LS.set("friendlyIdeaSearches", JSON.stringify([{ q, at: Date.now(), ideas: (ideas && ideas.length ? ideas : (old && old.ideas) || []).slice(0, 20) }, ...rest].slice(0, 8))); } catch {} };
 const forgetIdeaSearch = q => { try { LS.set("friendlyIdeaSearches", JSON.stringify(recentIdeaSearches().filter(x => x.q !== q))); } catch {} };
 const agoWords = ts => { const m = Math.round((Date.now() - ts) / 60000); if (!ts || m < 2) return "just now"; if (m < 60) return m + " min ago"; const h = Math.round(m / 60); if (h < 24) return h === 1 ? "an hour ago" : h + " hours ago"; const d = Math.round(h / 24); return d === 1 ? "yesterday" : d < 7 ? d + " days ago" : "on " + fmtDay({ date: new Date(ts).toLocaleDateString("en-CA") }); };
-function openIdeasBrowser() {
+function openIdeasBrowser(pre) {
+  pre = pre && typeof pre === "object" && !(pre instanceof Event) ? pre : null;
   if (isDemo()) return toast("Browsing ideas is off in the demo.");
   const city = (S.profile.city || "").trim(); if (!city) { go("#/curate"); return; }
   let ask = null, list = [], loading = false;
@@ -3211,9 +3234,17 @@ function openIdeasBrowser() {
   };
   const start = a => { ask = a; list = []; fetchMore(); };
   paint();
+  if (pre && pre.free) { rememberIdeaSearch(pre.free); start({ free: pre.free, label: "\u201c" + pre.free + "\u201d" }); }
 }
 function wireCurate() {
   if (el("curBrowse")) el("curBrowse").onclick = openIdeasBrowser;
+  if (el("curAsk")) el("curAsk").onclick = () => openConcierge();
+  document.querySelectorAll("[data-cfloat]").forEach(b => b.onclick = () => { const [id, gid] = b.dataset.cfloat.split("|"), n = S._nightById[id]; if (n) openAskSheet({ text: n.title + "?", date: n.date, part: dayPartOf(n.start), aud: gid }); });
+  document.querySelectorAll("[data-cwhen]").forEach(b => b.onclick = () => { const [id, gid] = b.dataset.cwhen.split("|"), n = S._nightById[id]; if (n) openWhenAsk({ text: n.title, aud: gid, date: n.date }); });
+  document.querySelectorAll("[data-csplan]").forEach(b => b.onclick = () => { const n = S._nightById[b.dataset.csplan]; if (n) nightToPlan(n); });
+  document.querySelectorAll("[data-csfloat]").forEach(b => b.onclick = () => { const n = S._nightById[b.dataset.csfloat]; if (n) openAskSheet({ text: n.title + "?", date: n.date, part: dayPartOf(n.start), aud: n._gid }); });
+  document.querySelectorAll("[data-csx]").forEach(b => b.onclick = async () => { const n = S._nightById[b.dataset.csx]; if (!n) return; const g = S.groups.get(n._gid), v = ((g || {}).saves || {})[n._k] || {}, me = myUid();
+    try { await updateDoc(doc(db, "groups", n._gid), (v.by || []).filter(u => u !== me).length ? { ["saves." + n._k + ".by"]: arrayRemove(me) } : { ["saves." + n._k]: deleteField() }); } catch (e) { toast(e.message); } });
   if (el("builtNights")) { const b = builtStore().filter(n => !n.date || n.date >= todayStr()); const repaint = () => { const box = el("recentList"); if (!box) return; box.innerHTML = nightListHtml(b, "s", S._recentState); wireNightList(box, b, "s", S._recentState, repaint); }; wireNightList(el("builtNights"), b, "s", S._recentState, repaint); el("builtNights").ontoggle = e => { S._builtOpen = e.target.open; }; }
   if (el("savedIdeas")) { wireIdeaCards(el("savedIdeas")); el("savedIdeas").ontoggle = e => { S._ideasOpen = e.target.open; }; }
   if (el("clearBuilt")) el("clearBuilt").onclick = () => { try { LS.remove("friendlyBuilt"); } catch {} render(); };
@@ -3238,7 +3269,7 @@ function wireCurate() {
 const nightKey = n => (n.title || "") + "|" + (n.date || "");
 // Nights still ahead: later days, or today's that haven't started yet (an hour's grace).
 const upcomingNights = () => { const t = todayStr(), now = new Date(), mins = now.getHours() * 60 + now.getMinutes();
-  return ((S.curated && S.curated.nights) || []).filter(n => !n.date || n.date > t || (n.date === t && (!/^\d{2}:\d{2}$/.test(n.start || "") || +n.start.slice(0, 2) * 60 + +n.start.slice(3) > mins - 60))); };
+  return [...((S.curated && S.curated.nights) || []), ...ticketNights()].filter(n => !n.date || n.date > t || (n.date === t && (!/^\d{2}:\d{2}$/.test(n.start || "") || +n.start.slice(0, 2) * 60 + +n.start.slice(3) > mins - 60))); };
 // Weekend picks first, then by date; ones with a painted cover ahead of the rest. `min` tops the list up with
 // cover-less nights so the tray never shows fewer than that many (the tab only wants covers).
 // Thursday to Sunday the weekend leads; Monday to Wednesday tonight leads, so a quiet weeknight gets a same-day idea.
@@ -3993,7 +4024,7 @@ function planCardHtml(ev, plain) {
     <div class="tl tl-ev">${st.map((x, i) => { const state = !today ? "" : i < cur ? "done" : i === cur ? "cur" : i === cur + 1 ? "next" : "";
       return `<div class="stop ${state}"><span class="t">${x.time ? esc(fmtTime(x.time)) : ""}</span><span class="e">${esc(x.emoji || "📍")}</span>
         <span class="stop-txt"><b>${esc(x.name || x.place)}${state === "cur" ? ` <span class="stop-pill now">Now</span>` : state === "next" ? ` <span class="stop-pill">Up next</span>` : ""}</b>${x.name && x.place ? `<small>${esc(placeLine(x))}</small>` : ""}${x.note ? `<small class="stop-note">${esc(x.note)}</small>` : ""}</span>
-        ${(x.place || x.name) && state !== "done" ? `<a class="stop-dir" href="${esc(stopMapUrl(x))}" target="_blank" rel="noopener">Directions</a>` : ""}</div>`; }).join("")}</div></div>`;
+        ${(x.place || x.name) && state !== "done" ? `<a class="stop-dir" href="${esc(stopMapUrl(x))}" target="_blank" rel="noopener">Directions</a>` : ""}</div>${i < st.length - 1 ? transitionLine(x, st[i + 1]) : ""}`; }).join("")}</div>${(f => f ? `<div class="ride-row">${rideLinks(f, st[0].name || placeName(st[0].place))}</div>` : "")(stopFacts(st[0]))}</div>`;
 }
 // The event's money in one place: receipts people are still picking from, the event's expenses with your share,
 // and Add expense. Refreshed in place when expenses or shared receipts change.
@@ -4143,6 +4174,7 @@ function eventInner(ev) {
 
   <div class="ev-card-glass" id="rsvpCard">${rsvpBtns}</div>
   ${ev.timePoll ? `<div class="ev-card-glass" id="whenCard">${whenInner(ev)}</div>` : ""}
+  ${(h => h ? `<div class="ev-card-glass" id="bookCard">${h}</div>` : "")(bookingInner(ev))}
   ${ev.kind === "trip" ? `<div class="ev-card-glass" id="tripCard">${tripInner(ev)}</div>` : ""}
 
   ${!canSeeGuests(ev) ? `<div class="ev-card-glass" id="guestCard"><div class="glass-head">Guest list <span>${going} going</span></div><p class="muted-th sm" style="margin:0">🔒 RSVP above to see who's coming.</p></div>` : (() => { const gOpen = collapsedOpen("friendlyGuestOpen:" + ev.id, true); return `<div class="ev-card-glass inv-card ${gOpen ? "open" : ""}" id="guestCard">
@@ -4485,6 +4517,7 @@ function dayInner(ev) {
   return `<div class="glass-head">Day of <span>${esc(fmtDay(ev))}</span></div>
     <div class="day-sec"><div class="glass-sub">☀️ Weather &amp; arrivals</div>
     <div id="wx" class="muted-th sm" style="margin:0 0 8px">${esc(ev._wx || "")}</div>
+    ${bookedLines(ev)}<div id="rainNote">${rainNote(ev)}</div><div class="ride-row" id="dayRide">${dayRideInner(ev)}</div>
     ${statuses.length ? `<div class="chipwrap">${statuses.map(c => `<span class="day-chip">${LIVE_ICON[c.status] || "🚗"} ${esc(first(c.authorName || nameOf(c.authorId)))} is ${lateWord(c)} <i>${ago(c.createdAt)}</i></span>`).join("")}</div>` : ""}
     <div class="btnrow" style="margin:4px 0 10px">
       ${soon || mine ? `<button type="button" class="btn-th small ${mine === "omw" ? "accent" : ""}" data-status="omw">🚗 On my way</button><button type="button" class="btn-th small ${mine === "late" ? "accent" : ""}" data-status="late">⏰ Running late</button><button type="button" class="btn-th small ${mine === "here" ? "accent" : ""}" data-status="here">📍 I'm here</button>` : ""}
@@ -4579,16 +4612,17 @@ async function loadWeather(ev) {
   const box = el("wx"); if (!box || !ev.location || /zoom|meet\.google|teams|http|online|call/i.test(ev.location)) return;
   const du = daysUntil(ev); if (du < 0 || du > 15) return;
   const key = "wx2:" + ev.date + ":" + ev.location; let cached = null; try { cached = JSON.parse(LS.get(key) || "null"); } catch {}
-  const show = txt => { ev._wx = txt; const b = el("wx"); if (b) b.textContent = txt; };
-  if (cached && Date.now() - cached.at < 36e5) return show(cached.txt);
+  const show = txt => { ev._wx = txt; const b = el("wx"); if (b) b.textContent = txt; const rn = el("rainNote"); if (rn) rn.innerHTML = rainNote(ev); };
+  if (cached && Date.now() - cached.at < 36e5) { ev._rain = cached.rain || 0; return show(cached.txt); }
   try {
     // The event's address first; with several stops, any stop that names a city will do.
     let hit = null; for (const place of [ev.location, ...evStops(ev).map(x => x.place)].filter(Boolean)) { hit = await geocodePlace(place); if (hit) break; }
     if (!hit) return;
     const f = await (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${hit.latitude}&longitude=${hit.longitude}&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&temperature_unit=fahrenheit&timezone=auto&start_date=${ev.date}&end_date=${ev.date}`)).json();
     const d = f.daily; if (!d || !d.weather_code) return;
-    const txt = `${WX[d.weather_code[0]] || "🌡"} · ${Math.round(d.temperature_2m_max[0])}° / ${Math.round(d.temperature_2m_min[0])}°${d.precipitation_probability_max && d.precipitation_probability_max[0] != null ? " · " + d.precipitation_probability_max[0] + "% rain" : ""} · ${hit.name}`;
-    try { LS.set(key, JSON.stringify({ at: Date.now(), txt })); } catch {}
+    const rain = d.precipitation_probability_max && d.precipitation_probability_max[0] != null ? +d.precipitation_probability_max[0] : 0; ev._rain = rain;
+    const txt = `${WX[d.weather_code[0]] || "🌡"} · ${Math.round(d.temperature_2m_max[0])}° / ${Math.round(d.temperature_2m_min[0])}°${rain ? " · " + rain + "% rain" : ""} · ${hit.name}`;
+    try { LS.set(key, JSON.stringify({ at: Date.now(), txt, rain })); } catch {}
     show(txt);
   } catch {}
 }
@@ -4620,8 +4654,306 @@ function openCalendarDialog(ev) {
   };
   document.querySelectorAll("#appDialog [data-go]").forEach(b => b.onclick = () => { closeDialog(); go(b.dataset.go); });
 }
+// Ride buttons: the Uber and Lyft wordmarks (official marks, used as-is on white pills).
+const UBER_SVG = `<svg viewBox="0 0 926.906 321.777" aria-hidden="true" focusable="false"><path fill="#000" d="M53.328,229.809c3.917,10.395,9.34,19.283,16.27,26.664c6.93,7.382,15.14,13.031,24.63,16.948 c9.491,3.917,19.81,5.875,30.958,5.875c10.847,0,21.015-2.034,30.506-6.102s17.776-9.792,24.856-17.173 c7.08-7.382,12.579-16.194,16.496-26.438c3.917-10.244,5.875-21.692,5.875-34.347V0h47.453v316.354h-47.001v-29.376 c-10.545,11.147-22.974,19.734-37.285,25.761c-14.312,6.025-29.752,9.038-46.323,9.038c-16.873,0-32.615-2.938-47.228-8.813 c-14.612-5.875-27.267-14.235-37.962-25.082S15.441,264.006,9.265,248.79C3.088,233.575,0,216.628,0,197.947V0h47.453v195.236 C47.453,207.891,49.411,219.414,53.328,229.809z"/><path fill="#000" d="M332.168,0v115.243c10.545-10.545,22.748-18.905,36.607-25.082s28.924-9.265,45.193-9.265 c16.873,0,32.689,3.163,47.453,9.49c14.763,6.327,27.567,14.914,38.414,25.761s19.434,23.651,25.761,38.414 c6.327,14.764,9.49,30.431,9.49,47.002c0,16.57-3.163,32.162-9.49,46.774c-6.327,14.613-14.914,27.343-25.761,38.188 c-10.847,10.847-23.651,19.434-38.414,25.761c-14.764,6.327-30.581,9.49-47.453,9.49c-16.27,0-31.409-3.088-45.419-9.265 c-14.01-6.176-26.288-14.537-36.833-25.082v28.924h-45.193V0H332.168z M337.365,232.746c4.067,9.642,9.717,18.078,16.948,25.309 c7.231,7.231,15.667,12.956,25.308,17.174c9.642,4.218,20.036,6.327,31.184,6.327c10.847,0,21.09-2.109,30.731-6.327 s18.001-9.942,25.083-17.174c7.08-7.23,12.729-15.667,16.947-25.309c4.218-9.641,6.327-20.035,6.327-31.183 c0-11.148-2.109-21.618-6.327-31.41s-9.867-18.303-16.947-25.534c-7.081-7.23-15.441-12.88-25.083-16.947 s-19.885-6.102-30.731-6.102c-10.846,0-21.09,2.034-30.731,6.102s-18.077,9.717-25.309,16.947 c-7.23,7.231-12.955,15.742-17.173,25.534c-4.218,9.792-6.327,20.262-6.327,31.41C331.264,212.711,333.298,223.105,337.365,232.746 z"/><path fill="#000" d="M560.842,155.014c6.025-14.462,14.312-27.191,24.856-38.188s23.049-19.659,37.511-25.986 s30.129-9.49,47.001-9.49c16.571,0,31.937,3.013,46.098,9.038c14.16,6.026,26.362,14.387,36.606,25.083 c10.244,10.695,18.229,23.35,23.952,37.962c5.725,14.613,8.587,30.506,8.587,47.68v14.914H597.901 c1.507,9.34,4.52,18.002,9.039,25.985c4.52,7.984,10.168,14.914,16.947,20.789c6.779,5.876,14.462,10.471,23.049,13.784 c8.587,3.314,17.7,4.972,27.342,4.972c27.418,0,49.563-11.299,66.435-33.896l32.991,24.404 c-11.449,15.366-25.609,27.418-42.481,36.155c-16.873,8.737-35.854,13.106-56.944,13.106c-17.174,0-33.217-3.014-48.131-9.039 s-27.869-14.462-38.866-25.309s-19.659-23.576-25.986-38.188s-9.491-30.506-9.491-47.679 C551.803,184.842,554.817,169.476,560.842,155.014z M624.339,137.162c-12.805,10.696-21.316,24.932-25.534,42.708h140.552 c-3.917-17.776-12.278-32.012-25.083-42.708c-12.805-10.695-27.794-16.043-44.967-16.043 C652.133,121.119,637.144,126.467,624.339,137.162z"/><path fill="#000" d="M870.866,142.359c-9.641,10.545-14.462,24.856-14.462,42.934v131.062h-45.646V85.868h45.193v28.472 c5.725-9.34,13.182-16.722,22.371-22.145c9.189-5.424,20.111-8.136,32.766-8.136h15.817v42.482h-18.981 C892.86,126.542,880.507,131.814,870.866,142.359z"/></svg>`;
+const LYFT_SVG = `<svg viewBox="112.0 79.0 199 141" aria-hidden="true" focusable="false"><path fill="#FF00BF" d="M112.746,82.343 L142.806,82.343 L142.806,163.017 C142.806,175.784 148.646,183.389 153.264,186.649 C148.375,190.995 133.435,194.798 122.298,185.562 C115.732,180.118 112.746,171.166 112.746,162.745 L112.746,82.343 Z M300.609,149.357 L300.609,140.879 L309.777,140.879 L309.777,111.136 L299.709,111.136 C295.844,93.279 279.946,79.898 260.933,79.898 C239.03,79.898 221.275,97.654 221.275,119.556 L221.275,189.015 C227.515,189.892 234.949,188.906 241.274,183.661 C247.839,178.216 250.825,169.265 250.825,160.844 L250.825,158.285 L265.838,158.285 L265.838,128.542 L250.825,128.542 L250.825,119.556 L250.861,119.556 C250.861,113.994 255.37,109.485 260.933,109.485 C266.495,109.485 271.022,113.994 271.022,119.556 L271.022,149.357 C271.022,171.259 288.796,189.015 310.698,189.015 L310.698,159.428 C305.136,159.428 300.609,154.919 300.609,149.357 Z M186.761,111.136 L186.761,154.787 C186.761,157.265 184.705,159.274 182.168,159.274 C179.631,159.274 177.575,157.265 177.575,154.787 L177.575,111.136 L147.831,111.136 L147.831,162.474 C147.831,171.709 150.963,183.389 165.216,187.192 C179.484,190.999 187.761,183.118 187.761,183.118 C187.007,188.31 182.117,192.113 174.24,192.928 C168.28,193.544 160.658,191.57 156.856,189.94 L156.856,217.139 C166.544,219.996 176.791,220.919 186.819,218.973 C205.018,215.442 216.504,200.231 216.504,179.994 L216.504,111.136 L186.761,111.136 Z"/></svg>`;
+
+// ---- Real facts, Book it, rides, transitions ----
+// Facts come from the facts function (Google Places), cached on this phone for 12 hours per place. null = never asked.
+const factsLS = (name, near) => "friendlyFacts:" + (String(name) + "|" + String(near)).toLowerCase().replace(/[^a-z0-9|]+/g, "-").slice(0, 100);
+const factsCached = (name, near) => { try { const c = JSON.parse(LS.get(factsLS(name, near)) || "null"); return c && Date.now() - c.at < 12 * 36e5 ? c.f : null; } catch { return null; } };
+const seedFacts = (name, near, f) => { if (!name || !f || factsCached(name, near)) return; try { LS.set(factsLS(name, near), JSON.stringify({ at: Date.now(), f: { ...f, seeded: true } })); } catch {} };
+const factsPending = new Map();
+async function factsFor(name, near, opts = {}) {
+  name = String(name || "").trim(); near = String(near || S.profile.city || "").trim(); if (!name || !S.user) return null;
+  const hit = factsCached(name, near); if (hit && (!opts.more || hit.more || hit.missing)) return hit;
+  const k = factsLS(name, near); if (factsPending.has(k)) return factsPending.get(k);
+  const job = (async () => {
+    try { const tok = await S.user.getIdToken(); const r = await fetch(`${FN_BASE}/facts?q=${encodeURIComponent(name)}&near=${encodeURIComponent(near)}`, { headers: { Authorization: "Bearer " + tok } }); if (!r.ok) return hit; const f = await r.json(); if (!f || f.off) return hit; try { LS.set(k, JSON.stringify({ at: Date.now(), f })); } catch {} return f; }
+    catch { return hit; } finally { factsPending.delete(k); }
+  })();
+  factsPending.set(k, job); return job;
+}
+const nearOf = x => (x && x.place) || (S.profile && S.profile.city) || "";
+const stopFacts = x => x ? factsCached(x.name || x.place, nearOf(x)) : null;
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+// "Saturday: 11:00 AM – 11:00 PM" → "11 AM to 11 PM" for the day in question.
+const hoursOn = (f, date) => { const hs = (f && f.hours) || []; if (!hs.length) return ""; const name = DAY_NAMES[evDate({ date: date || todayStr() }).getDay()]; const line = hs.find(h => h.startsWith(name + ":")); return line ? line.slice(name.length + 1).trim().replace(/[  ]/g, " ").replace(/:00/g, "").replace(/\s*[–-]\s*/g, " to ") : ""; };
+function factsStrip(f, date) {
+  if (!f || f.missing) return "";
+  const items = [], h = hoursOn(f, date), today = !date || date === todayStr();
+  if (h) items.push((f.openNow === true && today ? "🟢 Open now · " : "🕒 ") + esc(h)); else if (f.openNow != null && today) items.push(f.openNow ? "🟢 Open now" : "🔴 Closed now");
+  if (f.price || f.rating) items.push(esc([f.price, f.rating ? `${f.rating}★${f.ratings ? ` (${Number(f.ratings).toLocaleString()})` : ""}` : ""].filter(Boolean).join(" · ")));
+  if (f.reservable === true) items.push("📅 Takes reservations"); else if (f.reservable === false) items.push("Walk-in");
+  if (f.parking) items.push("🅿️ " + esc(f.parking));
+  return items.length ? `<div class="facts">${items.map(x => `<span>${x}</span>`).join("")}</div>` : "";
+}
+const photoStripHtml = f => f && f.photos && f.photos.length ? `<div class="photo-strip">${f.photos.slice(0, 3).map(u => `<img src="${esc(u)}" alt="" loading="lazy">`).join("")}</div>` : "";
+const telHref = p => "tel:" + String(p || "").replace(/[^+\d]/g, "");
+// Maps has Reserve a table for most places that take reservations; the place's own Maps page is the best hand-off.
+const reserveUrl = (f, name) => (f && f.maps) || ("https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(name + " " + ((S.profile && S.profile.city) || "")));
+function rideLinks(f, label) {
+  if (!f || f.lat == null || f.lng == null) return "";
+  const addr = encodeURIComponent(f.address || f.name || label);
+  return `<span class="muted sm ride-lbl">Ride to ${esc(label)}</span><a class="btn ride ride-uber" href="https://m.uber.com/ul/?action=setPickup&pickup=my_location&dropoff%5Bformatted_address%5D=${addr}&dropoff%5Blatitude%5D=${f.lat}&dropoff%5Blongitude%5D=${f.lng}" target="_blank" rel="noopener" aria-label="Uber to ${esc(label)}">${UBER_SVG}</a><a class="btn ride ride-lyft" href="https://lyft.com/ride?id=lyft&destination%5Blatitude%5D=${f.lat}&destination%5Blongitude%5D=${f.lng}&destination%5Baddress%5D=${addr}" target="_blank" rel="noopener" aria-label="Lyft to ${esc(label)}">${LYFT_SVG}</a>`;
+}
+function factsSheetInner(name, f, loading) {
+  const t = f && !f.missing ? f : null, h = t ? hoursOn(t) : "";
+  return `<h3 style="margin:0 0 2px">${esc((t && t.name) || name)}</h3><div class="muted sm" style="margin:0 0 8px">${esc([t && t.type, t && t.address].filter(Boolean).join(" · ") || (loading ? "Checking with Google…" : "No details found for this one"))}</div>
+    ${photoStripHtml(t)}
+    ${t ? `<div class="card" style="padding:8px 14px;margin:10px 0"><div class="member-row" style="padding:6px 0"><span style="flex:1;min-width:0"><b>${t.openNow === true ? "🟢 Open now" : t.openNow === false ? "🔴 Closed now" : "🕒 Hours"}</b><div class="muted sm">${esc(h ? "Today " + h : "Hours not listed")}</div></span>${t.reservable === true ? `<span class="pill ok">Takes reservations</span>` : t.reservable === false ? `<span class="pill">Walk-in</span>` : ""}</div>
+      ${t.rating || t.price ? `<div class="member-row" style="padding:6px 0"><span style="flex:1;min-width:0"><b>${esc([t.price, t.rating ? t.rating + "★" : ""].filter(Boolean).join(" · "))}</b><div class="muted sm">${t.ratings ? Number(t.ratings).toLocaleString() + " Google reviews" : ""}${t.summary ? (t.ratings ? " · " : "") + esc(t.summary) : ""}</div></span></div>` : ""}
+      ${t.parking || t.outdoor ? `<div class="member-row" style="padding:6px 0"><span style="flex:1;min-width:0"><b>${t.outdoor ? "🌤️ Outdoor seating" : "🅿️ Parking"}</b><div class="muted sm">${esc(t.parking || "")}</div></span></div>` : ""}</div>` : ""}
+    <div class="btnrow" style="gap:6px;flex-wrap:wrap"><a class="btn primary" href="${esc(reserveUrl(t, name))}" target="_blank" rel="noopener">📅 Reserve</a>${t && t.phone ? `<a class="btn" href="${esc(telHref(t.phone))}">📞 Call</a>` : ""}<a class="btn" href="${esc(stopMapUrl({ name: (t && t.name) || name, place: (t && t.address) || "" }))}" target="_blank" rel="noopener">🧭 Directions</a>${t && t.website ? `<a class="btn" href="${esc(t.website)}" target="_blank" rel="noopener">🍽️ Menu &amp; site</a>` : ""}</div>
+    ${t && t.lat != null ? `<div class="ride-row">${rideLinks(t, t.name || name)}</div>` : ""}
+    <p class="muted sm" style="margin:10px 0 0">${t ? "Facts and photos from Google, checked today. Double-check hours on a holiday." : loading ? "" : "Google doesn't know this one by that name. Try the website, or search Maps."}</p>`;
+}
+async function openFactsSheet(name, near, seed) {
+  let f = seed || factsCached(name, near);
+  dialog(`<div id="factsBox">${factsSheetInner(name, f, true)}</div>`, null, null);
+  const got = await factsFor(name, near, { more: true });
+  const box = el("factsBox"); if (!box) return; f = got || f; box.innerHTML = factsSheetInner(name, f, false);
+}
+// ---- Book it: a booking state for each place on the plan (events/{id}.booking[key]) ----
+const bkey = x => String((x && (x.name || x.place)) || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "main";
+const homey = v => /\b(my|our|their|his|her)\b|[’']s (new |old )?(place|house|apartment|spot|pad)|\bhome\b|\bhouse\b|apartment|\bapt\b|backyard|the pool/i.test(String(v || ""));
+const goingTotal = ev => (ev.invitedUids || []).reduce((n, u) => (ev.rsvps || {})[u] === "going" ? n + 1 + (((ev.plusOnes || {})[u]) || 0) : n, 0);
+const ticketLink = ev => ev.ticketUrl || ((/Tickets: (https?:\/\/\S+)/.exec(ev.notes || "") || [])[1] || "");
+// Places on the plan worth booking: named stops (not someone's house), or the plan's single venue.
+function bookableStops(ev) {
+  const st = evStops(ev).filter(x => (x.name || x.place) && !homey(x.name));
+  if (st.length) return st.map(x => ({ key: bkey(x), name: x.name || placeName(x.place), place: nearOf(x), time: x.time || "", emoji: x.emoji || "📍" }));
+  if (ev.location && !homey(ev.location) && !/zoom|meet\.google|teams|http|online|call/i.test(ev.location)) return [{ key: "main", name: placeName(ev.location), place: ev.location, time: ev.time || "", emoji: ev.emoji || "📍" }];
+  return [];
+}
+function bookingInner(ev) {
+  if (ev.kind === "meeting" || (ev.date || "") < todayStr()) return "";
+  const me = myUid(), b = ev.booking || {}, stops = bookableStops(ev), tix = ticketLink(ev), going = goingTotal(ev);
+  if (!stops.length && !tix) return "";
+  const rows = stops.map(s => {
+    const v = b[s.key] || {}, f = factsCached(s.name, s.place), mine = v.by === me, booked = v.state === "booked", claimed = v.state === "claimed";
+    const sub = booked ? `✓ Booked${v.time ? " · " + esc(v.time) : ""}${v.size ? " · for " + v.size : ""}${v.name ? " · under " + esc(v.name) : ""}${v.conf ? " · #" + esc(v.conf) : ""}`
+      : claimed ? `${mine ? "You're" : esc(first(v.byName || nameOf(v.by))) + " is"} on it${f && f.phone ? " · " + esc(f.phone) : ""}`
+      : ["Not booked yet", f && f.reservable === true ? "takes reservations" : f && f.reservable === false ? "walk-in" : "", f && f.phone ? esc(f.phone) : ""].filter(Boolean).join(" · ");
+    const pill = booked ? `<span class="pill ok">Booked</span>` : claimed ? `<span class="pill due">Booking…</span>` : `<span class="pill due">Not booked</span>`;
+    const acts = booked ? `${v.photo ? `<button type="button" class="btn-th small" data-bphoto="${esc(s.key)}">📷 Confirmation</button>` : ""}${f && f.phone ? `<a class="btn-th small" href="${esc(telHref(f.phone))}">📞 Call</a>` : ""}<button type="button" class="btn-th small" data-bedit="${esc(s.key)}">Change</button>`
+      : `<a class="btn-th small accent" data-breserve="${esc(s.key)}" href="${esc(reserveUrl(f, s.name))}" target="_blank" rel="noopener">📅 ${f && f.reservable === false ? "Open in Maps" : "Reserve a table"}</a>${f && f.phone ? `<a class="btn-th small" href="${esc(telHref(f.phone))}">📞 Call</a>` : ""}<button type="button" class="btn-th small" data-bdone="${esc(s.key)}">✓ I booked it</button>`;
+    const claim = booked ? "" : claimed ? (mine ? `<button type="button" class="linkish" data-bunclaim="${esc(s.key)}">Not me after all</button>` : "")
+      : `<div class="day-row" style="align-items:center;padding-top:4px"><span style="flex:1;min-width:0"><b>Who's booking?</b><div class="muted-th sm">Nobody yet. Claim it and Dot reminds you two days before.</div></span><button type="button" class="btn-th small" data-bclaim="${esc(s.key)}">I'm on it</button></div>`;
+    const nudge = booked && v.size && going && going !== v.size && v.sizeAck !== going ? `<div class="dot-note">${dot("thinking", 40)}<span>RSVPs are at ${going} now, the booking says ${v.size}. Update it?</span></div><div class="btnrow" style="gap:6px;margin:4px 0 8px"><button type="button" class="btn-th small accent" data-bsize="${esc(s.key)}|${going}">Update to ${going}</button><button type="button" class="btn-th small" data-bkeep="${esc(s.key)}|${going}">Keep it at ${v.size}</button></div>` : "";
+    return `<div class="bk-row"><div class="day-row" style="align-items:center"><span style="flex:1;min-width:0"><b>${esc(s.emoji)} ${esc(s.name)}${s.time ? " · " + esc(fmtTime(s.time)) : ""}</b><div class="muted-th sm">${sub}</div></span>${pill}</div><div class="btnrow" style="margin:6px 0 4px;flex-wrap:wrap;gap:6px">${acts}</div>${nudge}${claim}</div>`; }).join("");
+  const tixRow = tix ? `<div class="bk-row"><div class="day-row" style="align-items:center"><span style="flex:1;min-width:0"><b>🎟️ Tickets</b><div class="muted-th sm">${going} going so far</div></span></div><div class="btnrow" style="margin:6px 0 4px;gap:6px;flex-wrap:wrap"><a class="btn-th small accent" href="${esc(tix)}" target="_blank" rel="noopener">🎟️ Get tickets</a><button type="button" class="btn-th small" data-bpitch="1">🎁 Pitch in</button></div></div>` : "";
+  const allBooked = stops.length > 0 && stops.every(s => (b[s.key] || {}).state === "booked");
+  return `<div class="glass-head">Booking <span>${allBooked ? "✓ all set" : (stops.length + (tix ? 1 : 0)) + " to sort"}</span></div>
+    ${stops.length && !allBooked ? `<div class="muted-th sm" style="margin:0 0 6px">${going ? `Table for ${going}, following the RSVPs.` : "The headcount follows the RSVPs."} Dot asks if that changes after you book.</div>` : ""}${rows}${tixRow}`;
+}
+const repaintBooking = ev => { const c = el("bookCard"); const cur = S.events.get(ev.id) || ev; const html = bookingInner(cur); if (!c || !html) return; c.innerHTML = html; wireBooking(cur); };
+const repaintPlan = ev => { const c = el("planCard"); if (!c) return; const cur = S.events.get(ev.id) || ev; const html = planCardHtml(cur, c.classList.contains("th-plain")); if (html) c.outerHTML = html; };
+// Facts for the plan's places arrive after the first paint; the cards repaint as they do.
+function warmPlanFacts(ev) {
+  const seen = new Set();
+  [...bookableStops(ev), ...evStops(ev).map(x => ({ name: x.name || x.place, place: nearOf(x) }))].forEach(s => { const k = s.name + "|" + s.place; if (!s.name || seen.has(k) || factsCached(s.name, s.place) !== null) return; seen.add(k);
+    factsFor(s.name, s.place).then(f => { if (f) { repaintBooking(ev); repaintPlan(ev); const d = el("dayCard"); if (d) { const row = el("dayRide"); if (row) row.innerHTML = dayRideInner(ev); } } }); });
+}
+function wireBooking(ev) {
+  const card = el("bookCard"); if (!card) return;
+  const stop = key => bookableStops(ev).find(s => s.key === key);
+  const setB = (key, obj) => updateDoc(doc(db, "events", ev.id), { ["booking." + key]: obj }).catch(e => toast(e.message));
+  const patchB = (key, patch) => updateDoc(doc(db, "events", ev.id), Object.fromEntries(Object.entries(patch).map(([k, v]) => ["booking." + key + "." + k, v]))).catch(e => toast(e.message));
+  card.querySelectorAll("[data-bclaim]").forEach(b => b.onclick = () => { const s = stop(b.dataset.bclaim); setB(b.dataset.bclaim, { state: "claimed", by: myUid(), byName: S.profile.name, what: s ? s.name : "the table", at: Date.now() }); toast("You're on it. Dot reminds you two days before.", null, null, "happy"); });
+  card.querySelectorAll("[data-bunclaim]").forEach(b => b.onclick = () => setB(b.dataset.bunclaim, deleteField()));
+  card.querySelectorAll("[data-breserve]").forEach(a => a.onclick = e => { e.preventDefault(); bookingHandoff(ev, stop(a.dataset.breserve), a.href); });
+  card.querySelectorAll("[data-bdone]").forEach(b => b.onclick = () => askBooked(ev, stop(b.dataset.bdone)));
+  card.querySelectorAll("[data-bedit]").forEach(b => b.onclick = () => askBooked(ev, stop(b.dataset.bedit), (ev.booking || {})[b.dataset.bedit]));
+  card.querySelectorAll("[data-bsize]").forEach(b => b.onclick = () => { const [k, n] = b.dataset.bsize.split("|"); patchB(k, { size: +n, sizeAck: +n }); toast("Updated to " + n + ". Let the restaurant know too.", null, null, "happy"); });
+  card.querySelectorAll("[data-bkeep]").forEach(b => b.onclick = () => { const [k, n] = b.dataset.bkeep.split("|"); patchB(k, { sizeAck: +n }); });
+  card.querySelectorAll("[data-bphoto]").forEach(b => b.onclick = () => { const v = (ev.booking || {})[b.dataset.bphoto]; if (v && v.photo) lightbox(v.photo); });
+  card.querySelectorAll("[data-bpitch]").forEach(b => b.onclick = () => openPitchIn(ev.groupId || null, { desc: "Tickets for " + ev.title }));
+}
+// Dot hands off to Maps the way Apple Cash hands off to Shortcuts: say what will happen, then ask on the way back.
+function bookingHandoff(ev, s, url) {
+  if (!s) return;
+  const going = goingTotal(ev), when = [ev.date ? fmtDay(ev) : "", s.time ? fmtTime(s.time) : ""].filter(Boolean).join(", ");
+  dialog(`<div class="dot-say">${dot("happy", 56)}<div class="say-bubble">Let's get ${esc(s.name)}. Maps opens on it, and if they take reservations, Reserve a table is right there.</div></div>
+    <ol class="steps"><li>Maps opens on <b>${esc(s.name)}</b>. Tap <b>Reserve a table</b>, or call them from there.</li><li>Pick <b>${esc(when || "the time")}</b>${going ? ` for <b>${going} people</b>` : ""} and confirm with your name.</li><li>Come back here. I'll ask how it went and put it on the plan.</li></ol>
+    <button type="button" class="btn primary" id="bkOpen" style="width:100%">Open Maps</button><button type="button" class="btn" id="bkLater" style="width:100%;margin-top:8px">Not now</button>
+    <p class="muted sm" style="text-align:center;margin:8px 0 0">No table online? Call instead, then tap I booked it.</p>`, null, null);
+  el("bkOpen").onclick = () => {
+    closeDialog(); const v = (ev.booking || {})[s.key] || {};
+    if (v.state !== "booked" && v.state !== "claimed") updateDoc(doc(db, "events", ev.id), { ["booking." + s.key]: { state: "claimed", by: myUid(), byName: S.profile.name, what: s.name, at: Date.now() } }).catch(() => {});
+    S._bookPending = { ev: ev.id, key: s.key, at: Date.now() }; try { LS.set("friendlyBookPending", JSON.stringify(S._bookPending)); } catch {}
+    if (NATIVE || IOS || IS_ANDROID) location.href = url; else window.open(url, "_blank");
+  };
+  el("bkLater").onclick = closeDialog;
+}
+// Back from Maps (or after a reload while away): one question, then it's on the plan.
+function bookingReturn() {
+  let p = S._bookPending; if (!p) { try { p = JSON.parse(LS.get("friendlyBookPending") || "null"); } catch {} }
+  S._bookPending = null; try { LS.remove("friendlyBookPending"); } catch {}
+  if (!p || Date.now() - p.at > 20 * 60e3) return;
+  const ev = S.events.get(p.ev); if (!ev) return; const s = bookableStops(ev).find(x => x.key === p.key); if (!s) return;
+  if (((ev.booking || {})[p.key] || {}).state === "booked") return;
+  if (S.route.id !== ev.id) go("#/e/" + ev.id);
+  setTimeout(() => askBooked(ev, s), 400);
+}
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && (S._bookPending || LS.get("friendlyBookPending"))) setTimeout(bookingReturn, 600); });
+const fileDataUrl = file => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(new Error("couldn't read that image")); r.readAsDataURL(file); });
+function askBooked(ev, s, cur) {
+  if (!s) return; const going = goingTotal(ev), v = cur || {}; let photo = v.photo || "";
+  dialog(`<div class="dot-say">${dot("happy", 56)}<div class="say-bubble">${cur ? `Change the booking at ${esc(s.name)}.` : `Welcome back. Did you get ${esc(s.name)}?`}</div></div>
+    <div class="two"><label class="field"><span>Time</span><input id="bkTime" value="${esc(v.time || (s.time ? fmtTime(s.time) : ""))}" placeholder="7:30 PM" maxlength="20"></label><label class="field"><span>Party size</span><input id="bkSize" inputmode="numeric" value="${esc(String(v.size || going || ""))}" maxlength="3"></label></div>
+    <label class="field"><span>Under the name</span><input id="bkName" value="${esc(v.name || first(S.profile.name))}" maxlength="40"></label>
+    <label class="field"><span>Confirmation (optional)</span><input id="bkConf" value="${esc(v.conf || "")}" maxlength="40" placeholder="The number from the text or email"></label>
+    <div class="btnrow" style="gap:8px;flex-wrap:wrap;margin:-2px 0 10px;align-items:center"><button type="button" class="btn small" id="bkShot">📷 ${photo ? "Replace the screenshot" : "Add a screenshot"}</button><span class="muted sm" id="bkShotOk">${photo ? "Screenshot attached" : ""}</span></div>
+    <button type="button" class="btn primary" id="bkSave" style="width:100%">✓ Booked, add it to the plan</button><button type="button" class="btn" id="bkNo" style="width:100%;margin-top:8px">${cur ? "Not booked after all" : "Didn't get it"}</button>`, null, null);
+  el("bkShot").onclick = async () => { const f = await pickFile("image/*", "booking"); if (!f) return; try { photo = await compressImage(await fileDataUrl(f), 900, 0.72, 160000); el("bkShotOk").textContent = "Screenshot attached"; } catch (e) { toast(e.message); } };
+  el("bkSave").onclick = async () => { const size = parseInt(el("bkSize").value, 10) || 0;
+    try { await updateDoc(doc(db, "events", ev.id), { ["booking." + s.key]: { state: "booked", by: myUid(), byName: S.profile.name, what: s.name, time: el("bkTime").value.trim().slice(0, 20), size, sizeAck: size, name: el("bkName").value.trim().slice(0, 40), conf: el("bkConf").value.trim().slice(0, 40), ...(photo ? { photo } : {}), at: Date.now() } }); closeDialog(); toast("Booked. Everyone invited hears.", null, null, "coral:party"); } catch (e) { toast(e.message); } };
+  el("bkNo").onclick = async () => { try { await updateDoc(doc(db, "events", ev.id), { ["booking." + s.key]: cur ? deleteField() : { state: "claimed", by: myUid(), byName: S.profile.name, what: s.name, at: Date.now() } }); } catch {} closeDialog(); };
+}
+const bookedLines = ev => Object.values(ev.booking || {}).filter(v => v && v.state === "booked").map(v => `<div class="muted-th sm" style="margin:0 0 6px">📅 <b>${esc(v.what || "Booked")}</b> · ${[v.time, v.size ? "for " + v.size : "", v.name ? "under " + esc(v.name) : ""].filter(Boolean).join(" · ")}</div>`).join("");
+// ---- Getting there: a walk or a short drive between stops, and a ride to the first one ----
+const kmBetween = (a, b) => { const R = 6371, dLat = (b.lat - a.lat) * Math.PI / 180, dLng = (b.lng - a.lng) * Math.PI / 180, x = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(x)); };
+const minsToHm = m => { const t = ((m % 1440) + 1440) % 1440; return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0"); };
+function transitionLine(a, b) {
+  const fa = stopFacts(a), fb = stopFacts(b); if (!fa || !fb || fa.lat == null || fb.lat == null) return "";
+  const km = kmBetween(fa, fb); if (km < 0.05) return `<div class="tl-go muted-th sm">same spot</div>`;
+  const walk = Math.max(1, Math.round(km / 0.08)), drive = Math.round(km / 0.5) + 3;   // 80 m a minute on foot; town driving plus parking
+  const onFoot = km <= 1.5, leaveIn = onFoot ? walk : drive;
+  const leave = stopMins(b.time) < 99999 ? ` · leave by ${fmtTime(minsToHm(stopMins(b.time) - leaveIn))}` : "";
+  return `<div class="tl-go muted-th sm">${onFoot ? `🚶 ${walk} min walk${km > 0.4 ? ` · or 🚗 ${Math.round(km / 0.5) + 2} min` : ""}` : `🚗 about ${drive} min · ${km < 10 ? (km * 0.621).toFixed(1) : Math.round(km * 0.621)} mi`}${leave}</div>`;
+}
+const dayRideInner = ev => { const s = bookableStops(ev)[0]; const f = s && factsCached(s.name, s.place); return f ? rideLinks(f, s.name) : ""; };
+const outdoorStop = ev => { const st = evStops(ev).length ? evStops(ev) : [{ name: ev.location || "", place: ev.location || "", note: "" }]; return st.find(x => (stopFacts(x) || {}).outdoor || /patio|rooftop|\bpark\b|garden|outdoor|lawn|pavilion|trail|lake|beach|pool/i.test([x.name, x.note].join(" "))); };
+function rainNote(ev) {
+  if (!(ev._rain >= 50) || (ev.date || "") < todayStr()) return ""; let ok = []; try { ok = JSON.parse(LS.get("friendlyRainOk") || "[]"); } catch {} if (ok.includes(ev.id + "|" + ev.date)) return "";
+  const o = outdoorStop(ev); if (!o) return ""; const name = o.name || placeName(o.place);
+  return `<div class="dot-note">${dot("thinking", 40)}<span>${ev._rain}% chance of rain. ${esc(name)} may move inside; want an indoor swap ready?</span></div><div class="btnrow" style="gap:6px;margin:4px 0 8px"><button type="button" class="btn-th small accent" data-rainplan="${esc(name)}">See the rain plan</button><button type="button" class="btn-th small" data-rainok="${esc(ev.id + "|" + ev.date)}">We'll risk it</button></div>`;
+}
+document.addEventListener("click", e => {
+  const a = e.target.closest && e.target.closest("[data-rainplan]"); if (a) { openIdeasBrowser({ free: "indoor alternative to " + a.dataset.rainplan + " near " + ((S.profile && S.profile.city) || "") }); return; }
+  const k = e.target.closest && e.target.closest("[data-rainok]"); if (k) { let ok = []; try { ok = JSON.parse(LS.get("friendlyRainOk") || "[]"); } catch {} try { LS.set("friendlyRainOk", JSON.stringify([...ok, k.dataset.rainok].slice(-20))); } catch {} const rn = el("rainNote"); if (rn) rn.innerHTML = ""; }
+});
+const dayPartOf = t => { const h = +String(t || "19:00").slice(0, 2); return h < 12 ? "morning" : h < 17 ? "afternoon" : "evening"; };
+// Ticketed things from Ticketmaster ride along with Dot's nights as cards of their own.
+const SEG_EMOJI = { Music: "🎸", Sports: "🏟️", "Arts & Theatre": "🎭", Film: "🎬", Miscellaneous: "🎟️" };
+const ticketNights = () => ((S.curated && S.curated.tickets) || []).map(t => ({ title: t.title, date: t.date, start: t.time || "", stops: [{ time: t.time ? fmtTime(t.time) : "", name: t.venue || t.title, kind: "do", note: t.address || "", url: t.url }], emoji: SEG_EMOJI[t.seg] || "🎟️", emojis: "", tags: ["tickets", t.seg === "Sports" ? "sports" : t.seg === "Music" ? "music" : "", t.genre === "Comedy" ? "comedy" : ""].filter(Boolean), cost: t.min ? `from $${t.min}${t.max && t.max !== t.min ? ` to $${t.max}` : ""}` : "", size: "", parking: "", why: [t.genre, t.venue].filter(Boolean).join(" · "), ticketUrl: t.url, img: t.img, ticket: t, theme: "midnight" }));
+
+// ---- Picks for this crew: what the group keeps choosing, scored against Dot's nights ----
+const TASTE_WORDS = [["tacos", /taco|mexican|burrito|margarita/i, "🌮"], ["pizza", /pizza|italian|pasta/i, "🍕"], ["sushi", /sushi|ramen|japanese|thai|pho|asian|korean/i, "🍣"], ["bbq", /bbq|barbecue|brisket|smokehouse/i, "🍖"], ["burgers", /burger|wings|pub\b|sports bar/i, "🍔"], ["brunch", /brunch|coffee|breakfast|bakery/i, "☕"], ["patios", /patio|rooftop|outdoor|beer garden|\bpark\b|lake|pool/i, "🌤️"], ["live music", /live music|concert|band|\bshow\b|\bdj\b|karaoke/i, "🎶"], ["comedy", /comedy|improv|stand-up/i, "🎤"], ["games", /\bgame\b|trivia|bowling|arcade|golf|pickleball|\baxe\b|escape room/i, "🎲"], ["movies", /movie|film|cinema/i, "🎬"], ["sports", /football|basketball|baseball|soccer|hockey|game day|watch party/i, "🏟️"], ["drinks", /\bbar\b|brewery|wine|cocktail|happy hour|drinks/i, "🍻"], ["dinner", /dinner|restaurant|steak|seafood|bistro/i, "🍽️"], ["outdoors", /hike|trail|bike|kayak|camp/i, "🥾"], ["under $40", /under \$40|cheap|budget|\$\b/i, "💸"], ["family", /family|kids/i, "👨‍👩‍👧"]];
+function crewProfile(g) {
+  const evs = myEvents().filter(e => evInGroup(e, g)), tally = {}, notes = {};
+  const bump = (k, w = 1) => { tally[k] = (tally[k] || 0) + w; };
+  for (const e of evs) {
+    const text = [e.title, e.food, e.location, e.notes, ...evStops(e).map(x => x.name + " " + (x.note || ""))].join(" "), going = Object.values(e.rsvps || {}).filter(r => r === "going").length;
+    for (const [k, re] of TASTE_WORDS) if (re.test(text)) bump(k, 1 + going / 4);
+    for (const v of Object.values(e.spotVotes || {})) for (const val of Object.values(v)) { if (val > 0) for (const [k, re] of TASTE_WORDS) if (re.test(text)) bump(k, 1); }
+    for (const a of Object.values(e.answers || {})) for (const t of Object.values(a)) { const w = String(t); if (/vegetarian|vegan/i.test(w)) notes.veg = (notes.veg || 0) + 1; if (/gluten/i.test(w)) notes.gf = 1; if (/allerg|shellfish|dairy|peanut/i.test(w)) notes.allergy = 1; }
+  }
+  const tags = Object.entries(tally).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([k]) => k);
+  const diet = []; if (notes.veg) diet.push(notes.veg === 1 ? "one vegetarian" : notes.veg + " vegetarians"); if (notes.gf) diet.push("gluten free"); if (notes.allergy) diet.push("allergies");
+  return { tags, diet, plans: evs.length, tally };
+}
+function crewPicks(g, max = 3) {
+  const prof = crewProfile(g); if (!prof.tags.length) return { prof, picks: [] };
+  const score = n => { const text = [n.title, n.why, ...(n.stops || []).map(x => x.name + " " + (x.note || "")), ...(n.tags || [])].join(" "); let sc = 0; for (const [k, re] of TASTE_WORDS) if (prof.tags.includes(k) && re.test(text)) sc += prof.tally[k] || 1; return sc; };
+  const picks = upcomingNights().map(n => ({ n, sc: score(n) })).filter(x => x.sc > 0).sort((a, b) => b.sc - a.sc || (a.n.date || "").localeCompare(b.n.date || "")).slice(0, max).map(x => x.n);
+  return { prof, picks };
+}
+// Who's free, as far as Friendly can see: members with another plan at that time don't count.
+function crewFree(g, date, time) {
+  const members = g.memberUids || []; let busy = 0;
+  for (const u of members) { if (u === myUid()) { if (myBusy(date, time).length) busy++; continue; } if ([...S.events.values()].some(e => e.date === date && (e.rsvps || {})[u] === "going" && (!time || !e.time || overlaps(time, e.time, e.endTime)))) busy++; }
+  return { free: members.length - busy, total: members.length };
+}
+const curGroup = () => (S._curGroup && S.groups.get(S._curGroup)) || [...S.groups.values()].map(g => [g, crewProfile(g).plans]).filter(x => x[1] >= 3).sort((a, b) => b[1] - a[1]).map(x => x[0])[0] || null;
+function crewCardHtml(g) {
+  if (!g) return ""; const { prof, picks } = crewPicks(g); if (!picks.length) return "";
+  const chipOf = k => { const w = TASTE_WORDS.find(x => x[0] === k); return `<span class="fchip on" style="pointer-events:none">${w ? w[2] + " " : ""}${esc(k)}</span>`; };
+  return `<div class="card crew-card" id="crewCard"><div class="section-head"><h2>Picks for ${esc(g.name)}</h2><span class="faces-sm">${(g.memberUids || []).slice(0, 4).map(u => avatar(u, "sm")).join("")}</span></div>
+    <div class="muted sm" style="margin:0 0 6px">What the ${(g.memberUids || []).length} of you keep choosing, from ${prof.plans} plans:</div><div class="chiprow" style="flex-wrap:wrap;overflow:visible;padding:0;margin:0 0 6px">${prof.tags.map(chipOf).join("")}${prof.diet.map(n => `<span class="fchip" style="pointer-events:none">🥗 ${esc(n)}</span>`).join("")}</div>
+    ${picks.map((n, i) => { const id = "cp" + i; S._nightById = S._nightById || {}; S._nightById[id] = n; const fr = crewFree(g, n.date, n.start);
+      const line = fr.total > 1 ? `${fr.free === fr.total ? "🟢" : fr.free >= fr.total / 2 ? "🟡" : "🔴"} ${esc(nightWhen(n))} works for ${fr.free} of ${fr.total}, as far as Friendly can see` : esc(nightWhen(n));
+      return `<div class="crew-row"><span><b>${esc(n.emoji || [...(n.emojis || "✨")][0] || "✨")} ${esc(n.title)}</b><div class="muted sm">${line}</div></span><button type="button" class="btn ${i === 0 ? "primary" : ""} small" data-cfloat="${id}|${esc(g.id)}">Float it</button><button type="button" class="btn small" data-cwhen="${id}|${esc(g.id)}" aria-label="Ask when works" title="Ask when works">🗓</button></div>`; }).join("")}</div>`;
+}
+// ---- Saved by the crew: a night saved to a group (groups/{id}.saves[key] = { night, by: [uids], at }) ----
+const saveKey = n => nightKey(n).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "x";
+async function saveForCrew(n, gid) {
+  const me = myUid(), base = "saves." + saveKey(n) + ".", g = S.groups.get(gid);
+  const night = { title: n.title, date: n.date || "", start: n.start || "", emoji: n.emoji || "", emojis: n.emojis || "", why: n.why || "", cost: n.cost || "", ticketUrl: n.ticketUrl || "", img: n.img || "", theme: n.theme || "", stops: (n.stops || []).slice(0, 5).map(x => ({ name: x.name || "", time: x.time || "", kind: x.kind || "do", note: x.note || "", ...(x.facts ? { facts: { lat: x.facts.lat || null, lng: x.facts.lng || null, maps: x.facts.maps || "", phone: x.facts.phone || "", rating: x.facts.rating || 0, price: x.facts.price || "" } } : {}) })) };
+  try { await updateDoc(doc(db, "groups", gid), { [base + "night"]: night, [base + "by"]: arrayUnion(me), [base + "at"]: Date.now() }); toast(`Saved for ${(g || {}).name || "the crew"}. It shows under Saved by the crew for everyone in it.`, null, null, "coral:happy"); }
+  catch (e) { toast(e.message); }
+}
+function pickGroupThen(fn, title = "Save for which crew?") {
+  const gs = [...S.groups.values()]; if (!gs.length) return toast("Make a group first, then save nights for it."); if (gs.length === 1) return fn(gs[0].id);
+  dialog(`<h3>${esc(title)}</h3><div class="stack">${gs.map(g => `<button type="button" class="btn" data-pickg="${esc(g.id)}">${groupMini(g)} ${esc(g.name)}</button>`).join("")}</div>`, null, null);
+  document.querySelectorAll("[data-pickg]").forEach(b => b.onclick = () => { closeDialog(); fn(b.dataset.pickg); });
+}
+function crewSavesHtml() {
+  const me = myUid(), t = todayStr(), items = [];
+  for (const g of S.groups.values()) for (const [k, v] of Object.entries(g.saves || {})) { if (v && v.night && !(v.night.date && v.night.date < t)) items.push({ g, k, v }); }
+  if (!items.length) return "";
+  items.sort((a, b) => (b.v.by || []).length - (a.v.by || []).length || (b.v.at || 0) - (a.v.at || 0));
+  return `<div class="card crew-card" id="savesCard"><div class="section-head"><h2>⭐ Saved by the crew</h2></div>${items.slice(0, 8).map(({ g, k, v }, i) => { const id = "cs" + i; S._nightById = S._nightById || {}; S._nightById[id] = { ...v.night, _gid: g.id, _k: k }; const by = v.by || [], mine = by.includes(me);
+    const who = by.length === 1 ? (mine ? "Just you so far" : first(nameOf(by[0])) + " saved this") : `${by.length} of ${esc(g.name)} saved this`;
+    return `<div class="crew-row"><span><b>${esc(v.night.emoji || [...(v.night.emojis || "✨")][0] || "✨")} ${esc(v.night.title)}</b><div class="muted sm"><span class="faces-sm">${by.slice(0, 4).map(u => avatar(u, "sm")).join("")}</span> ${who}${v.night.date ? " · " + esc(nightWhen(v.night)) : ""}</div></span><button type="button" class="btn ${by.length > 1 ? "primary" : ""} small" data-csplan="${id}">Plan it</button><button type="button" class="btn small" data-csfloat="${id}">Float it</button>${mine ? `<button type="button" class="wall-del" data-csx="${id}" title="Remove my save">✕</button>` : ""}</div>`; }).join("")}</div>`;
+}
+// ---- Your crew's spots: where you've actually been, with a thumbs vote the morning after ----
+function crewSpots() {
+  const t = todayStr(), by = {};
+  for (const e of myEvents()) { if ((e.date || "") >= t || e.kind === "meeting") continue;
+    for (const s of bookableStops(e)) { const o = by[s.key] = by[s.key] || { key: s.key, name: s.name, emoji: s.emoji, place: s.place, times: 0, last: "", up: 0, down: 0 }; o.times++; if (e.date > o.last) o.last = e.date; for (const v of Object.values(e.spotVotes || {})) { if ((v || {})[s.key] > 0) o.up++; if ((v || {})[s.key] < 0) o.down++; } } }
+  return Object.values(by).sort((a, b) => (b.up - b.down) - (a.up - a.down) || b.times - a.times || b.last.localeCompare(a.last));
+}
+function spotsCardHtml(max, all) {
+  const list = crewSpots(); if (!list.length) return "";
+  S._spotById = Object.fromEntries(list.map(o => [o.key, o]));
+  const rows = (all ? list : list.slice(0, max)).map(o => { const ago = Math.round((Date.now() - evDate({ date: o.last }).getTime()) / 864e5), stale = ago > 60;
+    const sub = [`${o.times} ${o.times === 1 ? "time" : "times"}`, stale ? `it's been ${Math.round(ago / 30)} months` : "last " + fmtDay({ date: o.last }), o.up > o.down ? (o.up > 1 ? "everyone's favorite" : "a favorite") : o.down > o.up ? "not a hit" : ""].filter(Boolean).join(" · ");
+    return `<div class="crew-row"><span><b>${esc(o.emoji)} ${esc(o.name)}</b><div class="muted sm">${esc(sub)}</div></span><button type="button" class="btn ${stale ? "primary" : ""} small" data-sgo="${esc(o.key)}">${stale ? "Float it" : "Go again"}</button></div>`; }).join("");
+  return `<div class="card crew-card" id="spotsCard"><div class="section-head"><h2>Your crew's spots</h2>${!all && list.length > max ? `<a class="hd-link" data-go="#/curate?to=spotsCard">All ${list.length} ›</a>` : ""}</div>${rows}</div>`;
+}
+document.addEventListener("click", e => {
+  const g = e.target.closest && e.target.closest("[data-sgo]"); if (g) { const o = (S._spotById || {})[g.dataset.sgo]; if (!o) return; if (g.textContent.trim() === "Float it") openAskSheet({ text: o.name + " again?" }); else ideaToPlan({ title: o.name, emoji: o.emoji, place: o.name, area: o.place || (S.profile.city || "") }); return; }
+  const v = e.target.closest && e.target.closest("[data-spot]"); if (v) { const [eid, key, val] = v.dataset.spot.split("|"); const ev = S.events.get(eid); if (!ev) return; const me = myUid(), mine = { ...((ev.spotVotes || {})[me] || {}), [key]: +val };
+    updateDoc(doc(db, "events", eid), { ["spotVotes." + me]: mine }).then(() => toast(+val > 0 ? "Noted. Dot leans that way next time." : "Noted. Dot skips it next time.", null, null, +val > 0 ? "coral:happy" : "thinking")).catch(err => toast(err.message)); return; }
+  const cp = e.target.closest && e.target.closest("[data-crewpicks]"); if (cp) { S._curGroup = cp.dataset.crewpicks; go("#/curate"); }
+});
+// ---- Ask Dot: a concierge chat that ends in three real options, then the plan or the booking ----
+const to24h = t => { const m = /^(\d{1,2})(?::(\d{2}))?\s*([AP]M)$/i.exec(String(t || "").trim()); if (!m) return /^\d{2}:\d{2}$/.test(t || "") ? t : ""; let h = +m[1] % 12; if (/p/i.test(m[3])) h += 12; return String(h).padStart(2, "0") + ":" + (m[2] || "00"); };
+function openConcierge(seed) {
+  if (isDemo()) return toast("Asking Dot is off in the demo. Try Build me a night instead.");
+  const city = (S.profile.city || "").trim(); if (!city) { toast("Tell me your city first."); return go("#/curate"); }
+  S._dotChat = S._dotChat || []; const hist = S._dotChat; let busy = false;
+  const optRow = (o, i) => `<div class="chat-opt"><b class="n">${i + 1}</b><span class="m"><b>${esc(o.name)}</b>${o.area ? ` <span class="muted sm">· ${esc(o.area)}</span>` : ""}<div class="muted sm">${esc([o.blurb, o.price, o.parking ? "🅿️ " + o.parking : "", o.bestTime ? "best at " + o.bestTime : ""].filter(Boolean).join(" · "))}</div></span></div>`;
+  const paint = () => { const box = el("dotChat"); if (!box) return;
+    box.innerHTML = `<div class="chat">${hist.length ? "" : `<div class="dot-say" style="margin:0">${dot("happy", 40)}<div class="say-bubble">Ask me like you'd ask a friend who knows ${esc(city)}: a patio for 8 on Saturday, somewhere quiet near the stadium, a late bite after the show.</div></div>`}
+      ${hist.map((h, i) => h.role === "me" ? `<div class="chat-u">${esc(h.text)}</div>` : `<div class="dot-say" style="margin:0">${dot("happy", 40)}<div class="say-bubble">${esc(h.text)}${h.options && h.options.length ? `<div style="margin-top:6px">${h.options.map(optRow).join("")}</div>` : ""}${h.action && h.action.place ? `<div class="btnrow" style="gap:6px;margin-top:8px"><button type="button" class="btn primary small" data-cplan="${i}">Make the plan, then book</button><button type="button" class="btn small" data-cbook="${i}">📅 Just open Maps</button></div>` : h.options && h.options.length ? `<div class="btnrow" style="gap:6px;margin-top:8px;flex-wrap:wrap">${h.options.map((o, k) => `<button type="button" class="btn small" data-cplanopt="${i}|${k}">Plan #${k + 1}</button>`).join("")}</div>` : ""}</div></div>`).join("")}
+      ${busy ? `<div class="dot-say" style="margin:0">${dot("thinking", 40)}<div class="say-bubble">Looking around ${esc(city)}…</div></div>` : ""}</div>
+      <label class="field"><span>${hist.length ? "Say more" : "What are you after?"}</span><input id="dotAsk" maxlength="300" placeholder="${esc(hist.length ? "Make it 7:30 instead · book the second one at 7" : "A patio for 8 Saturday, under $40, with parking")}" ${busy ? "disabled" : ""}></label>
+      <div class="btnrow" style="gap:6px"><button type="button" class="btn primary" id="dotSend" ${busy ? "disabled" : ""}>Ask Dot</button>${hist.length && !busy ? `<button type="button" class="btn ghost small" id="dotClear">Start over</button>` : ""}</div>`;
+    const send = async () => { const t = el("dotAsk").value.trim(); if (t.length < 3 || busy) return; hist.push({ role: "me", text: t }); busy = true; paint();
+      try {
+        const res = await requestViaFirestore("planRequests", { mode: "find", text: t, city, miles: myMiles(), history: hist.slice(-7, -1).map(h => ({ role: h.role, text: h.text, options: (h.options || []).map(o => o.name) })), ...nowCtx() }, 150000);
+        const d = res.data || {}; let act = d.action || null;
+        if (act && act.type === "book") { const prev = [...hist].reverse().find(h => h.role === "dot" && h.options && h.options.length); const o = prev && prev.options[act.option - 1]; act = o ? { ...act, place: o } : null; }
+        hist.push({ role: "dot", text: d.reply || "Here's what I found.", options: d.options || [], action: act });
+      } catch (e) { hist.push({ role: "dot", text: "I couldn't look that up just now. " + e.message }); }
+      busy = false; paint(); const c = el("dotChat"); if (c) { const last = c.querySelector(".chat").lastElementChild; if (last) last.scrollIntoView({ block: "end", behavior: "smooth" }); } };
+    el("dotSend").onclick = send; el("dotAsk").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); send(); } };
+    if (el("dotClear")) el("dotClear").onclick = () => { hist.length = 0; paint(); };
+    box.querySelectorAll("[data-cbook]").forEach(b => b.onclick = () => { const h = hist[+b.dataset.cbook], o = h.action && h.action.place; if (!o) return; const url = reserveUrl(factsCached(o.name, city), o.name); if (NATIVE || IOS || IS_ANDROID) location.href = url; else window.open(url, "_blank"); });
+    box.querySelectorAll("[data-cplan]").forEach(b => b.onclick = () => { const h = hist[+b.dataset.cplan], o = h.action && h.action.place; if (o) conciergeToPlan(o, h.action); });
+    box.querySelectorAll("[data-cplanopt]").forEach(b => b.onclick = () => { const [i, k] = b.dataset.cplanopt.split("|"); const o = hist[+i].options[+k]; if (o) conciergeToPlan(o, null); });
+    if (!busy && !hist.length && seed) { const inp = el("dotAsk"); if (inp) inp.value = seed; } };
+  dialog(`<h3 style="margin:0 0 10px">Ask Dot</h3><div id="dotChat"></div>`, null, null); paint();
+}
+function conciergeToPlan(o, act) {
+  const city = (S.profile.city || "").trim(); closeDialog();
+  ideaToPlan({ title: o.name, emoji: o.kind === "eat" ? "🍽️" : "🎟️", place: o.name, area: o.area || city, blurb: [o.blurb, o.parking ? "Parking: " + o.parking : ""].filter(Boolean).join(" "), price: o.price, url: o.url, time: act && act.time ? act.time : to24h(o.bestTime) });
+}
 function wireEventPage(ev) {
-  wireWhen(ev); if (ev.kind === "trip") wireTrip(ev);
+  wireWhen(ev); if (ev.kind === "trip") wireTrip(ev); wireBooking(ev); warmPlanFacts(ev);
   if (ev.coverFull) fullCoverOf(ev).then(c => { const img = document.querySelector(".event-cover img"); if (img && c && img.getAttribute("src") !== c) img.src = c; });
   const id = ev.id;
   markPeeked("#/e/" + ev.id);
@@ -6125,7 +6457,8 @@ function wirePickPeople(pre, onChange) {
   el(pre + "Search").oninput = () => { const q = el(pre + "Search").value.trim().toLowerCase(); box.querySelectorAll(".pi-pick-row").forEach(r => { r.hidden = !!q && !r.dataset.pname.includes(q); }); };
   return { picked, show(on) { box.hidden = !on; if (on) el(pre + "Search").focus(); } };
 }
-function openPitchIn(groupId) {
+function openPitchIn(groupId, pre) {
+  pre = pre && typeof pre === "object" && !(pre instanceof Event) ? pre : null;
   const me = myUid(), groups = [...S.groups.values()], friends = myFriendUids();
   let who = groupId && S.groups.get(groupId) ? groupId : groups[0] ? groups[0].id : "friends";
   let pk = { picked: new Set(), show() {} };
@@ -6147,6 +6480,7 @@ function openPitchIn(groupId) {
   pk = wirePickPeople("pi", sum);
   document.querySelectorAll("[data-piw]").forEach(b => b.onclick = () => { document.querySelectorAll("[data-piw]").forEach(x => x.classList.remove("on")); b.classList.add("on"); who = b.dataset.piw; pk.show(who === "pick"); sum(); });
   el("piEach").oninput = sum; sum();
+  if (pre) { if (pre.desc) el("piDesc").value = String(pre.desc).slice(0, 80); if (pre.each) { el("piEach").value = String(pre.each); sum(); } }
 }
 function pickCards() {
   const me = myUid(), list = [...(S.splits || new Map()).values()].filter(t => t.status === "open").sort((a, b) => b.createdAt - a.createdAt);

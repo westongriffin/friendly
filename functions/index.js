@@ -563,10 +563,106 @@ const CURATE_MILES = [5, 10, 25, 50], DEFAULT_MILES = 25;
 const milesOf = m => CURATE_MILES.includes(Number(m)) ? Number(m) : DEFAULT_MILES;
 const curatedKey = (city, miles) => cityKeyOf(city) + (milesOf(miles) === DEFAULT_MILES ? "" : "--" + milesOf(miles) + "mi");
 const nearArea = (city, miles) => { const m = milesOf(miles); return m <= 5 ? `in ${city} itself, within about 5 miles of it (nothing farther)` : `in or around ${city}, within about ${m} miles of it (nothing farther)`; };
+// ---- Real venue facts: Google Places API (New). "unset" = not configured; everything degrades to Dot's own words. ----
+// placeFacts/{key} caches one place for a day. The nightly Curate check asks for the cheaper "pro" fields only; the
+// in-app details sheet and booking rows ask for the extras (reservable, outdoor seating, parking, summary, photos).
+// Optional API keys live in Firestore config/keys { places, ticketmaster } (no client access; Wes pastes them in the
+// Firebase console). Missing or "unset" means off, and everything degrades to Dot's own words.
+const KEYS = { at: 0, v: {} };
+async function apiKey(name) {
+  if (Date.now() - KEYS.at > 600e3) { try { const snap = await db.doc("config/keys").get(); KEYS.v = snap.exists ? snap.data() : {}; } catch { KEYS.v = {}; } KEYS.at = Date.now(); }
+  const k = KEYS.v[name]; return k && k !== "unset" ? String(k).trim() : "";
+}
+const PRICE_WORDS = { PRICE_LEVEL_FREE: "Free", PRICE_LEVEL_INEXPENSIVE: "$", PRICE_LEVEL_MODERATE: "$$", PRICE_LEVEL_EXPENSIVE: "$$$", PRICE_LEVEL_VERY_EXPENSIVE: "$$$$" };
+const factsKey = (name, near) => (venueKey(name) + "|" + venueKey(near)).replace(/[^a-z0-9|]+/g, "-").slice(0, 120) || "x";
+const PRO_FIELDS = "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.priceLevel,places.nationalPhoneNumber,places.websiteUri,places.googleMapsUri,places.currentOpeningHours,places.businessStatus,places.primaryTypeDisplayName";
+const MORE_FIELDS = "reservable,outdoorSeating,parkingOptions,editorialSummary,photos";
+const parkingWords = p => { if (!p) return ""; const w = []; if (p.freeParkingLot) w.push("free lot"); if (p.paidParkingLot) w.push("paid lot"); if (p.freeGarageParking) w.push("free garage"); if (p.paidGarageParking) w.push("paid garage"); if (p.freeStreetParking) w.push("free street parking"); if (p.paidStreetParking) w.push("paid street parking"); if (p.valetParking) w.push("valet"); return w.join(", "); };
+async function placeFacts(name, near, more) {
+  const key = await apiKey("places"); name = sv(name, 100); near = sv(near, 80); if (!key || !name) return null;
+  const ref = db.doc("placeFacts/" + factsKey(name, near)); const snap = await ref.get(); const c = snap.exists ? snap.data() : null;
+  if (c && Date.now() - (c.at || 0) < 24 * 36e5 && (!more || c.more || c.missing)) return c.missing ? null : c;
+  const hdr = { "Content-Type": "application/json", "X-Goog-Api-Key": key };
+  let f = null;
+  try {
+    const r = await fetch("https://places.googleapis.com/v1/places:searchText", { method: "POST", headers: { ...hdr, "X-Goog-FieldMask": PRO_FIELDS }, body: JSON.stringify({ textQuery: near ? name + " near " + near : name, maxResultCount: 1, languageCode: "en" }) });
+    if (!r.ok) throw new Error("places " + r.status + " " + (await r.text()).slice(0, 120));
+    const p = ((await r.json()).places || [])[0];
+    if (p) {
+      f = { id: p.id, name: (p.displayName || {}).text || name, address: p.formattedAddress || "", lat: p.location ? p.location.latitude : null, lng: p.location ? p.location.longitude : null, rating: p.rating || 0, ratings: p.userRatingCount || 0, price: PRICE_WORDS[p.priceLevel] || "", phone: p.nationalPhoneNumber || "", website: p.websiteUri || "", maps: p.googleMapsUri || "", openNow: p.currentOpeningHours ? !!p.currentOpeningHours.openNow : null, hours: (p.currentOpeningHours || {}).weekdayDescriptions || [], status: p.businessStatus || "", type: (p.primaryTypeDisplayName || {}).text || "", at: Date.now() };
+      if (more) {
+        const r2 = await fetch(`https://places.googleapis.com/v1/places/${p.id}`, { headers: { ...hdr, "X-Goog-FieldMask": MORE_FIELDS } });
+        if (r2.ok) {
+          const q = await r2.json();
+          f.reservable = q.reservable === true ? true : q.reservable === false ? false : null; f.outdoor = !!q.outdoorSeating; f.parking = parkingWords(q.parkingOptions); f.summary = (q.editorialSummary || {}).text || ""; f.photos = [];
+          for (const ph of (q.photos || []).slice(0, 3)) { try { const r3 = await fetch(`https://places.googleapis.com/v1/${ph.name}/media?maxWidthPx=640&skipHttpRedirect=true&key=${key}`); if (r3.ok) { const j = await r3.json(); if (j.photoUri) f.photos.push(j.photoUri); } } catch {} }
+          f.more = true;
+        }
+      }
+    }
+  } catch (err) { logger.warn("placeFacts " + name + ": " + err.message); return c && !c.missing ? c : null; }
+  await ref.set(f || { missing: true, at: Date.now() }).catch(() => {});
+  return f;
+}
+// In-app lookup (details sheet, booking rows, rides): signed-in users only, cached a day per place.
+exports.facts = onRequest({ region: "us-central1", invoker: "public", memory: "256MiB", maxInstances: 5 }, async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*"); res.set("Access-Control-Allow-Headers", "Authorization, Content-Type"); res.set("Access-Control-Allow-Methods", "GET, OPTIONS"); res.set("Cache-Control", "private, max-age=600");
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  const m = /^Bearer (.+)$/.exec(req.get("authorization") || ""); if (!m) { res.status(401).json({ error: "sign in" }); return; }
+  try { await getAuth().verifyIdToken(m[1]); } catch { res.status(401).json({ error: "sign in again" }); return; }
+  if (!(await apiKey("places"))) { res.json({ off: true }); return; }
+  const q = sv(req.query.q, 100), near = sv(req.query.near, 80); if (!q) { res.status(400).json({ error: "q" }); return; }
+  const f = await placeFacts(q, near, true);
+  res.json(f || { missing: true });
+});
+// Nightly: check each night's places against Google (pro facts only) and drop any that closed for good.
+async function attachFacts(nights, city) {
+  if (!(await apiKey("places"))) return nights;
+  const keep = new Array(nights.length).fill(true); let i = 0;
+  const work = async () => { while (i < nights.length) { const k = i++; const n = nights[k];
+    for (const s of (n.stops || []).slice(0, 3)) { if (!s.name || s.kind === "go") continue; const f = await placeFacts(s.name, city, false); if (!f) continue;
+      if (f.status === "CLOSED_PERMANENTLY") { keep[k] = false; break; }
+      s.facts = { rating: f.rating, ratings: f.ratings, price: f.price, phone: f.phone, maps: f.maps, website: f.website, lat: f.lat, lng: f.lng, hours: (f.hours || []).slice(0, 7), address: f.address, type: f.type }; }
+    if (keep[k]) n.checkedAt = Date.now(); else logger.info("curate: dropped " + n.title + " (closed for good)"); } };
+  await Promise.all([1, 2, 3, 4].map(work));
+  const out = nights.filter((n, k) => keep[k]); return out.length ? out : nights;
+}
+// Ticketed things nearby (Ticketmaster Discovery): the next two weeks of music, comedy, sports, and theatre.
+async function fetchTickets(city, miles) {
+  const key = await apiKey("ticketmaster"); if (!key) return [];
+  const cf = await placeFacts(city, "", false); if (!cf || cf.lat == null) return [];
+  const iso = d => d.toISOString().replace(/\.\d+Z$/, "Z");
+  const url = `https://app.ticketmaster.com/discovery/v2/events.json?apikey=${key}&latlong=${cf.lat},${cf.lng}&radius=${milesOf(miles)}&unit=miles&startDateTime=${iso(new Date())}&endDateTime=${iso(new Date(Date.now() + 14 * 864e5))}&size=60&sort=date,asc&classificationName=music,comedy,sports,arts%20%26%20theatre`;
+  const r = await fetch(url); if (!r.ok) { logger.warn("ticketmaster " + r.status + " " + (await r.text()).slice(0, 100)); return []; }
+  const j = await r.json(); const evs = ((j._embedded || {}).events || []);
+  return evs.filter(e => e.dates && e.dates.start && e.dates.start.localDate && isUrl(e.url)).map(e => {
+    const v = ((e._embedded || {}).venues || [])[0] || {}, pr = (e.priceRanges || [])[0] || {}, cls = (e.classifications || [])[0] || {};
+    const img = (e.images || []).filter(x => x.ratio === "16_9" && x.width >= 600).sort((a, b) => a.width - b.width)[0] || (e.images || [])[0];
+    return { id: e.id, title: sv(e.name, 90), date: e.dates.start.localDate, time: (e.dates.start.localTime || "").slice(0, 5), venue: sv(v.name, 80), address: [v.address && v.address.line1, v.city && v.city.name].filter(Boolean).join(", "), lat: v.location ? +v.location.latitude : null, lng: v.location ? +v.location.longitude : null, min: pr.min != null ? Math.round(pr.min) : 0, max: pr.max != null ? Math.round(pr.max) : 0, url: e.url, img: img ? img.url : "", genre: sv((cls.genre || {}).name || (cls.segment || {}).name, 30), seg: sv((cls.segment || {}).name, 30), status: ((e.dates || {}).status || {}).code || "" };
+  }).slice(0, 40);
+}
 async function buildAndCacheCity(city, tz, today, weekday, onPhase, miles) {
-  const nights = await curateCity({ city, tz, today, weekday, miles }, onPhase);
-  await db.doc("curated/" + curatedKey(city, miles)).set({ city, miles: milesOf(miles), nights, updatedAt: Date.now(), forDate: today, v: 4 });
+  const raw = await curateCity({ city, tz, today, weekday, miles }, onPhase);
+  if (onPhase) await onPhase("checking");
+  const [nights, tickets] = await Promise.all([attachFacts(raw, city), fetchTickets(city, miles).catch(err => { logger.warn("tickets: " + err.message); return []; })]);
+  await db.doc("curated/" + curatedKey(city, miles)).set({ city, miles: milesOf(miles), nights, tickets, updatedAt: Date.now(), forDate: today, v: 4 });
   return nights;
+}
+// Dot as concierge: a short back-and-forth that ends in three real options, and "book the second one at 7".
+async function findPlaces(d) {
+  const city = sv(d.city, 60); if (!city) throw new Error("no city");
+  const hist = (Array.isArray(d.history) ? d.history : []).slice(-6).map(h => `${h.role === "dot" ? "Dot" : "Friend"}: ${sv(h.text, 400)}${Array.isArray(h.options) && h.options.length ? " [options: " + h.options.slice(0, 3).map((o, i) => (i + 1) + ". " + sv(o.name || o, 80)).join("; ") + "]" : ""}`);
+  const prompt = `You are Dot, the concierge in Friendly, an app friends use to plan nights out. The friend is ${nearArea(city, d.miles)}. Today is ${sv(d.today, 10)} (${sv(d.weekday, 10)}), local time ${sv(d.now, 5)}.
+Conversation so far:
+${hist.join("\n") || "(none)"}
+Friend: ${sv(d.text, 500)}
+Use search to answer with real, specific places or events that are open now (not permanently closed). When they ask for options, give exactly 3, each a real place: name, kind ("eat" or "do"), area (neighborhood or town), blurb (one short line on why it fits; mention group size, patio, or parking when they asked), price ("$" to "$$$$"), parking (a few words), bestTime (a time that fits, like "7:00 PM"), address, url (the official site if known, else ""). When they refer to an earlier option ("book the second one at 7"), set action to {"type":"book","option":<1-3>,"time":"<HH:MM, 24-hour>","size":<people, or 0>} and name that option in the reply. Otherwise action is null. If they only want a change or an answer, reply in a sentence and leave options empty unless new ones are needed.
+Answer as JSON only, one object in an array: [{"reply":"<one or two friendly sentences, under 220 characters, no lists>","options":[...],"action":{...} or null}]`;
+  const raw = await askGroundedReliably(prompt, 2200, d.onPhase, "concierge");
+  const r = Array.isArray(raw) ? raw[0] : raw; if (!r || typeof r !== "object") throw new Error("no answer");
+  const options = (Array.isArray(r.options) ? r.options : []).slice(0, 3).map(o => ({ name: sv(o && o.name, 80), kind: o && o.kind === "eat" ? "eat" : "do", area: sv(o && o.area, 40), blurb: clip(o && o.blurb, 160), price: sv(o && o.price, 12), parking: clip(o && o.parking, 60), bestTime: sv(o && o.bestTime, 10), address: sv(o && o.address, 120), url: isUrl(o && o.url) ? sv(o.url, 300) : "" })).filter(o => o.name);
+  const a = r.action && r.action.type === "book" ? { type: "book", option: Math.min(3, Math.max(1, +r.action.option || 1)), time: /^\d{2}:\d{2}$/.test(r.action.time || "") ? r.action.time : "", size: +r.action.size || 0 } : null;
+  return { reply: clip(r.reply, 240) || "Here's what I found.", options, action: a };
 }
 async function buildNight(d) {
   const city = sv(d.city, 60); if (city.length < 2) throw new Error("no city");
@@ -729,6 +825,7 @@ exports.onPlanRequest = onDocumentCreated({ document: "planRequests/{id}", regio
       : d.mode === "curate-city" ? { nights: await buildAndCacheCity(sv(d.city, 60), sv(d.tz, 40), d.today, d.weekday, phase => ref.update({ phase }).catch(() => {}), d.miles) }
       : d.mode === "night" ? { nights: await buildNight({ ...d, onPhase: phase => ref.update({ phase }).catch(() => {}) }) }
       : d.mode === "ideas" ? { ideas: await buildIdeas({ ...d, onPhase: phase => ref.update({ phase }).catch(() => {}) }) }
+      : d.mode === "find" ? await findPlaces({ ...d, onPhase: phase => ref.update({ phase }).catch(() => {}) })
       : await draftPlan(d);
     await ref.update({ status: "done", data });
   }
@@ -1423,6 +1520,17 @@ exports.onEventCreated = onDocumentCreated({ document: "events/{id}", ...MAIL },
 });
 
 // Event deleted -> cancel the calendar entries, drop the preview.
+// Book it: events/{id}.booking = { [stopKey]: { state: "claimed"|"booked", by, byName, what, time, size, name, conf, at } }.
+// Booked → everyone invited hears; claimed → the hosts hear who's on it. Reminders for claimed-not-booked run in dailyReminders.
+exports.onBooking = onDocumentUpdated({ document: "events/{id}", ...PUSH }, async e => {
+  const b = e.data.before.data() || {}, a = e.data.after.data() || {}; const was = b.booking || {}, now = a.booking || {};
+  for (const [k, v] of Object.entries(now)) {
+    const w = was[k] || {}; if (!v || !v.state || v.state === w.state) continue;
+    const who = firstName(v.byName || ""), url = "/#/e/" + e.params.id + "?to=bookCard", what = v.what || "the table";
+    if (v.state === "booked") await notify((a.invitedUids || []).filter(u => u !== v.by), `${who} booked ${what}`, [a.title, v.time ? "at " + v.time : "", v.size ? "for " + v.size : "", v.name ? "under " + v.name : ""].filter(Boolean).join(" · "), url, { type: "event", actorId: v.by });
+    else if (v.state === "claimed") await notify([a.hostId, ...(a.cohostUids || [])].filter(u => u && u !== v.by), `${who} is booking ${what}`, a.title + " · Dot reminds them two days out.", url, { type: "event", actorId: v.by });
+  }
+});
 exports.onEventDeleted = onDocumentDeleted({ document: "events/{id}", ...MAIL }, async e => {
   const ev = e.data && e.data.data(); if (!ev) return;
   await Promise.all([sendInviteEmails(e.params.id, ev, "CANCEL"), db.doc("previews/" + e.params.id).delete().catch(() => {}), notifyCanceled(e.params.id, ev),
@@ -2258,6 +2366,11 @@ exports.dailyReminders = onSchedule({ schedule: "0 9 * * *", timeZone: "America/
     tripDays++;
   }
   logger.info("Sent reminders for " + snap.size + " events and " + tripDays + " trip days");
+  // Book it: two days out, whoever claimed a booking and hasn't marked it booked gets a nudge.
+  const in2 = nextDay(nextDay(today)); const soon = await db.collection("events").where("date", "==", in2).get(); let bookNudges = 0;
+  for (const doc of soon.docs) { const ev = doc.data(); for (const [k, v] of Object.entries(ev.booking || {})) { if (!v || v.state !== "claimed" || !v.by) continue;
+    await notify([v.by], `Still need to book ${v.what || "the table"}?`, `${ev.title} is in two days. Reserve it, then tap I booked it so the crew knows.`, "/#/e/" + doc.id + "?to=bookCard", { type: "reminder" }); bookNudges++; } }
+  if (bookNudges) logger.info("Booking nudges: " + bookNudges);
 
   // Birthdays: a month out, tell the rest of each group so someone can plan.
   const target = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 30);
