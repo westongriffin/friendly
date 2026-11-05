@@ -574,7 +574,7 @@ async function apiKey(name) {
   let k = KEYS.v[name];
   // The Places key is created in the Cloud Console under the name "Friendly Places"; the first time it's needed, the
   // function reads its value through the API Keys API (its own service account) and keeps it in config/keys.
-  if (!k && name === "places" && !KEYS.triedLookup) { KEYS.triedLookup = true; try { k = await findPlacesKey(); if (k) { await db.doc("config/keys").set({ places: k }, { merge: true }); KEYS.v.places = k; } } catch (err) { logger.warn("places key lookup: " + err.message); } }
+  if (!k && name === "places" && Date.now() - (KEYS.lookupAt || 0) > 300e3) { KEYS.lookupAt = Date.now(); try { k = await findPlacesKey(); if (k) { await db.doc("config/keys").set({ places: k }, { merge: true }); KEYS.v.places = k; } } catch (err) { logger.warn("places key lookup: " + err.message); } }
   return k && k !== "unset" ? String(k).trim() : "";
 }
 async function findPlacesKey() {
