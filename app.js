@@ -2941,7 +2941,7 @@ function matchFriends(names, extra) {
 //      pairs each with a place to eat, and turns a pick into a plan, a poll, tickets or a table.
 const CURATE_LABEL = "Curate";
 const CURATE_FILTERS = [["weekend", "This weekend"], ["tonight", "Tonight"], ["late", "Late night"], ["date", "Date night"], ["group", "Group of 6+"], ["cheap", "Under $40"], ["family", "Family"], ["tickets", "🎟️ Tickets"]];
-const CURATE_LEADS = { tickets: "Real tickets at real prices, from Ticketmaster. Grab them, or start a pitch-in so everyone chips in.", weekend: "A few nights worth leaving the house for this weekend. Tap one and I'll set it up.", tonight: "Short notice, still good.", date: "For just the two of you.", group: "Big group? These places handle it.", cheap: "Good nights that won't hurt.", family: "Kid-friendly, and you'll like it too." };
+const CURATE_LEADS = { tickets: "Real tickets, straight from Ticketmaster. Grab them, or start a pitch-in so everyone chips in.", weekend: "A few nights worth leaving the house for this weekend. Tap one and I'll set it up.", tonight: "Short notice, still good.", date: "For just the two of you.", group: "Big group? These places handle it.", cheap: "Good nights that won't hurt.", family: "Kid-friendly, and you'll like it too." };
 let curFilter = "weekend", curSub = null, curCoverSub = null, curKey = "";
 const cityKeyOf = c => String(c || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
 const pad2 = n => String(n).padStart(2, "0");
@@ -3041,7 +3041,7 @@ function nightCardHtml(n, id) {
     ${n.why ? `<p class="why">${esc(n.why)}</p>` : ""}
     <div class="meta">${[n.cost, n.size, n.parking].filter(Boolean).map(m => `<span>${esc(m)}</span>`).join("")}</div>
     ${f ? factsStrip(f, n.date) : ""}${f || n.checkedAt ? `<div class="checked">✓ ${esc((eat || main).name)} checked against Google${n.checkedAt ? " " + agoWords(n.checkedAt) : ""} · <button type="button" class="link-btn" data-ndetails="${id}">Details ›</button></div>` : ""}
-    <div class="acts" style="flex-wrap:wrap;gap:6px"><button type="button" class="btn primary small" data-nplan="${id}">Make it a plan</button>${t ? `<a class="btn small" href="${esc(t.url)}" target="_blank" rel="noopener">🎟️ Get tickets${price ? " · " + esc(price) : ""}</a>${t.min ? `<button type="button" class="btn small" data-npitch="${id}">🎁 Pitch in $${t.min} each</button>` : ""}` : `<button type="button" class="btn small" data-npoll="${id}">Poll the group</button>${tix ? `<a class="btn small" href="${esc(tix)}" target="_blank" rel="noopener">Get tickets</a>` : ""}${eat ? `<a class="btn small" href="${esc(reserveUrl(eat.facts, eat.name))}" target="_blank" rel="noopener">📅 Reserve a table</a>` : ""}`}<button type="button" class="btn small" data-nfloat="${id}">Float it</button>${S.groups.size ? `<button type="button" class="btn small" data-nsave="${id}">☆ Save for the crew</button>` : ""}</div>
+    <div class="acts" style="flex-wrap:wrap;gap:6px"><button type="button" class="btn primary small" data-nplan="${id}">Make it a plan</button>${t ? `<a class="btn small" href="${esc(t.url)}" target="_blank" rel="noopener">🎟️ Get tickets${price ? " · " + esc(price) : ""}</a><button type="button" class="btn small" data-npitch="${id}">🎁 Pitch in${t.min ? ` $${t.min} each` : ""}</button>` : `<button type="button" class="btn small" data-npoll="${id}">Poll the group</button>${tix ? `<a class="btn small" href="${esc(tix)}" target="_blank" rel="noopener">Get tickets</a>` : ""}${eat ? `<a class="btn small" href="${esc(reserveUrl(eat.facts, eat.name))}" target="_blank" rel="noopener">📅 Reserve a table</a>` : ""}`}<button type="button" class="btn small" data-nfloat="${id}">Float it</button>${S.groups.size ? `<button type="button" class="btn small" data-nsave="${id}">☆ Save for the crew</button>` : ""}</div>
     </div></div>`;
 }
 function wireNightCards(root = document) {
@@ -4837,7 +4837,11 @@ document.addEventListener("click", e => {
 const dayPartOf = t => { const h = +String(t || "19:00").slice(0, 2); return h < 12 ? "morning" : h < 17 ? "afternoon" : "evening"; };
 // Ticketed things from Ticketmaster ride along with Dot's nights as cards of their own.
 const SEG_EMOJI = { Music: "🎸", Sports: "🏟️", "Arts & Theatre": "🎭", Film: "🎬", Miscellaneous: "🎟️" };
-const ticketNights = () => ((S.curated && S.curated.tickets) || []).map(t => ({ title: t.title, date: t.date, start: t.time || "", stops: [{ time: t.time ? fmtTime(t.time) : "", name: t.venue || t.title, kind: "do", note: t.address || "", url: t.url }], emoji: SEG_EMOJI[t.seg] || "🎟️", emojis: "", tags: ["tickets", t.seg === "Sports" ? "sports" : t.seg === "Music" ? "music" : "", t.genre === "Comedy" ? "comedy" : ""].filter(Boolean), cost: t.min ? `from $${t.min}${t.max && t.max !== t.min ? ` to $${t.max}` : ""}` : "", size: "", parking: "", why: [t.genre, t.venue].filter(Boolean).join(" · "), ticketUrl: t.url, img: t.img, ticket: t, theme: "midnight" }));
+// Ticketmaster's placeholder genres ("Undefined", "Miscellaneous") say nothing; the segment (Music, Sports) does.
+const genreWord = t => /^(undefined|miscellaneous|other|unknown)$/i.test(t.genre || "") ? (t.seg || "") : (t.genre || "");
+// Cancelled, postponed, and off-sale listings have nothing to grab.
+const ticketLive = t => !/^(cancelled|canceled|postponed|offsale)$/i.test(t.status || "");
+const ticketNights = () => ((S.curated && S.curated.tickets) || []).filter(ticketLive).map(t => ({ title: t.title, date: t.date, start: t.time || "", stops: [{ time: t.time ? fmtTime(t.time) : "", name: t.venue || t.title, kind: "do", note: t.address || "", url: t.url }], emoji: SEG_EMOJI[t.seg] || "🎟️", emojis: "", tags: ["tickets", t.seg === "Sports" ? "sports" : t.seg === "Music" ? "music" : "", t.genre === "Comedy" ? "comedy" : ""].filter(Boolean), cost: t.min ? `from $${t.min}${t.max && t.max !== t.min ? ` to $${t.max}` : ""}` : "", size: "", parking: "", why: [genreWord(t), t.venue].filter(Boolean).join(" · "), ticketUrl: t.url, img: t.img, ticket: t, theme: "midnight" }));
 
 // ---- Picks for this crew: what the group keeps choosing, scored against Dot's nights ----
 const TASTE_WORDS = [["tacos", /taco|mexican|burrito|margarita/i, "🌮"], ["pizza", /pizza|italian|pasta/i, "🍕"], ["sushi", /sushi|ramen|japanese|thai|pho|asian|korean/i, "🍣"], ["bbq", /bbq|barbecue|brisket|smokehouse/i, "🍖"], ["burgers", /burger|wings|pub\b|sports bar/i, "🍔"], ["brunch", /brunch|coffee|breakfast|bakery/i, "☕"], ["patios", /patio|rooftop|outdoor|beer garden|\bpark\b|lake|pool/i, "🌤️"], ["live music", /live music|concert|band|\bshow\b|\bdj\b|karaoke/i, "🎶"], ["comedy", /comedy|improv|stand-up/i, "🎤"], ["games", /\bgame\b|trivia|bowling|arcade|golf|pickleball|\baxe\b|escape room/i, "🎲"], ["movies", /movie|film|cinema/i, "🎬"], ["sports", /football|basketball|baseball|soccer|hockey|game day|watch party/i, "🏟️"], ["drinks", /\bbar\b|brewery|wine|cocktail|happy hour|drinks/i, "🍻"], ["dinner", /dinner|restaurant|steak|seafood|bistro/i, "🍽️"], ["outdoors", /hike|trail|bike|kayak|camp/i, "🥾"], ["under $40", /under \$40|cheap|budget|\$\b/i, "💸"], ["family", /family|kids/i, "👨‍👩‍👧"]];
@@ -5238,7 +5242,7 @@ function addSongDialog(ev) {
 function photosInner(ev) {
   const ps = S.photos.filter(visibleContent);
   const tiles = ps.map(p => `<div class="photo-tile"><img src="${esc(p.img)}" data-photo="${p.id}" alt="" loading="lazy">${photoBadges(p)}${p.addedBy === myUid() || isAdmin() ? `<button class="photo-act" data-delphoto="${p.id}" title="Remove">✕</button>` : `<button class="photo-act" data-more="photo|${p.id}" title="Report">⚑</button>`}</div>`).join("");
-  return `<div class="glass-head">Photos <span>${ps.length}</span></div><div class="photo-grid"><button class="photo-add" id="addPhoto">＋</button>${tiles || ""}</div>${ps.length ? "" : `<p class="muted-th" style="margin-top:8px">Share pics from the night.</p>`}`;
+  return `<div class="glass-head">Photos <span>${ps.length}</span></div>${albumRowHtml(ev, ps)}<div class="photo-grid"><button class="photo-add" id="addPhoto">＋</button>${tiles || ""}</div>${ps.length ? "" : `<p class="muted-th" style="margin-top:8px">Share pics from the night.</p>`}`;
 }
 function wirePhotos(ev) {
   if (el("addPhoto")) el("addPhoto").onclick = async () => {
@@ -5251,6 +5255,66 @@ function wirePhotos(ev) {
   document.querySelectorAll("[data-photo]").forEach(im => im.onclick = () => { const p = S.photos.find(x => x.id === im.dataset.photo); if (p) openPhoto(ev, p); });
   document.querySelectorAll("[data-delphoto]").forEach(b => b.onclick = () => { if (confirm("Remove this photo?")) deleteDoc(doc(subCol(ev, "photos"), b.dataset.delphoto)).catch(e => toast(e.message)); });
   document.querySelectorAll("#photosCard [data-more]").forEach(b => b.onclick = () => { const [kind, id] = b.dataset.more.split("|"); moderationMenu(ev, kind, id); });
+  document.querySelectorAll("[data-album]").forEach(b => b.onclick = () => sendAlbum(ev, b.dataset.album, b));
+}
+
+// ----- Send to a Shared Album -----
+// Apple gives apps no way to create or add to a Shared Album, so the share sheet does the hand-off: Friendly readies
+// the photos, the person taps Shared Albums (or Google Photos), and this phone remembers which photos went so the next
+// tap offers only the new ones. Works through the Web Share API where it exists, else the native Share plugin.
+let ALBUM_OK = null;
+function canSendAlbum() {
+  if (ALBUM_OK == null) { try { ALBUM_OK = !!(navigator.canShare && navigator.canShare({ files: [new File([new Uint8Array(4)], "a.jpg", { type: "image/jpeg" })] })) || !!(NATIVE && plugin("Share") && plugin("Filesystem")); } catch { ALBUM_OK = false; } }
+  return ALBUM_OK;
+}
+const albumKey = id => "friendlyAlbum:" + id;
+const albumSent = id => { try { const v = JSON.parse(LS.get(albumKey(id)) || "null"); return v && Array.isArray(v.ids) ? v : null; } catch { return null; } };
+function rememberAlbum(id, ids, replace) { const prev = replace ? null : albumSent(id); const all = [...new Set([...(prev ? prev.ids : []), ...ids])]; LS.set(albumKey(id), JSON.stringify({ at: Date.now(), ids: all.slice(-800) })); }
+const ALBUM_MAX = 40;   // per send, so the share sheet and memory stay comfortable; the next tap picks up the rest
+function albumRowHtml(ev, ps) {
+  if (!ps.length || !canSendAlbum()) return "";
+  const sent = albumSent(ev.id), fresh = sent ? ps.filter(p => !sent.ids.includes(p.id)) : ps;
+  if (!sent) return `<div class="album-row"><button type="button" class="btn-th small" data-album="new">📤 Send to a Shared Album</button><span class="album-note">Everyone's photos, in one tap.</span></div>`;
+  const kept = ps.length - fresh.length;
+  return `<div class="album-row">${fresh.length ? `<button type="button" class="btn-th small" data-album="new">📤 ${fresh.length} new photo${fresh.length === 1 ? "" : "s"} since last time · Send ${fresh.length === 1 ? "it" : "them"}</button>` : ""}<span class="album-note">${fresh.length ? "" : "✓ "}${kept} in your Shared Album · sent ${esc(agoWords(sent.at))} · <button type="button" class="link-btn" data-album="all">Send all again</button></span></div>`;
+}
+function albumTip() {
+  const apple = IOS || (NATIVE && !IS_ANDROID);
+  return new Promise(res => {
+    dialog(`<div class="dot-say">${dot("happy", 44)}<div class="say-bubble">Here's how this works.</div></div>
+      <ol class="album-steps"><li>I get the photos ready and open your ${apple ? "iPhone's" : "phone's"} share sheet.</li>
+      <li>${apple ? "Tap <b>Shared Albums</b> (it may say <b>Add to Shared Album</b>), then pick an album or make a new one." : "Pick <b>Google Photos</b>, or wherever you keep albums, and choose an album."}</li>
+      <li>${apple ? "Tap <b>Post</b>." : "Confirm."} Friendly remembers what went, so next time it offers only the new photos.</li></ol>`, "Let's go", () => { closeDialog(); res(true); });
+    const c = el("dlgCancel"); if (c) c.addEventListener("click", () => res(false));
+  });
+}
+// Hands files to the share sheet. Resolves true when they went, false when the person backed out.
+async function shareFiles(files, title) {
+  if (navigator.canShare && navigator.canShare({ files })) { try { await navigator.share({ files, title }); return true; } catch (e) { if (e.name === "AbortError") return false; } }
+  const FS = NATIVE && plugin("Filesystem"), SH = NATIVE && plugin("Share");
+  if (!FS || !SH) throw new Error("sharing isn't available here");
+  const uris = [];
+  for (const f of files) { const b64 = (await blobToURL(f)).split(",")[1]; const w = await FS.writeFile({ path: "album/" + f.name, data: b64, directory: "CACHE", recursive: true }); uris.push(w.uri); }
+  try { await SH.share({ title, files: uris }); return true; }
+  catch (e) { if (/cancel/i.test(e.message || "")) return false; throw e; }
+  finally { FS.rmdir({ path: "album", directory: "CACHE", recursive: true }).catch(() => {}); }
+}
+async function sendAlbum(ev, mode, btn) {
+  const ps = S.photos.filter(visibleContent).slice().sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));   // oldest first, so the album reads in order
+  const sent = albumSent(ev.id), all = mode === "all" || !sent;
+  let list = all ? ps : ps.filter(p => !sent.ids.includes(p.id));
+  if (!list.length) return toast("Nothing new to send.");
+  const rest = Math.max(0, list.length - ALBUM_MAX); list = list.slice(0, ALBUM_MAX);
+  if (!LS.get("friendlyAlbumTip")) { if (!(await albumTip())) return; LS.set("friendlyAlbumTip", "1"); }
+  const label = btn ? btn.textContent : ""; const prog = i => { if (btn) { btn.disabled = true; btn.textContent = `Getting ${list.length} photo${list.length === 1 ? "" : "s"} ready… ${i} of ${list.length}`; } };
+  const stem = String(ev.title || "friendly").replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "friendly";
+  try {
+    const files = [];
+    for (let i = 0; i < list.length; i++) { prog(i); const blob = await (await fetch(await bestPhoto(ev, list[i]))).blob(); const ext = /png/.test(blob.type) ? "png" : /heic|heif/.test(blob.type) ? "heic" : "jpg"; files.push(new File([blob], `${stem}-${String(ps.indexOf(list[i]) + 1).padStart(2, "0")}.${ext}`, { type: blob.type || "image/jpeg" })); }
+    prog(list.length);
+    if (await shareFiles(files, ev.title || "Photos")) { rememberAlbum(ev.id, list.map(p => p.id), all); toast(rest ? `Sent ${list.length}. Tap again for the other ${rest}.` : all ? "Sent. From here I'll keep count of new photos for you." : "Sent. Your album is caught up.", null, null, "happy"); }
+  } catch (e) { toast("Couldn't get those photos ready: " + e.message); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = label; } const b = el("photosCard"); if (b) { b.innerHTML = photosInner(ev); wirePhotos(ev); } }
 }
 async function setRsvp(ev, status) {
   const me = myUid();
@@ -7319,7 +7383,7 @@ function openBugDialog(fromShake) {
     <p class="muted sm" style="margin:10px 0 0">We'll include the screen you were on and your app version.</p>`, "Send", async () => {
       const text = el("bugText").value.trim(); if (text.length < 4) return toast("Tell us a little about what happened.");
       try {
-        await addDoc(collection(db, "bugs"), { uid: myUid(), name: S.profile.name || "", text, ...(shot ? { photo: shot } : {}), route: location.hash || "#/", version: nativeVersion || "", platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", ua: navigator.userAgent.slice(0, 200), status: "open", createdAt: Date.now() });
+        await addDoc(collection(db, "bugs"), { uid: myUid(), name: S.profile.name || "", text, ...(shot ? { photo: shot } : {}), route: location.hash || "#/", version: nativeVersion || "", platform: NATIVE ? (IS_ANDROID ? "android" : "ios") : "web", ua: navigator.userAgent.slice(0, 200), size: innerWidth + "x" + innerHeight + " · rem " + getComputedStyle(document.documentElement).fontSize + " · screen " + (window.screen ? screen.width + "x" + screen.height : "?"), status: "open", createdAt: Date.now() });
         closeDialog(); toast("Thanks! The team has it.", null, null, "happy");
       } catch (e) { toast(e.message); }
     });

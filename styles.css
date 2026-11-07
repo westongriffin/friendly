@@ -399,6 +399,9 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 
 /* ---------- PHOTO WALL ---------- */
 .photo-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.album-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin:0 0 10px}
+.album-note{font-size:.85rem;opacity:.85;line-height:1.35}
+.album-steps{margin:10px 0 0;padding-left:20px;display:grid;gap:6px}
 .photo-grid img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;cursor:pointer;display:block}
 .photo-tile{position:relative}
 .photo-act{position:absolute;top:4px;right:4px;width:30px;height:30px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:0.75rem;display:grid;place-items:center}

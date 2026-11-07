@@ -643,6 +643,8 @@ async function attachFacts(nights, city) {
   const out = nights.filter((n, k) => keep[k]); return out.length ? out : nights;
 }
 // Ticketed things nearby (Ticketmaster Discovery): the next two weeks of music, comedy, sports, and theatre.
+// Ticketmaster's placeholder genres say nothing; the segment (Music, Sports) does.
+const GENRE_NOISE = /^(undefined|miscellaneous|other|unknown)$/i;
 async function fetchTickets(city, miles) {
   const key = await apiKey("ticketmaster"); if (!key) return [];
   const cf = await placeFacts(city, "", false); if (!cf || cf.lat == null) return [];
@@ -650,10 +652,10 @@ async function fetchTickets(city, miles) {
   const url = `https://app.ticketmaster.com/discovery/v2/events.json?apikey=${key}&latlong=${cf.lat},${cf.lng}&radius=${milesOf(miles)}&unit=miles&startDateTime=${iso(new Date())}&endDateTime=${iso(new Date(Date.now() + 14 * 864e5))}&size=60&sort=date,asc&classificationName=music,comedy,sports,arts%20%26%20theatre`;
   const r = await fetch(url); if (!r.ok) { logger.warn("ticketmaster " + r.status + " " + (await r.text()).slice(0, 100)); return []; }
   const j = await r.json(); const evs = ((j._embedded || {}).events || []);
-  return evs.filter(e => e.dates && e.dates.start && e.dates.start.localDate && isUrl(e.url)).map(e => {
-    const v = ((e._embedded || {}).venues || [])[0] || {}, pr = (e.priceRanges || [])[0] || {}, cls = (e.classifications || [])[0] || {};
+  return evs.filter(e => e.dates && e.dates.start && e.dates.start.localDate && isUrl(e.url) && !/^(cancelled|canceled|postponed|offsale)$/i.test(((e.dates.status || {}).code) || "")).map(e => {
+    const v = ((e._embedded || {}).venues || [])[0] || {}, pr = (e.priceRanges || [])[0] || {}, cls = (e.classifications || [])[0] || {}, gn = (cls.genre || {}).name || "";
     const img = (e.images || []).filter(x => x.ratio === "16_9" && x.width >= 600).sort((a, b) => a.width - b.width)[0] || (e.images || [])[0];
-    return { id: e.id, title: sv(e.name, 90), date: e.dates.start.localDate, time: (e.dates.start.localTime || "").slice(0, 5), venue: sv(v.name, 80), address: [v.address && v.address.line1, v.city && v.city.name].filter(Boolean).join(", "), lat: v.location ? +v.location.latitude : null, lng: v.location ? +v.location.longitude : null, min: pr.min != null ? Math.round(pr.min) : 0, max: pr.max != null ? Math.round(pr.max) : 0, url: e.url, img: img ? img.url : "", genre: sv((cls.genre || {}).name || (cls.segment || {}).name, 30), seg: sv((cls.segment || {}).name, 30), status: ((e.dates || {}).status || {}).code || "" };
+    return { id: e.id, title: sv(e.name, 90), date: e.dates.start.localDate, time: (e.dates.start.localTime || "").slice(0, 5), venue: sv(v.name, 80), address: [v.address && v.address.line1, v.city && v.city.name].filter(Boolean).join(", "), lat: v.location ? +v.location.latitude : null, lng: v.location ? +v.location.longitude : null, min: pr.min != null ? Math.round(pr.min) : 0, max: pr.max != null ? Math.round(pr.max) : 0, url: e.url, img: img ? img.url : "", genre: sv(GENRE_NOISE.test(gn) ? (cls.segment || {}).name : gn, 30), seg: sv((cls.segment || {}).name, 30), status: ((e.dates || {}).status || {}).code || "" };
   }).slice(0, 40);
 }
 async function buildAndCacheCity(city, tz, today, weekday, onPhase, miles) {
