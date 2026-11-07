@@ -5274,9 +5274,10 @@ const ALBUM_MAX = 40;   // per send, so the share sheet and memory stay comforta
 function albumRowHtml(ev, ps) {
   if (!ps.length || !canSendAlbum()) return "";
   const sent = albumSent(ev.id), fresh = sent ? ps.filter(p => !sent.ids.includes(p.id)) : ps;
-  if (!sent) return `<div class="album-row"><button type="button" class="btn-th small" data-album="new">📤 Send to a Shared Album</button><span class="album-note">Everyone's photos, in one tap.</span></div>`;
+  const where = IOS || (NATIVE && !IS_ANDROID) ? "an iCloud Shared Album" : IS_ANDROID ? "a Google Photos album" : "a shared album";
+  if (!sent) return `<div class="album-row"><button type="button" class="btn-th small" data-album="new">📤 Add to a Shared Album</button><span class="album-note">Everyone's photos into ${where}, in one tap.</span></div>`;
   const kept = ps.length - fresh.length;
-  return `<div class="album-row">${fresh.length ? `<button type="button" class="btn-th small" data-album="new">📤 ${fresh.length} new photo${fresh.length === 1 ? "" : "s"} since last time · Send ${fresh.length === 1 ? "it" : "them"}</button>` : ""}<span class="album-note">${fresh.length ? "" : "✓ "}${kept} in your Shared Album · sent ${esc(agoWords(sent.at))} · <button type="button" class="link-btn" data-album="all">Send all again</button></span></div>`;
+  return `<div class="album-row">${fresh.length ? `<button type="button" class="btn-th small" data-album="new">📤 Add ${fresh.length} new photo${fresh.length === 1 ? "" : "s"}</button>` : ""}<span class="album-note">${kept ? `${fresh.length ? "" : "✓ "}${kept} in your Shared Album · added ${esc(agoWords(sent.at))}` : `Last added ${esc(agoWords(sent.at))}`} · <button type="button" class="link-btn" data-album="all">Add all again</button></span></div>`;
 }
 function albumTip() {
   const apple = IOS || (NATIVE && !IS_ANDROID);
@@ -5303,7 +5304,7 @@ async function sendAlbum(ev, mode, btn) {
   const ps = S.photos.filter(visibleContent).slice().sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));   // oldest first, so the album reads in order
   const sent = albumSent(ev.id), all = mode === "all" || !sent;
   let list = all ? ps : ps.filter(p => !sent.ids.includes(p.id));
-  if (!list.length) return toast("Nothing new to send.");
+  if (!list.length) return toast("Nothing new to add.");
   const rest = Math.max(0, list.length - ALBUM_MAX); list = list.slice(0, ALBUM_MAX);
   if (!LS.get("friendlyAlbumTip")) { if (!(await albumTip())) return; LS.set("friendlyAlbumTip", "1"); }
   const label = btn ? btn.textContent : ""; const prog = i => { if (btn) { btn.disabled = true; btn.textContent = `Getting ${list.length} photo${list.length === 1 ? "" : "s"} ready… ${i} of ${list.length}`; } };
@@ -5312,7 +5313,7 @@ async function sendAlbum(ev, mode, btn) {
     const files = [];
     for (let i = 0; i < list.length; i++) { prog(i); const blob = await (await fetch(await bestPhoto(ev, list[i]))).blob(); const ext = /png/.test(blob.type) ? "png" : /heic|heif/.test(blob.type) ? "heic" : "jpg"; files.push(new File([blob], `${stem}-${String(ps.indexOf(list[i]) + 1).padStart(2, "0")}.${ext}`, { type: blob.type || "image/jpeg" })); }
     prog(list.length);
-    if (await shareFiles(files, ev.title || "Photos")) { rememberAlbum(ev.id, list.map(p => p.id), all); toast(rest ? `Sent ${list.length}. Tap again for the other ${rest}.` : all ? "Sent. From here I'll keep count of new photos for you." : "Sent. Your album is caught up.", null, null, "happy"); }
+    if (await shareFiles(files, ev.title || "Photos")) { rememberAlbum(ev.id, list.map(p => p.id), all); toast(rest ? `Added ${list.length}. Tap again for the other ${rest}.` : all ? "Added. From here I'll keep count of new photos for you." : "Added. Your album is caught up.", null, null, "happy"); }
   } catch (e) { toast("Couldn't get those photos ready: " + e.message); }
   finally { if (btn) { btn.disabled = false; btn.textContent = label; } const b = el("photosCard"); if (b) { b.innerHTML = photosInner(ev); wirePhotos(ev); } }
 }
