@@ -5326,7 +5326,7 @@ function openTravelSheet(ev, leg, c) {
 function openAssignSheet(ev, c) {
   const s = bringState(c), people = evPeople(ev), cur = new Set(s.who);
   dialog(`<h3>Who's in ${esc(c.item)}?</h3><p class="muted sm" style="margin:0 0 8px">${c.qty ? `Sleeps ${esc(c.qty)}. ` : ""}Tick everyone sleeping here.</p>
-    <div class="assign-list">${people.map(u => `<label class="trip-pack-row"><input type="checkbox" data-asg="${esc(u)}" ${cur.has(u) ? "checked" : ""}>${avatar(u, "xs")}<span>${esc(nameOf(u))}${u === ev.hostId ? ' <span class="muted sm">· host</span>' : ""}</span></label>`).join("")}</div>`, "Save", async () => {
+    <div class="assign-list">${people.map(u => `<label class="trip-pack-row"><input type="checkbox" data-asg="${esc(u)}" ${cur.has(u) ? "checked" : ""}>${avatar(u)}<span>${esc(nameOf(u))}${u === ev.hostId ? ' <span class="muted sm">· host</span>' : ""}</span></label>`).join("")}</div>`, "Save", async () => {
     const chosen = [...document.querySelectorAll("[data-asg]:checked")].map(x => x.dataset.asg), names = {};
     for (const u of chosen) names[u] = (((c.reactions || {}).claimNames || {})[u]) || nameOf(u);
     try { await updateDoc(doc(subCol(ev, "comments"), c.id), { "reactions.claim": chosen, "reactions.claimNames": names, "reactions.claimQty": deleteField() }); closeDialog(); } catch (e) { toast(e.message); } });

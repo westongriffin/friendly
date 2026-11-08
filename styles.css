@@ -353,7 +353,7 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .btn-th{background:var(--th-chip);color:var(--th-ink);border-radius:11px;padding:10px 14px;font-weight:700;backdrop-filter:blur(6px)}
 .btn-th.accent{background:var(--th-accent);color:var(--th-on-accent)}
 .btn-th.ghost{background:transparent} .btn-th.small{padding:7px 12px;font-size:0.8125rem} .btn-th.danger{color:#fff;background:var(--bad)}
-.ev-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.ev-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}.ev-actions>.btn-th{flex:1 1 auto}
 .ev-foot{text-align:center;margin-top:22px;font-family:var(--th-font);font-weight:700;opacity:.5;color:var(--th-ink)}
 .ans-block{margin-bottom:12px} .ans-block b{display:block;margin-bottom:4px} .ans{font-size:0.8125rem;margin-bottom:2px} .ans span{color:var(--muted)}
 
@@ -1485,7 +1485,7 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 .trip-days{margin:4px 0 10px;flex-wrap:wrap;overflow:visible;padding-bottom:0}
 .trip-day{margin-top:8px}.trip-day-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
 .trip-rooms{display:flex;flex-direction:column}.trip-rooms .hd-faces{display:inline-flex;vertical-align:middle;margin-right:4px}.trip-rooms .wall-del{font-size:.9rem}
-.trip-pack{display:flex;flex-direction:column;gap:4px}.trip-pack-row{display:flex;align-items:center;gap:10px;padding:6px 0;min-height:36px}.trip-pack-row input{width:20px;height:20px;accent-color:var(--th-accent)}.trip-pack-row span{flex:1;min-width:0}.trip-pack-row span.done{opacity:.55;text-decoration:line-through}
+.trip-pack{display:flex;flex-direction:column;gap:4px}.trip-pack-row{display:flex;align-items:center;gap:10px;padding:6px 0;min-height:36px}.trip-pack-row input{width:20px;height:20px;accent-color:var(--th-accent)}.trip-pack-row span{flex:1;min-width:0}.trip-pack-row .avatar{flex:none}.trip-pack-row span.done{opacity:.55;text-decoration:line-through}
 .trip-pack-add{display:flex;gap:8px;margin-top:8px}.trip-pack-add input{flex:1;min-width:0;border-radius:12px;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.1);color:inherit;padding:9px 12px;font:inherit}
 .trip-tab{display:grid;grid-template-columns:1fr 1fr;gap:10px}.trip-tab>div{display:flex;flex-direction:column;gap:2px}.trip-tab b{font-family:var(--mono,inherit);font-size:1.25rem}.trip-tab.three{grid-template-columns:1fr 1fr 1fr;margin:0 0 12px}.trip-tab.three b{font-size:1.05rem}
 
@@ -1668,7 +1668,7 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 .stop-edit select{border:1px solid var(--line);border-radius:10px;padding:7px 32px 7px 9px;background-color:var(--surface);min-width:0;width:100%}
 .st-emo-row{display:flex;gap:6px;align-items:center}.st-emo-row input{flex:1;min-width:0}
 .app-dialog .st-emo-pick{margin:-4px 0 10px}
-#moneyCard .btnrow .ev-x-add{flex:1;width:auto}
+#moneyCard .btnrow{margin-top:10px}#moneyCard .btnrow>.btn-th{flex:1 1 auto;width:auto;margin-top:0}
 /* Button edges (Nov 2026 audit). Themed buttons take the theme's chip tinted with 18% of its accent and an edge of its ink at 55%,
    so they read on dark and light themes alike (65% clears 3:1 on the mid-tone themes; a chosen RSVP pill keeps its edge too). App buttons and chips get a warm tan edge that holds 3:1 on cream and white. */
 .btn-th,.jump-chip,.rb{background:linear-gradient(color-mix(in srgb,var(--th-accent,var(--accent)) 18%,transparent),color-mix(in srgb,var(--th-accent,var(--accent)) 18%,transparent)),var(--th-chip,var(--surface2));box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--th-ink,var(--ink)) 65%,transparent)}
