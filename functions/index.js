@@ -867,9 +867,9 @@ Rules:
 - startDate and endDate: the first and last day of the trip (departure day through the day everyone gets home). For a single-day event they are the same day.
 - stay: where the group sleeps: a ship (the ship's name, kind ship), a hotel, a rental house, or a campsite, with check-in and check-out as printed (the boarding window for a ship), the address or port if printed, and a short note (cabin or room, deck, resort fee).
 - stops: EVERY dated line, in the order it happens, one per flight leg, boarding, port call, check-in, check-out, excursion, dinner reservation, show, transfer, or activity. day is the date it happens.
-  - A port call or a day at a destination is one stop of kind port named after the place ("Puerto Plata"), with place the port or city. A day at sea on a cruise is one stop of kind other named "At sea".
+  - A port call or a day at a destination is exactly ONE stop of kind port, named after the place alone ("Puerto Plata", never "Arrive Puerto Plata" or "Depart Puerto Plata"), with place the port or city, time the arrival time, and the departure or all-aboard time in the note ("Departs 6:00 PM"). Never make separate arrive and depart stops. A day at sea on a cruise is one stop of kind other named "At sea".
   - A flight: kind flight, name like "Flight DFW → MIA", place the departure airport with its city, note the airline, flight number, departure and arrival times, seats, and terminal.
-  - Boarding a ship: kind boarding, name "Board the <ship>", place the port and city, time when boarding opens. Leaving the ship on the last day: kind checkout.
+  - Boarding a ship: kind boarding, name "Board the <ship>", place the port and city, time when boarding opens, note the all-aboard and sail-away times. The home port is not a port stop on embarkation day. Leaving the ship on the last day: one stop of kind checkout named "Off the <ship>", time when disembarkation begins, note the ship's arrival time; no port stop for the home port that day either.
   - Hotel check-in or check-out: kinds checkin and checkout, place the hotel's address.
   - conf: the confirmation, booking, or record locator printed for that line. emoji: one emoji for the stop. Never list a stop twice; never add stops that are not in the document.
 - title: a short name for the trip the way the document gives it (the ship, the destination, or the event), without dates.
@@ -884,12 +884,34 @@ async function askItinerary(parts) {
   const j = await r.json();
   return JSON.parse(((((j.candidates || [])[0] || {}).content || {}).parts || []).map(p => p.text || "").join(""));
 }
+// "18:00" as "6:00 PM", for notes.
+const itinT12 = t => { const [h, m] = t.split(":").map(Number); return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`; };
+// The model sometimes splits a port call into "Arrive X" and "Depart X" stops, and lists the home port beside boarding or
+// disembarkation. Fold those: one port stop per place and day with the departure in its note; the home port's times go
+// into the boarding or checkout stop's note.
+function foldPorts(stops) {
+  const verb = /^(arrive|arrives|arriving|arrival(?: in| at)?|depart|departs|departing|departure(?: from)?|leave|leaves|leaving)\s+(?:in\s+|at\s+|from\s+)?(.+)$/i;
+  const addNote = (y, s) => { y.note = [y.note, s].filter(Boolean).join(" · ").slice(0, 200); };
+  const out = [];
+  for (const x of stops) {
+    const m = x.kind === "port" ? verb.exec(x.name) : null;
+    if (!m) { out.push(x); continue; }
+    const place = m[2].trim(), leaving = /^(depart|leave)/i.test(m[1]);
+    const anchor = stops.find(y => y !== x && y.day === x.day && (leaving ? y.kind === "boarding" : y.kind === "checkout"));
+    if (anchor) { if (x.time) addNote(anchor, (leaving ? "Sails " : "Arrives ") + itinT12(x.time)); continue; }
+    const twin = out.find(y => y.kind === "port" && y.day === x.day && y.name.toLowerCase() === place.toLowerCase());
+    if (twin) { if (leaving && x.time) addNote(twin, "Departs " + itinT12(x.time)); continue; }
+    x.name = place; if (leaving && x.time) { addNote(x, "Departs " + itinT12(x.time)); x.time = ""; }
+    out.push(x);
+  }
+  return out;
+}
 function tidyItinerary(out) {
   const ymd = v => /^\d{4}-\d{2}-\d{2}$/.test(v || "") ? v : "", hm = v => /^\d{2}:\d{2}$/.test(v || "") ? v : "";
   const emo = v => noLone(sv(v, 8).replace(/[A-Za-z0-9\s]/g, "").slice(0, 4));
   const KE = { flight: "✈️", boarding: "🚢", port: "⚓", checkin: "🏨", checkout: "🧳", meal: "🍽️", excursion: "🎟️", beach: "🏖️", ride: "🚕", drive: "🚗", train: "🚆", ferry: "⛴️", activity: "🎳", other: "📍" };
-  const stops = (Array.isArray(out.stops) ? out.stops : []).map(x => x || {}).map(x => ({ day: ymd(x.day), time: hm(x.time), kind: ITIN_KINDS.includes(x.kind) ? x.kind : "other", name: sv(x.name, 60), place: sv(x.place, 120), note: sv(x.note, 200), conf: sv(x.conf, 40), emoji: emo(x.emoji) || KE[x.kind] || "📍" }))
-    .filter(x => x.day && (x.name || x.place)).sort((a, b) => a.day.localeCompare(b.day) || a.time.localeCompare(b.time)).slice(0, 60);
+  const stops = foldPorts((Array.isArray(out.stops) ? out.stops : []).map(x => x || {}).map(x => ({ day: ymd(x.day), time: hm(x.time), kind: ITIN_KINDS.includes(x.kind) ? x.kind : "other", name: sv(x.name, 60), place: sv(x.place, 120), note: sv(x.note, 200), conf: sv(x.conf, 40), emoji: emo(x.emoji) || KE[x.kind] || "📍" }))
+    .filter(x => x.day && (x.name || x.place)).sort((a, b) => a.day.localeCompare(b.day) || a.time.localeCompare(b.time)).slice(0, 60));
   let startDate = ymd(out.startDate), endDate = ymd(out.endDate);
   if (stops.length) { if (!startDate || startDate > stops[0].day) startDate = stops[0].day; if (!endDate || endDate < stops[stops.length - 1].day) endDate = stops[stops.length - 1].day; }
   if (endDate && startDate && endDate < startDate) endDate = startDate;
