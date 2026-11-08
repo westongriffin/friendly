@@ -417,11 +417,11 @@ function dotSuggestions() {
   const route = S.route;
   try {
     for (const e of S.events.values()) {
-      if (!e.date || e.date < today) continue;
+      if (!e.date || evLast(e) < today) continue;
       const mine = canManage(e), n = (e.invitedUids || []).length, age = now - (e.createdAt || 0);
       if (e.hostId === me && n <= 1 && !(e.invitedPhones || []).length && age > 60e3 && age < 3 * 864e5)
         push("invite", e.id, `Nobody's on “${e.title}” yet. Want a hand inviting people?`, "Add people", () => { go("#/e/" + e.id); setTimeout(() => { const x = S.events.get(e.id); if (x) openEventInviteDialog(x); }, 500); });
-      if (mine && e.date === today && !e.location && e.kind !== "meeting")
+      if (mine && e.date === today && !e.location && e.kind !== "meeting" && !isTripEv(e))
         push("address", e.id, `“${e.title}” is today and has no address. Add one so people can tap for directions.`, "Add location", () => editEvent(e));
       if (e.hostId === me && daysTo(e) <= 3 && pendingOf(e).length >= 2)
         push("nudge", e.id, `${pendingOf(e).length} people haven't answered for “${e.title}”. Want me to nudge them?`, "Nudge them", () => nudge(e));
@@ -538,7 +538,7 @@ function evDate(ev) { const [y, m, d] = (ev.date || "2000-01-01").split("-").map
 function fmtTime(t) { if (!t) return ""; const [h, mi] = t.split(":").map(Number); const d = new Date(); d.setHours(h, mi); return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }); }
 function fmtWhen(ev) {
   const d = evDate(ev);
-  if (ev.endDate && ev.endDate > ev.date) return `${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} to ${evDate({ date: ev.endDate }).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}`;
+  if (ev.endDate && ev.endDate > ev.date) return `${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} to ${evDate({ date: ev.endDate }).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} · ${ymdDiff(ev.date, ev.endDate) + 1} days`;
   let s = d.toLocaleDateString(undefined, { weekday: "short", month: "long", day: "numeric" });
   if (ev.time) s += " · " + fmtTime(ev.time) + (ev.endTime ? "–" + fmtTime(ev.endTime) : "");
   return s;
@@ -1781,22 +1781,22 @@ function calendarBody(evs) {
   const t = todayStr(); const now = new Date();
   if (!calYM) calYM = { y: now.getFullYear(), m: now.getMonth() };
   const { y, m } = calYM; const first = new Date(y, m, 1); const startDow = first.getDay(); const days = new Date(y, m + 1, 0).getDate();
-  const byDay = {}; evs.forEach(e => (byDay[e.date] = byDay[e.date] || []).push(e));
+  const byDay = {}; evs.forEach(e => (isTripEv(e) ? tripDays(e) : [e.date]).forEach(d => (byDay[d] = byDay[d] || []).push(e)));   // a trip marks every day it runs
   const key = d => y + "-" + String(m + 1).padStart(2, "0") + "-" + String(d).padStart(2, "0");
   let cells = ""; for (let i = 0; i < startDow; i++) cells += `<div class="cal-cell blank"></div>`;
   for (let d = 1; d <= days; d++) { const k = key(d); const list = byDay[k] || []; cells += `<div class="cal-cell${k === t ? " today" : ""}${list.length ? " has" : ""}${k === calDay ? " sel" : ""}"${list.length ? ` data-calday="${k}"` : ""}><span class="cal-n">${d}</span><span class="cal-dots">${list.slice(0, 3).map(e => esc(e.kind === "meeting" ? "📅" : e.emoji || "🎉")).join("")}</span></div>`; }
   const monthName = first.toLocaleDateString(undefined, { month: "long", year: "numeric" });
   const sel = calDay && byDay[calDay] ? byDay[calDay] : null;
-  const agenda = sel || evs.filter(e => e.date >= t).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || ""))).slice(0, 40);
+  const agenda = sel || evs.filter(e => evLast(e) >= t).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || ""))).slice(0, 40);
   let list = "", last = "";
-  for (const e of agenda) { if (e.date !== last) { last = e.date; list += `<div class="tl-date">${esc(fmtDay(e))}${e.date === t ? " · Today" : ""}</div>`; } list += planRow(e); }
+  for (const e of agenda) { const k = spansDay(e, t) ? t : e.date; if (k !== last) { last = k; list += `<div class="tl-date">${esc(fmtDay({ date: k }))}${k === t ? " · Today" : ""}</div>`; } list += planRow(e); }
   return `<div class="card cal"><div class="cal-head"><button class="btn ghost small" id="calPrev" aria-label="Previous month">‹</button><b>${esc(monthName)}</b><button class="btn ghost small" id="calNext" aria-label="Next month">›</button></div>
     <div class="cal-dow">${["S", "M", "T", "W", "T", "F", "S"].map(d => `<span>${d}</span>`).join("")}</div><div class="cal-grid">${cells}</div></div>
     <div class="section-head" style="margin-top:18px"><h2>${sel ? esc(fmtDay(sel[0])) : "Timeline"}</h2>${sel ? `<button class="btn small" id="calClear">All upcoming</button>` : ""}</div>
     <div class="card">${list || `<p class="muted" style="padding:14px 16px;margin:0">Nothing scheduled yet.</p>`}</div>`;
 }
 // Upcoming events I was texted an invite to but haven't joined (see the phoneEvents listener).
-const unjoinedEvents = () => [...((S.phoneEvents || new Map()).values())].filter(e => e.date >= todayStr() && !S.events.has(e.id) && !(e.invitedUids || []).includes(myUid()));
+const unjoinedEvents = () => [...((S.phoneEvents || new Map()).values())].filter(e => evLast(e) >= todayStr() && !S.events.has(e.id) && !(e.invitedUids || []).includes(myUid()));
 
 // ---------- HOME (the dashboard) ----------
 // What's next, what needs you, money at a glance, Dot's picks, the week, memories, the latest, and your crews.
@@ -1807,14 +1807,15 @@ function homeBody() {
   const me = myUid(), t = todayStr();
   const evs = [...myEvents(), ...unjoinedEvents()].filter(e => !declinedByMe(e));
   const ended = e => liveWindow(e).phase === "after", isLive = e => ["soon", "now"].includes(liveWindow(e).phase);
-  const upcoming = evs.filter(e => e.date >= t && !ended(e)).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
+  const upcoming = evs.filter(e => evLast(e) >= t && !ended(e)).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
   let hiddenToday = []; try { hiddenToday = JSON.parse(LS.get("friendlyTodayHidden") || "[]"); } catch {}
-  const todayEvs = upcoming.filter(e => e.date === t && !hiddenToday.includes(e.id + "|" + e.date)).slice(0, 2);
+  // A trip is today's plan on every day it runs (hidden per day, so the ✕ comes back tomorrow).
+  const todayEvs = upcoming.filter(e => spansDay(e, t) && !hiddenToday.includes(e.id + "|" + (isTripEv(e) ? t : e.date))).slice(0, 2);
   const todayHero = todayEvs.find(e => !isLive(e)) || null;
-  const todayCards = todayEvs.filter(e => e !== todayHero).map(e => isLive(e) ? liveCard(e) : `<div class="card notif-card today-card" data-ev="${e.id}" role="button"><button type="button" class="today-x" data-hide-today="${e.id}|${e.date}" aria-label="Hide this">✕</button>${dotHat(56)}<div style="flex:1;min-width:0"><div class="eyebrow-sm">Today</div><b>${esc(e.title)}${e.time ? " · " + fmtTime(e.time) : ""}</b><div class="muted sm">${e.kind === "meeting" ? (e.invitedUids || []).filter(u => (e.rsvps || {})[u] === "going").length + " accepted" : goingCount(e) + " going"}${evStops(e).length ? " · " + evStops(e).length + " stops" : e.location ? " · " + esc(placeName(e.location)) : ""}</div></div><span class="chev">›</span></div>`).join("");
+  const todayCards = todayEvs.filter(e => e !== todayHero).map(e => isLive(e) ? liveCard(e) : `<div class="card notif-card today-card" data-ev="${e.id}" role="button"><button type="button" class="today-x" data-hide-today="${e.id}|${isTripEv(e) ? t : e.date}" aria-label="Hide this">✕</button>${dotHat(56)}<div style="flex:1;min-width:0"><div class="eyebrow-sm">Today${isTripEv(e) ? ` · Day ${tripDayN(e, t)} of ${tripLen(e)}` : ""}</div><b>${esc(e.title)}${!isTripEv(e) && e.time ? " · " + fmtTime(e.time) : ""}</b><div class="muted sm">${e.kind === "meeting" ? (e.invitedUids || []).filter(u => (e.rsvps || {})[u] === "going").length + " accepted" : goingCount(e) + " going"}${evStops(e).length ? " · " + evStops(e).length + " stops" : e.location ? " · " + esc(placeName(e.location)) : ""}</div></div><span class="chev">›</span></div>`).join("");
   if ((S.profile.city || "").trim()) ensureCurated();
   const mine = upcoming.filter(e => !e._unjoined), weekEnd = addDays(t, (7 - new Date().getDay()) % 7);
-  const hero = todayHero || mine.find(e => !todayEvs.includes(e) && !hiddenToday.includes(e.id + "|" + e.date)) || null;
+  const hero = todayHero || mine.find(e => !todayEvs.includes(e) && !hiddenToday.includes(e.id + "|" + (isTripEv(e) && spansDay(e, t) ? t : e.date))) || null;
   const rest = mine.filter(e => e !== hero && !todayEvs.includes(e));
   const inWeek = rest.filter(e => e.date <= weekEnd), week = (inWeek.length ? inWeek : rest).slice(0, 3), weekLabel = inWeek.length ? "This week" : "Coming up";
   const weekCount = mine.filter(e => e.date <= weekEnd).length;
@@ -1832,13 +1833,13 @@ function homeBody() {
   <header class="hd-greet">${head}</header>
   ${toolsRow}
   ${weekDigest(mine)}
-  ${notifCard()}${hero && hero.date === t ? heroCard(hero) : ""}${todayCards}${afterCard()}${birthdayCard()}
+  ${notifCard()}${hero && spansDay(hero, t) ? heroCard(hero) : ""}${todayCards}${afterCard()}${birthdayCard()}
   ${askBox()}${asksSection()}
-  ${hero && hero.date !== t ? heroCard(hero) : hero || mine.length || todayEvs.length ? "" : `<div class="card empty">${dot("sleepy", 84)}<b>No plans yet</b><p class="muted">Tell Dot what you're thinking, or start one from scratch.</p><div class="btnrow" style="justify-content:center"><button class="btn primary" id="homeTell">Tell Dot</button><button class="btn" data-go="#/new">New plan</button></div></div>`}
+  ${hero && !spansDay(hero, t) ? heroCard(hero) : hero || mine.length || todayEvs.length ? "" : `<div class="card empty">${dot("sleepy", 84)}<b>No plans yet</b><p class="muted">Tell Dot what you're thinking, or start one from scratch.</p><div class="btnrow" style="justify-content:center"><button class="btn primary" id="homeTell">Tell Dot</button><button class="btn" data-go="#/new">New plan</button></div></div>`}
   ${needsYou()}
   ${moneyGlance()}
   ${curateTray(upcoming, false)}
-  ${week.length ? `<div class="hd-h"><h3>${weekLabel}</h3><a class="hd-link" data-go="#/plans">All plans ›</a></div><div class="card hd-list">${week.map(ev => `<a class="hd-ev" data-ev="${ev.id}"><span class="hd-date"><b>${ev.date === t ? "Today" : evDate(ev).toLocaleDateString("en-US", { weekday: "short" })}</b><span>${evDate(ev).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span></span><span class="hd-evt"><b>${esc(ev.emoji || "")} ${esc(ev.title)}</b><span class="muted sm">${ev.kind === "trip" && ev.endDate > ev.date ? `⛵ Trip · ${tripDays(ev).length} days` : esc(fmtTime(ev.time))}${placeName(ev.location) ? " · " + esc(placeName(ev.location)) : ""}</span></span>${hdFaces(ev)}</a>`).join("")}</div>` : ""}
+  ${week.length ? `<div class="hd-h"><h3>${weekLabel}</h3><a class="hd-link" data-go="#/plans">All plans ›</a></div><div class="card hd-list">${week.map(ev => `<a class="hd-ev" data-ev="${ev.id}"><span class="hd-date"><b>${spansDay(ev, t) ? "Today" : evDate(ev).toLocaleDateString("en-US", { weekday: "short" })}</b><span>${evDate(ev).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span></span><span class="hd-evt"><b>${esc(ev.emoji || "")} ${esc(ev.title)}</b><span class="muted sm">${isTripEv(ev) ? (spansDay(ev, t) ? `⛵ Day ${tripDayN(ev, t)} of ${tripLen(ev)}` : `⛵ Trip · ${tripLen(ev)} days`) : esc(fmtTime(ev.time))}${placeName(ev.location) ? " · " + esc(placeName(ev.location)) : ""}</span></span>${hdFaces(ev)}</a>`).join("")}</div>` : ""}
   ${memoriesStrip()}${yearCard()}
   ${latestList()}
   ${crewsRow()}`;
@@ -2051,6 +2052,12 @@ function liveWindow(ev) {
   let end = ev.endTime ? new Date(y, m - 1, d, ...ev.endTime.split(":").map(Number)).getTime() : start + 4 * 3600e3;
   if (end <= start) end += 24 * 3600e3;
   const now = Date.now(), H = 3600e3;
+  if (isTripEv(ev)) {
+    // The first day keeps the usual arrivals window; after that the trip is "during" until its last day ends.
+    const [ly, lm, ld] = evLast(ev).split("-").map(Number), lastEnd = new Date(ly, lm - 1, ld, 23, 59).getTime();
+    const phase = now < start - 3 * H ? null : now < start ? "soon" : now <= end ? "now" : now <= lastEnd ? "during" : now <= lastEnd + 20 * H ? "after" : null;
+    return { start, end: lastEnd, phase };
+  }
   const phase = now < start - 3 * H ? null : now < start ? "soon" : now <= end ? "now" : now <= end + 20 * H ? "after" : null;
   return { start, end, phase };
 }
@@ -2115,7 +2122,7 @@ function afterCard() {
   const evening = parseInt((ev.time || "12:00").split(":")[0], 10) >= 17;
   const owe = [...S.expenses.values()].filter(x => x.eventId === ev.id && x.paidBy !== me && !(x.paid || {})[me]).reduce((n, x) => n + (x.shares ? (x.shares[me] || 0) : ((x.split || []).includes(me) ? Math.round(x.amountCents / x.split.length) : 0)), 0);
   return `<div class="card lv-after">
-    <div class="lv-after-grid">${coral("party", 40)}<div class="lv-after-text"><b>${evening ? "Last night was a good one!" : "That was a good one!"}</b><p>Add your photos from ${esc(ev.title)}.${others.length ? ` ${esc(andNames(others.map(u => first(nameOf(u)))))} already added ${pics.length}.` : ""}</p></div><button type="button" class="today-x lv-after-x" data-hide-after="${esc(ev.id)}" aria-label="Hide this">✕</button></div>
+    <div class="lv-after-grid">${coral("party", 40)}<div class="lv-after-text"><b>${isTripEv(ev) ? "What a trip!" : evening ? "Last night was a good one!" : "That was a good one!"}</b><p>Add your photos from ${esc(ev.title)}.${others.length ? ` ${esc(andNames(others.map(u => first(nameOf(u)))))} already added ${pics.length}.` : ""}</p></div><button type="button" class="today-x lv-after-x" data-hide-after="${esc(ev.id)}" aria-label="Hide this">✕</button></div>
     ${pics.length ? `<div class="hd-scroll hd-mems lv-after-pics">${pics.slice(0, 6).map(p => `<img src="${esc(p.img)}" data-hdmem="${esc(ev.id)}|${esc(p.id)}" alt="" loading="lazy">`).join("")}</div>` : ""}
     ${(v => v && !((ev.spotVotes || {})[me] || {})[v.key] ? `<div class="lv-after-how"><span class="sm"><b>How was ${esc(v.name)}?</b> <span class="muted">A tap helps Dot pick for this crew.</span></span><span class="btnrow" style="gap:6px"><button type="button" class="btn small" data-spot="${esc(ev.id)}|${esc(v.key)}|1">👍 Go again</button><button type="button" class="btn small" data-spot="${esc(ev.id)}|${esc(v.key)}|-1">👎 Not for us</button></span></div>` : "")(bookableStops(ev)[0])}
     <div class="lv-after-btns">${owe ? `<a class="btn ghost small" data-go="#/money?to=settleCard">Settle up ${fmt$(owe)}</a>` : `<a class="btn ghost small" data-go="#/e/${esc(ev.id)}?to=wall">Say thanks</a>`}<a class="btn primary small" data-go="#/e/${esc(ev.id)}?to=photosCard">Add photos</a></div></div>`;
@@ -2235,16 +2242,16 @@ function wireAsks() {
 function heroCard(ev) {
   const th = themeOf(ev.theme, ev.customTheme), myR = (ev.rsvps || {})[myUid()], tf = tileFaces(ev);
   const pill = myR ? `<span class="you-pill ${myR}">${{ going: "You're going", maybe: "Maybe", no: "Can't go", waitlist: "Waitlisted", pending: "Pending" }[myR] || ""}</span>` : (ev.invitedUids || []).includes(myUid()) && ev.hostId !== myUid() ? `<span class="you-pill rsvp">RSVP</span>` : "";
-  const today = ev.date === todayStr();
+  const t = todayStr(), today = spansDay(ev, t), trip = isTripEv(ev);
   return `<a class="hd-hero t-${esc(th.id)} ${ev.cover ? "has-cover" : ""} ${today ? "today" : ""}" data-ev="${ev.id}" style="--th-accent:${esc(th.accent)};--th-ink:${esc(th.ink)};--th-on-accent:${esc(th.onAccent)}">
     ${ev.cover ? `<img class="cover-img" src="${esc(ev.cover)}" alt="">` : `<div class="ev-card-bg"></div>`}
-    <div class="hd-hero-top">${today ? `<span class="hd-chip today">${dotHat(22)} Today${ev.time ? " · " + esc(fmtTime(ev.time)) : ""}</span>` : `<span class="hd-chip">Up next · ${inDaysWord(ev)}</span>`}${pill}</div>
-    <div class="hd-hero-body"><div class="hd-emoji">${esc(ev.emoji || "📍")}</div><h2>${esc(ev.title)}</h2><div class="hd-sub">${esc(fmtWhen(ev))}${placeName(ev.location) ? " · " + esc(placeName(ev.location)) : ""}</div>
+    <div class="hd-hero-top">${today ? `<span class="hd-chip today">${dotHat(22)} Today${trip ? ` · Day ${tripDayN(ev, t)} of ${tripLen(ev)}` : ev.time ? " · " + esc(fmtTime(ev.time)) : ""}</span>` : `<span class="hd-chip">Up next · ${inDaysWord(ev)}${trip ? ` · ${tripLen(ev)} days` : ""}</span>`}${pill}</div>
+    <div class="hd-hero-body"><div class="hd-emoji">${esc(ev.emoji || "📍")}</div><h2>${esc(ev.title)}</h2><div class="hd-sub">${today && trip ? esc(tripTodayLine(ev, t)) : esc(fmtWhen(ev)) + (placeName(ev.location) ? " · " + esc(placeName(ev.location)) : "")}</div>
       <div class="hd-row"><span class="hd-faces">${tf.faces}</span><span class="hd-going">${esc(tf.label)}</span><span class="btn primary small">Open</span></div></div></a>`;
 }
 function needsYou() {
   const me = myUid(), t = todayStr(), items = [];
-  [...S.events.values()].filter(e => e.date >= t && (e.invitedUids || []).includes(me) && e.hostId !== me && !(e.rsvps || {})[me]).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 3)
+  [...S.events.values()].filter(e => evLast(e) >= t && (e.invitedUids || []).includes(me) && e.hostId !== me && !(e.rsvps || {})[me]).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 3)
     .forEach(e => items.push({ ic: e.emoji || "📅", t: `RSVP to ${e.title}`, s: `${(e.invitedUids || []).length} invited · ${evDate(e).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`, cta: "Reply", go: `#/e/${e.id}?to=rsvpCard` }));
   [...(S.splits || new Map()).values()].filter(x => x.status === "open" && (x.uids || []).includes(me) && !(x.done || {})[me]).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 2)
     .forEach(x => { const total = (x.items || []).reduce((n, i) => n + (i.cents || 0), 0) + (x.tax || 0) + (x.fees || 0) + (x.tip || 0);
@@ -2292,8 +2299,8 @@ function wireHomeDash() {
 function plansBody() {
   const all = [...myEvents(), ...unjoinedEvents()], evs = all.filter(e => !declinedByMe(e));
   const t = todayStr();
-  let upcoming = evs.filter(e => e.date >= t).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
-  let past = evs.filter(e => e.date < t).sort((a, b) => b.date.localeCompare(a.date));
+  let upcoming = evs.filter(e => evLast(e) >= t).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
+  let past = evs.filter(e => evLast(e) < t).sort((a, b) => b.date.localeCompare(a.date));
   let declined = all.filter(declinedByMe).sort((a, b) => b.date.localeCompare(a.date));
   if (homeFilter !== "all") { const f = homeFilter === "none" ? e => !e.groupId && ![...S.groups.values()].some(g => evInGroup(e, g)) : e => evInGroup(e, S.groups.get(homeFilter)); upcoming = upcoming.filter(f); past = past.filter(f); }
 
@@ -2326,7 +2333,7 @@ function eventCard(ev) {
   const rsvpDot = myR ? `<span class="you-pill ${myR}">${{ going: "You're going", maybe: "Maybe", no: "Can't go", waitlist: "Waitlisted", pending: "Pending" }[myR] || ""}</span>` : "";
   const dimCls = myR === "maybe" ? " maybe" : myR === "no" ? " declined" : "";
   const trip = ev.kind === "trip" && ev.endDate && ev.endDate > ev.date, nDays = trip ? tripDays(ev).length : 0, e = trip ? evDate({ date: ev.endDate }) : null;
-  const pills = `${isNewEvent(ev) ? `<span class="new-pill">New</span>` : ""}${trip ? `<span class="trip-pill">⛵ Trip · ${nDays} days</span>` : ""}${rsvpDot}`;
+  const pills = `${isNewEvent(ev) ? `<span class="new-pill">New</span>` : ""}${trip ? `<span class="trip-pill">⛵ ${spansDay(ev, todayStr()) ? `Day ${tripDayN(ev, todayStr())} of ${nDays}` : `Trip · ${nDays} days`}</span>` : ""}${rsvpDot}`;
   return `
   <a class="ev-card t-${esc(th.id)} ${ev.cover ? "has-cover" : ""} ${ev._unjoined ? "unjoined" : ""}${dimCls}" data-ev="${ev.id}" style="--th-accent:${esc(th.accent)};--th-ink:${esc(th.ink)};--th-on-accent:${esc(th.onAccent)}">
     ${ev.cover ? `<img class="cover-img" src="${esc(ev.cover)}" alt="">` : `<div class="ev-card-bg"></div>`}
@@ -2477,8 +2484,8 @@ function groupPageBody(gid) {
     <button class="btn" data-crewpicks="${esc(g.id)}">✨ Picks for this crew</button>
   </div>
   ${(() => { const t = todayStr(); const evs = myEvents().filter(e => evInGroup(e, g));
-    const up = evs.filter(e => e.date >= t).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
-    const past = evs.filter(e => e.date < t).sort((a, b) => b.date.localeCompare(a.date));
+    const up = evs.filter(e => evLast(e) >= t).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
+    const past = evs.filter(e => evLast(e) < t).sort((a, b) => b.date.localeCompare(a.date));
     return `<div class="section-head" style="margin-top:22px"><h2>Plans</h2>${evs.length ? `<button class="btn small" data-homefilter="${g.id}">Open in Plans</button>` : ""}</div>
     <div class="card">${up.length ? up.map(planRow).join("") : `<p class="muted" style="padding:14px 16px;margin:0">Nothing planned yet. Tap “Plan for this group” to start one.</p>`}</div>
     ${past.length ? `<details class="adv" style="margin-top:8px"><summary>${past.length} past</summary><div class="card" style="margin-top:8px">${past.slice(0, 20).map(planRow).join("")}</div></details>` : ""}`; })()}
@@ -2879,7 +2886,7 @@ async function leaveGroup(g) {
 const compose = { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji",
   title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false,
   questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "" };
-function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", endDate: "", stay: null, editId: null, repeat: "", stops: [], _restored: false, _fromDraft: false, _plan: null, _draftId: null, plusOn: null, plusMax: 0, bring: [], bringOn: true, carOn: true, drive: false, seats: 3 }); clearTimeout(draftTimer); }
+function resetCompose() { Object.assign(compose, { theme: DEFAULT_THEME, customTheme: null, emoji: "🎉", cover: null, coverTab: "emoji", title: "", date: "", time: "", end: "", where: "", food: "", notes: "", cap: "", approval: false, questions: [], invitees: new Set(), phoneInvitees: [], cohosts: new Set(), groupId: "", kind: "event", endDate: "", stay: null, editId: null, repeat: "", stops: [], _dupDays: 0, _restored: false, _fromDraft: false, _plan: null, _draftId: null, plusOn: null, plusMax: 0, bring: [], bringOn: true, carOn: true, drive: false, seats: 3 }); clearTimeout(draftTimer); }
 // ---- "Let me plan it": say the plan, Dot drafts it, you review it in the composer. Nothing is created or sent until you tap Create.
 function planContext(text, mode, ctx) {
   const d = new Date(), pad = n => String(n).padStart(2, "0");
@@ -3556,12 +3563,66 @@ function wireRepeat(p, onChange) {
 const STOP_CHIPS = [["🍽️", "Dinner"], ["🍸", "Drinks"], ["🎟️", "Show"], ["🎳", "Activity"], ["🍦", "Dessert"], ["✏️", ""]];   // "" = Custom
 const MEETING_CHIPS = [["📋", "Session"], ["🗣️", "Discussion"], ["☕", "Break"], ["🍽️", "Lunch"], ["🤝", "Wrap-up"], ["✏️", ""]];   // "" = Custom: a blank item to name yourself
 const isMeetingCtx = ctx => (ctx.h.kind || "") === "meeting";
+const isTripCtx = ctx => (ctx.h.kind || "") === "trip";
+const ctxDays = ctx => { const d0 = ctx.h.date || todayStr(), d1 = ctx.h.endDate && ctx.h.endDate > d0 ? ctx.h.endDate : d0; return tripDays({ date: d0, endDate: d1 }); };
 const STOP_EMOJIS = ["🍽️", "🍔", "🌮", "🍕", "🍣", "🍸", "🍻", "🍷", "☕", "🎟️", "🎬", "🎤", "🎳", "⚾", "🏈", "🎮", "🛍️", "🌳", "🏖️", "🍦", "🎂", "🎉", "🚗", "📍"];
 const stopMins = t => { if (!/^\d{2}:\d{2}$/.test(t || "")) return 99999; const [h, m] = t.split(":").map(Number); return (h < 5 ? h + 24 : h) * 60 + m; };   // 12:30 AM sorts after 10 PM
 // Timed stops sort among themselves; a stop with no time yet stays where it is.
 const sortStops = arr => { const slots = arr.map((x, i) => stopMins(x.time) < 99999 ? i : -1).filter(i => i >= 0); const timed = slots.map(i => arr[i]).map((x, k) => [x, k]).sort((a, b) => (stopMins(a[0].time) - stopMins(b[0].time)) || (a[1] - b[1])).map(p => p[0]); const out = arr.slice(); slots.forEach((i, k) => { out[i] = timed[k]; }); return out; };
-const cleanStops = arr => (Array.isArray(arr) ? arr : []).slice(0, 24).map(x => ({ time: /^\d{2}:\d{2}$/.test((x && x.time) || "") ? x.time : "", emoji: String((x && x.emoji) || "📍").slice(0, 4), name: String((x && x.name) || "").trim().slice(0, 60), place: String((x && x.place) || "").trim().slice(0, 120), ...((x && x.note) ? { note: String(x.note).trim().slice(0, 160) } : {}), ...(/^\d{4}-\d{2}-\d{2}$/.test((x && x.day) || "") ? { day: x.day } : {}) })).filter(x => x.name || x.place);
-const evStops = ev => { const st = cleanStops(ev && ev.stops); return st.length >= 2 ? sortStops(st) : []; };
+const cleanStops = arr => (Array.isArray(arr) ? arr : []).slice(0, 60).map(x => ({ time: /^\d{2}:\d{2}$/.test((x && x.time) || "") ? x.time : "", emoji: String((x && x.emoji) || "📍").slice(0, 4), name: String((x && x.name) || "").trim().slice(0, 60), place: String((x && x.place) || "").trim().slice(0, 120), ...((x && x.note) ? { note: String(x.note).trim().slice(0, 200) } : {}), ...(/^\d{4}-\d{2}-\d{2}$/.test((x && x.day) || "") ? { day: x.day } : {}), ...(x && TRIP_KINDS[x.kind] ? { kind: x.kind } : {}), ...((x && x.conf) ? { conf: String(x.conf).trim().slice(0, 40) } : {}) })).filter(x => x.name || x.place);
+// A night out needs two stops before it reads as a timeline; a trip's itinerary starts with one. Trip stops come
+// back in day order, then time order, each knowing its day and its index in the stored array (for edits).
+const evStops = ev => { const st = cleanStops(ev && ev.stops); if (isTripEv(ev)) return tripStops(ev, st); return st.length >= 2 ? sortStops(st) : []; };
+// ---- Trips: a plan that spans days. The LAST day decides upcoming vs. past; every stop carries the day it happens.
+const evLast = ev => (ev && ev.endDate && ev.date && ev.endDate > ev.date) ? ev.endDate : ((ev && ev.date) || "");
+const isTripEv = ev => !!ev && (ev.kind === "trip" || !!(ev.endDate && ev.date && ev.endDate > ev.date));
+const spansDay = (ev, d) => !!(ev && ev.date) && ev.date <= d && d <= evLast(ev);
+const ymdDiff = (a, b) => Math.round((evDate({ date: b }) - evDate({ date: a })) / 864e5);
+const tripLen = ev => ymdDiff(ev.date, evLast(ev)) + 1;
+const tripDayN = (ev, d) => ymdDiff(ev.date, d) + 1;
+// What a stop is, on a trip. Travel legs make up Getting there; venues (a dinner, an excursion) are the only
+// stops Book it offers to reserve; ports, beaches, and check-ins are never looked up as restaurants.
+const TRIP_KINDS = { flight: ["✈️", "Flight"], boarding: ["🚢", "Boarding"], port: ["⚓", "Port day"], checkin: ["🏨", "Check-in"], checkout: ["🧳", "Check-out"], meal: ["🍽️", "Dinner"], excursion: ["🎟️", "Excursion"], beach: ["🏖️", "Beach"], ride: ["🚕", "Ride"], drive: ["🚗", "Drive"], train: ["🚆", "Train"], ferry: ["⛴️", "Ferry"], activity: ["🎳", "Activity"], other: ["📍", "Custom"] };
+const TRIP_CHIPS = [["✈️", "Flight", "flight"], ["🚢", "Boarding", "boarding"], ["🏨", "Check-in", "checkin"], ["🍽️", "Dinner", "meal"], ["🏖️", "Beach", "beach"], ["🎟️", "Excursion", "excursion"], ["✏️", "", "other"]];
+const TRAVEL_KINDS = ["flight", "boarding", "ride", "drive", "train", "ferry"], VENUE_KINDS = ["meal", "excursion", "activity"];
+const TRIP_EMOJIS = ["🧳", "✈️", "🚢", "🏝️", "🏖️", "🏔️", "🏕️", "🎿", "🌴", "🗺️", "🚗", "🏨", "🎢", "🎒", "🌅", "🥂"];
+// A stop's day, clamped to the trip (the dates can be edited after stops were added).
+const stopDay = (x, ev) => { const d = x.day || ev.date, last = evLast(ev); return d < ev.date ? ev.date : d > last ? last : d; };
+function tripStops(ev, cleaned) {
+  const st = (cleaned || cleanStops(ev.stops)).map((x, i) => ({ ...x, day: stopDay(x, ev), _i: i }));
+  st.sort((a, b) => a.day.localeCompare(b.day) || (stopMins(a.time) - stopMins(b.time)) || (a._i - b._i));
+  // Where to look a venue up: its own place, else somewhere else that day (a port, an address), else where
+  // everyone's staying. Never the person's home town, which is how "Miami" once matched a restaurant in Frisco.
+  const stayAddr = (ev.stay && ev.stay.address) || "";
+  for (const x of st) {
+    if (x.place) { x.near = x.place; continue; }
+    const same = st.filter(y => y.day === x.day && y !== x), p = same.find(y => y.place && !TRAVEL_KINDS.includes(y.kind)), c = same.find(y => (y.kind === "port" || !y.kind) && !y.place && y.name);
+    x.near = p ? p.place : c ? c.name : stayAddr;
+  }
+  return st;
+}
+const tripStopsOn = (ev, d) => evStops(ev).filter(x => x.day === d);
+// "Miami → Puerto Plata → Bimini": the distinct places in day order, for the hero line.
+function tripRoute(ev) {
+  const skip = [...TRAVEL_KINDS, "checkin", "checkout", "meal"], out = [];
+  for (const x of evStops(ev)) { if (skip.includes(x.kind)) continue; const p = placeName(x.place || x.name); if (p && !out.includes(p)) out.push(p); }
+  return out.slice(0, 5);
+}
+// What one day of a running trip looks like: "Wednesday in Puerto Plata · 9:00 AM Catamaran to Cayo Arena".
+function tripTodayLine(ev, d, brief) {
+  d = d || todayStr(); const st = tripStopsOn(ev, d), anchor = st.find(x => x.kind === "port") || st.find(x => x.place && !TRAVEL_KINDS.includes(x.kind)) || st.find(x => !x.kind && !x.place && x.name) || null;
+  const where = !anchor ? "" : anchor.kind === "port" ? (anchor.name || placeName(anchor.place)) : (placeName(anchor.place) || anchor.name);
+  const bits = brief ? [] : st.filter(x => !(x === anchor && !x.time && !x.place)).slice(0, 2).map(x => (x.time ? fmtTime(x.time) + " " : "") + (x.name || placeName(x.place)));
+  return `${evDate({ date: d }).toLocaleDateString("en-US", { weekday: "long" })}${where ? " in " + where : ""}${bits.length ? " · " + bits.join(" · ") : ""}`;
+}
+const tripWhereLine = ev => { const r = tripRoute(ev), st = ev.stay || {}; return r.length >= 2 ? "🗺️ " + r.join(" → ") : st.name ? stayWords(st).emoji + " " + st.name : r.length === 1 ? "📍 " + r[0] : ""; };
+// Where everyone sleeps: a ship gets cabins and boarding, a hotel check-in, a campsite tents.
+const isShipStay = st => !!st && (st.kind === "ship" || /\b(ship|cruise|voyages?|carnival|royal caribbean|norwegian|celebrity|msc|princess|holland america|disney cruise|virgin|scarlet lady|valiant lady|resilient lady|brilliant lady|seabourn|viking|oceania|cunard|costa)\b/i.test([st.name, st.note].join(" ")));
+function stayWords(st) {
+  st = st || {}; const nm = st.name || "";
+  const k = ["ship", "hotel", "house", "camp"].includes(st.kind) ? st.kind : isShipStay(st) ? "ship" : /\b(hotel|resort|inn|suites?|lodge|marriott|hilton|hyatt|airbnb|vrbo|motel)\b/i.test(nm) ? "hotel" : /\b(camp|campsite|campground|tent|rv)\b/i.test(nm) ? "camp" : "house";
+  return { kind: k, emoji: { ship: "🚢", hotel: "🏨", camp: "🏕️", house: "🏡" }[k], title: { ship: "The ship", hotel: "The hotel", camp: "The campsite", house: "Staying" }[k], room: k === "ship" ? "cabin" : k === "camp" ? "tent" : "room", inLbl: k === "ship" ? "boarding" : "check-in", outLbl: k === "ship" ? "off the ship by" : "check-out" };
+}
 const stopsText = ev => evStops(ev).map(x => `${x.time ? fmtTime(x.time) + " " : ""}${x.name || x.place}${x.name && x.place ? " at " + placeLine(x) : ""}`).join("\n");
 // "Three Empires Brewing, Frisco, TX" under "Three Empires Brewing" reads as just "Frisco, TX".
 const placeLine = x => x.name && x.place && x.place.startsWith(x.name + ", ") ? x.place.slice(x.name.length + 2) : x.place;
@@ -3574,21 +3635,33 @@ const stopMapUrl = x => "https://www.google.com/maps/dir/?api=1&destination=" + 
 const composeStopCtx = { get h() { return compose; }, card: "stopsCard", head: "stopsHead", time: "cTime", where: "cWhere", end: "cEnd", endLbl: "cEndLbl", hide: "stops-hide", save: () => saveDraft(), before: () => syncCompose() };
 let stopCtx = composeStopCtx;
 function stopsEditor(ctx = stopCtx) {
-  const st = ctx.h.stops || [];
-  const chips = `<div class="chips stop-chips">${(isMeetingCtx(ctx) ? MEETING_CHIPS : STOP_CHIPS).map(([e, n]) => `<button type="button" class="chip ${n ? "" : "chip-custom"}" data-addstop="${n ? e : "📌"}|${n}">${e} ${n || "Custom"}</button>`).join("")}</div>`;
+  const st = ctx.h.stops || [], trip = isTripCtx(ctx);
+  const chips = `<div class="chips stop-chips">${(isMeetingCtx(ctx) ? MEETING_CHIPS : trip ? TRIP_CHIPS : STOP_CHIPS).map(([e, n, k]) => `<button type="button" class="chip ${n ? "" : "chip-custom"}" data-addstop="${n ? e : "📌"}|${n}|${k || ""}">${e} ${n || "Custom"}</button>`).join("")}</div>`;
+  if (trip) {
+    // A trip's stops are grouped under their day; each row has a day picker. The stored order doesn't matter.
+    if (!st.length) return `<p class="muted sm" style="margin:0 0 10px">Add the first thing on the itinerary: a flight, boarding, check-in, or the first dinner. Every stop gets a day.</p>${chips}`;
+    const days = ctxDays(ctx), clamp = d => !d || d < days[0] ? days[0] : d > days[days.length - 1] ? days[days.length - 1] : d;
+    const rows = st.map((x, i) => [x, i]).sort((a, b) => clamp(a[0].day).localeCompare(clamp(b[0].day)) || (stopMins(a[0].time) - stopMins(b[0].time)) || (a[1] - b[1]));
+    let last = ""; const html = rows.map(([x, i]) => { const d = clamp(x.day), head = d !== last ? `<div class="tl-dayh">${esc(dayLong(d))}</div>` : ""; last = d; return head + stopEditRow(x, i, ctx, days, d); }).join("");
+    return `<div class="tl tl-edit tl-trip">${html}</div><div class="stop-add"><span class="field-label" style="margin:12px 0 6px">Add a stop</span>${chips}</div>`;
+  }
   if (st.length < 2) return `<p class="muted sm" style="margin:0 0 10px">${isMeetingCtx(ctx) ? "More than one part? Add the next item and it becomes an agenda." : "Doing more than one thing? Add the next stop and it becomes a timeline."}</p>${chips}`;
-  return `<div class="tl tl-edit">${st.map((x, i) => `<div class="stop stop-edit" data-si="${i}">
-      <div class="stop-top"><button type="button" class="st-emoji" data-semo="${i}" aria-label="Change emoji">${esc(x.emoji || "📍")}</button>
-      <input class="st-name" data-sf="name" maxlength="60" value="${esc(x.name)}" placeholder="${i === 0 ? (isMeetingCtx(ctx) ? "First item, like Welcome" : "First stop, like Dinner") : isMeetingCtx(ctx) ? "Name this item" : "Then what?"}" aria-label="What">
-      <button type="button" class="st-del" data-sdel="${i}" aria-label="Remove stop">✕</button></div>
-      <div class="stop-bot"><label class="st-f st-f-time"><span>🕒 Time</span><input type="time" class="st-time" data-sf="time" value="${esc(x.time)}"></label>
-      <label class="st-f st-f-place"><span>📍 Where</span><span class="st-place-wrap"><input class="st-place" data-sf="place" maxlength="120" value="${esc(x.place)}" placeholder="Venue or address" autocomplete="off"></span></label></div>
-      ${x.note != null && x.note !== "" ? `<input class="st-note" data-sf="note" maxlength="160" value="${esc(x.note)}" placeholder="A tip for this stop" aria-label="Tip">` : ""}
-      <div class="st-emo-pick hidden" data-epick="${i}">${STOP_EMOJIS.map(e => `<button type="button" data-pe="${e}">${e}</button>`).join("")}</div>
-    </div>`).join("")}</div>
+  return `<div class="tl tl-edit">${st.map((x, i) => stopEditRow(x, i, ctx)).join("")}</div>
     <div class="stop-add"><span class="field-label" style="margin:12px 0 6px">${isMeetingCtx(ctx) ? "Add an item" : "Add a stop"}</span>${chips}</div>`;
 }
-function stopsHead(ctx = stopCtx) { const n = (ctx.h.stops || []).length, m = isMeetingCtx(ctx); return n >= 2 ? `${n} ${m ? "items" : "stops"} · in time order` : m ? "One part, or several" : "One stop, or several"; }
+function stopEditRow(x, i, ctx, days, day) {
+  const trip = !!days;
+  return `<div class="stop stop-edit" data-si="${i}">
+      <div class="stop-top"><button type="button" class="st-emoji" data-semo="${i}" aria-label="Change emoji">${esc(x.emoji || "📍")}</button>
+      <input class="st-name" data-sf="name" maxlength="60" value="${esc(x.name)}" placeholder="${trip ? "Flight to Miami, Board the ship, Dinner…" : i === 0 ? (isMeetingCtx(ctx) ? "First item, like Welcome" : "First stop, like Dinner") : isMeetingCtx(ctx) ? "Name this item" : "Then what?"}" aria-label="What">
+      <button type="button" class="st-del" data-sdel="${i}" aria-label="Remove stop">✕</button></div>
+      <div class="stop-bot">${trip ? `<label class="st-f st-f-day"><span>📅 Day</span><select class="st-day" data-sf="day" aria-label="Day">${days.map(d => `<option value="${d}" ${d === day ? "selected" : ""}>${esc(dayMid(d))}</option>`).join("")}</select></label>` : ""}<label class="st-f st-f-time"><span>🕒 Time</span><input type="time" class="st-time" data-sf="time" value="${esc(x.time)}"></label>
+      <label class="st-f st-f-place"><span>📍 Where</span><span class="st-place-wrap"><input class="st-place" data-sf="place" maxlength="120" value="${esc(x.place)}" placeholder="${trip ? "Airport, port, hotel, or venue" : "Venue or address"}" autocomplete="off"></span></label></div>
+      ${x.note != null && x.note !== "" ? `<input class="st-note" data-sf="note" maxlength="160" value="${esc(x.note)}" placeholder="A tip for this stop" aria-label="Tip">` : ""}
+      <div class="st-emo-pick hidden" data-epick="${i}">${(trip ? STOP_SHEET_EMOJIS : STOP_EMOJIS).map(e => `<button type="button" data-pe="${e}">${e}</button>`).join("")}</div>
+    </div>`;
+}
+function stopsHead(ctx = stopCtx) { const n = (ctx.h.stops || []).length, m = isMeetingCtx(ctx); if (isTripCtx(ctx)) return n ? `${n} stop${n === 1 ? "" : "s"} · by day` : "day by day"; return n >= 2 ? `${n} ${m ? "items" : "stops"} · in time order` : m ? "One part, or several" : "One stop, or several"; }
 function refreshStops() { const c = el(stopCtx.card); if (!c) return; c.innerHTML = stopsEditor(); const h = el(stopCtx.head); if (h) h.textContent = stopsHead(); document.querySelectorAll("." + stopCtx.hide).forEach(n => n.classList.toggle("hidden", (stopCtx.h.stops || []).length >= 2)); if (stopCtx.endLbl && el(stopCtx.endLbl)) el(stopCtx.endLbl).textContent = (stopCtx.h.stops || []).length >= 2 ? "Wraps up" : "End"; wireStops(); }
 // The first stop mirrors Start and Where, so the preview, weather and calendar stay right.
 const lastStopTime = st => st.filter(x => stopMins(x.time) < 99999).reduce((m, x) => !m || stopMins(x.time) > stopMins(m) ? x.time : m, "");
@@ -3606,6 +3679,7 @@ const stopLength = x => { const txt = [x.emoji, x.name, x.place].filter(Boolean)
 const lastStop = st => st.filter(x => stopMins(x.time) < 99999).reduce((m, x) => !m || stopMins(x.time) > stopMins(m.time) ? x : m, null);
 const wrapUpFor = st => { const l = lastStop(st); return l ? addMins(l.time, stopLength(l)) : ""; };
 function mirrorFirstStop() {
+  if (isTripCtx(stopCtx)) return;   // a trip has no Start or Where of its own to mirror
   const H = stopCtx.h, st = H.stops || []; if (st.length < 2) return;
   const ordered = sortStops(st), firstTimed = ordered.find(x => x.time); H.time = (firstTimed && firstTimed.time) || H.time; H.where = ordered[0].place || H.where;
   if (el(stopCtx.time)) el(stopCtx.time).value = H.time; if (el(stopCtx.where)) el(stopCtx.where).value = H.where;
@@ -3616,7 +3690,14 @@ function mirrorFirstStop() {
 function wireStops() {
   const C = stopCtx, H = C.h, root = el(C.card); if (!root) return;
   root.querySelectorAll("[data-addstop]").forEach(b => b.onclick = () => {
-    if (C.before) C.before(); const [emoji, name] = b.dataset.addstop.split("|");
+    if (C.before) C.before(); const [emoji, name, kind] = b.dataset.addstop.split("|");
+    if (isTripCtx(C)) {
+      if ((H.stops || []).length >= 60) return toast("Sixty stops is the most one trip can hold.");
+      const days = ctxDays(C), prev = (H.stops || [])[(H.stops || []).length - 1];
+      H.stops = [...(H.stops || []), { day: prev && days.includes(prev.day) ? prev.day : days[0], time: "", emoji, name, place: "", ...(kind && kind !== "other" ? { kind } : {}) }]; C.save(); refreshStops();
+      const row = [...el(C.card).querySelectorAll(".stop-edit")].find(r => +r.dataset.si === H.stops.length - 1), nm = row && row.querySelector(".st-name"); if (nm) { nm.focus(); if (name) nm.select(); }
+      return;
+    }
     if ((H.stops || []).length < 2) H.stops = [{ time: (el(C.time) || {}).value || H.time || "", emoji: isMeetingCtx(C) ? "📅" : (H.emoji || "📍"), name: "", place: (el(C.where) || {}).value || H.where || "" }];
     if (H.stops.length >= 8) return toast("Eight stops is the most one plan can hold.");
     H.stops.push({ time: "", emoji, name, place: "" }); C.save(); refreshStops();
@@ -3630,14 +3711,15 @@ function wireStops() {
       // the list and would close the picker) once the picker is dismissed with the check.
       if (inp.dataset.sf === "time") {
         inp.onchange = () => { H.stops[i].time = inp.value; mirrorFirstStop(); C.save(); };
-        inp.onblur = () => { H.stops[i].time = inp.value; const sorted = sortStops(H.stops); if (sorted.some((x, k) => x !== H.stops[k])) { H.stops = sorted; mirrorFirstStop(); C.save(); refreshStops(); } };
+        inp.onblur = () => { H.stops[i].time = inp.value; if (isTripCtx(C)) { C.save(); refreshStops(); return; } const sorted = sortStops(H.stops); if (sorted.some((x, k) => x !== H.stops[k])) { H.stops = sorted; mirrorFirstStop(); C.save(); refreshStops(); } };
       }
+      if (inp.dataset.sf === "day") inp.onchange = () => { H.stops[i].day = inp.value; C.save(); refreshStops(); };
     });
     attachPlaces(row.querySelector(".st-place"));
   });
   root.querySelectorAll("[data-sdel]").forEach(b => b.onclick = () => {
     H.stops.splice(+b.dataset.sdel, 1);
-    if (H.stops.length < 2) { const one = H.stops[0]; if (one) { H.time = one.time || H.time; H.where = one.place || H.where; if (el(C.time)) el(C.time).value = H.time; if (el(C.where)) el(C.where).value = H.where; } H.stops = []; }
+    if (!isTripCtx(C) && H.stops.length < 2) { const one = H.stops[0]; if (one) { H.time = one.time || H.time; H.where = one.place || H.where; if (el(C.time)) el(C.time).value = H.time; if (el(C.where)) el(C.where).value = H.where; } H.stops = []; }
     mirrorFirstStop(); C.save(); refreshStops();
   });
   root.querySelectorAll("[data-semo]").forEach(b => b.onclick = () => { const p = root.querySelector(`[data-epick="${b.dataset.semo}"]`); if (p) p.classList.toggle("hidden"); });
@@ -3647,7 +3729,7 @@ function composeBody() {
   restoreDraft(); stopCtx = composeStopCtx;
   const emojis = ["🎉", "🍕", "🌮", "🍻", "🎂", "🎬", "🎮", "🏖️", "🥾", "⚽", "🎲", "🍜", "🎃", "🎄", "🕺", "🔥"];
   const groups = [...S.groups.values()];
-  const th = themeOf(compose.theme, compose.customTheme);
+  const th = themeOf(compose.theme, compose.customTheme), trip = compose.kind === "trip", many = (compose.stops || []).length >= 2;
   return `
   <button class="link-back" data-go="${compose.editId ? "#/e/" + esc(compose.editId) : "#/"}">‹ ${compose.editId ? "Back to the " + (compose.kind === "meeting" ? "meeting" : compose.kind === "trip" ? "trip" : "plan") : "Cancel"}</button>${compose.editId ? `<p class="muted sm" style="margin:4px 0 10px">Editing. Everyone invited stays; add people here and change anything else.</p>` : ""}
   <div class="compose">
@@ -3658,9 +3740,10 @@ function composeBody() {
     </div>
     ${!compose._draftId && (S.drafts || []).length ? `<p class="muted sm" style="margin:-4px 0 10px">You have ${S.drafts.length} saved draft${S.drafts.length === 1 ? "" : "s"} · <a data-go="#/drafts" style="color:var(--accent);font-weight:600">Open Drafts</a></p>` : ""}
     ${compose._fromDraft ? `<p class="muted sm" style="margin:-4px 0 10px">Restored your draft · <a id="discardDraft" style="color:var(--accent);font-weight:600">Discard</a></p>` : ""}
-    ${compose._plan ? planCard() : (window.Blip && !isDemo() && !compose._fromDraft && !compose.title && !compose.editId ? `<button type="button" class="btn tell-dot" id="composeTell">${dot("happy", 26)} Or just tell Dot: “Taco night Friday at 7, invite the crew, bring a side.”</button>` : "")}
+    ${compose._plan ? planCard() : (window.Blip && !isDemo() && !compose._fromDraft && !compose.title && !compose.editId && !trip ? `<button type="button" class="btn tell-dot" id="composeTell">${dot("happy", 26)} Or just tell Dot: “Taco night Friday at 7, invite the crew, bring a side.”</button>` : "")}
+    ${!compose.editId && !compose._plan && compose.kind !== "meeting" ? (trip ? `<button type="button" class="btn tell-dot" id="composeImport">${dot("happy", 26)} Have the itinerary? Import a photo, PDF, or the confirmation email and Dot lays it out by day.</button>` : `<p class="muted sm" style="margin:-4px 0 10px;text-align:center">Have a booking or itinerary? <a id="composeImport" style="color:var(--accent);font-weight:600">Import it</a></p>`) : ""}
     <p class="muted sm draft-status" id="draftStatus" style="margin:-4px 0 10px;min-height:1.4em"></p>
-    ${compose.kind === "meeting" ? `<p class="muted sm" style="margin:-4px 0 12px">A plain calendar entry: title, time, place, who. Everyone gets a calendar invite by email.</p>` : compose.kind === "trip" ? `<p class="muted sm" style="margin:-4px 0 12px">A trip is a plan that spans more than one day. Set the first and last day and where everyone's staying here. Once it's created, the trip page adds a day-by-day plan with stops, rooms to pick, rides, packing, and one running tab for the whole trip.</p>` : ""}
+    ${compose.kind === "meeting" ? `<p class="muted sm" style="margin:-4px 0 12px">A plain calendar entry: title, time, place, who. Everyone gets a calendar invite by email.</p>` : compose.kind === "trip" ? `<p class="muted sm" style="margin:-4px 0 12px">A trip spans days. Set the first and last day and where everyone's staying, then build the itinerary day by day (or import it). The trip page adds rooms to pick, packing, and one tab for the whole trip.</p>` : ""}
     <div class="${compose.kind === "meeting" ? "hidden" : ""}">
     <div class="compose-preview t-${th.id}" id="cPreview" style="--th-accent:${th.accent};--th-ink:${th.ink};--th-on-accent:${th.onAccent};font-family:${th.font},system-ui">
       ${compose.cover ? `<div class="preview-cover"><img src="${compose.cover}" alt=""></div>` : ""}
@@ -3692,31 +3775,32 @@ function composeBody() {
     </div>
 
     <div class="form-card card">
-      <label class="field"><span>${compose.kind === "meeting" ? "Meeting title" : "What's the plan?"}</span><input id="cTitle" maxlength="80" value="${esc(compose.title)}" placeholder="Rooftop taco night"></label>
+      <label class="field"><span>${compose.kind === "meeting" ? "Meeting title" : trip ? "What's the trip?" : "What's the plan?"}</span><input id="cTitle" maxlength="80" value="${esc(compose.title)}" placeholder="${trip ? "Spring break cruise" : "Rooftop taco night"}"></label>
       <div class="two">
-        <label class="field"><span>${compose.kind === "trip" ? "First day" : "Date"}</span><input id="cDate" type="date" value="${compose.date || todayStr()}">${compose.kind !== "meeting" && compose.kind !== "trip" && !compose._plan ? `<button type="button" class="link-btn when-hint" id="composeWhen">Not sure when? Ask first ›</button>` : ""}</label>
-        ${compose.kind === "trip" ? `<label class="field"><span>Last day</span><input id="cEndDate" type="date" value="${compose.endDate || addDays(compose.date || todayStr(), 2)}" min="${compose.date || todayStr()}"></label>` : ""}
-      ${compose.kind === "trip" ? `</div>${(st => `<div class="field-label" style="margin:6px 0 6px">🏡 Where everyone's staying <span class="muted">(optional, you can add it later)</span></div>
-      <label class="field"><span>Place</span><input id="cStayName" maxlength="80" value="${esc(st.name || "")}" placeholder="Cedar Point Cabin"></label>
-      <label class="field"><span>Address</span><input id="cStayAddr" maxlength="160" value="${esc(st.address || "")}" placeholder="1250 Lakeshore Dr, Pottsboro"></label>
-      <div class="two"><label class="field"><span>Check-in</span><input id="cStayIn" maxlength="20" value="${esc(st.checkIn || "")}" placeholder="4 PM"></label><label class="field"><span>Check-out</span><input id="cStayOut" maxlength="20" value="${esc(st.checkOut || "")}" placeholder="11 AM"></label></div>
-      <div class="two"><label class="field"><span>Door or gate code</span><input id="cStayCode" maxlength="20" value="${esc(st.code || "")}"></label><label class="field"><span>Note</span><input id="cStayNote" maxlength="160" value="${esc(st.note || "")}" placeholder="Wifi: lakehouse / sunset24"></label></div>`)(compose.stay || {})}<div class="two" style="margin-top:4px">` : ""}
-        <label class="field stops-hide ${(compose.stops || []).length >= 2 ? "hidden" : ""}"><span>Start</span><input id="cTime" type="time" value="${compose.time}"></label>
+        <label class="field"><span>${trip ? "First day" : "Date"}</span><input id="cDate" type="date" value="${compose.date || todayStr()}">${compose.kind !== "meeting" && !trip && !compose._plan ? `<button type="button" class="link-btn when-hint" id="composeWhen">Not sure when? Ask first ›</button>` : ""}</label>
+        ${trip ? `<label class="field"><span>Last day</span><input id="cEndDate" type="date" value="${compose.endDate || addDays(compose.date || todayStr(), 2)}" min="${compose.date || todayStr()}"></label>` : `<label class="field stops-hide ${many ? "hidden" : ""}"><span>Start</span><input id="cTime" type="time" value="${compose.time}"></label>`}
       </div>
+      ${trip ? `<div class="hidden"><input id="cTime" type="time" value=""><input id="cEnd" type="time" value=""><input id="cCap" type="number" value=""><input id="cWhere" value=""><input id="cFood" value="">${repeatFields("c", compose)}</div>
+      ${(st => `<div class="field-label" style="margin:6px 0 6px">${stayWords(st).emoji} Where everyone's staying <span class="muted">(optional)</span></div>
+      <label class="field"><span>Ship, hotel, or house</span><input id="cStayName" maxlength="80" value="${esc(st.name || "")}" placeholder="Scarlet Lady, Cedar Point Cabin"></label>
+      <label class="field"><span>Address or port</span><input id="cStayAddr" maxlength="160" value="${esc(st.address || "")}" placeholder="PortMiami, Terminal V"></label>
+      <details class="adv" ${st.checkIn || st.checkOut || st.code || st.note ? "open" : ""}><summary>Check-in, codes, and notes</summary>
+      <div class="two" style="margin-top:8px"><label class="field"><span>Check-in or boarding</span><input id="cStayIn" maxlength="20" value="${esc(st.checkIn || "")}" placeholder="1:30 PM"></label><label class="field"><span>Check-out</span><input id="cStayOut" maxlength="20" value="${esc(st.checkOut || "")}" placeholder="10:30 AM"></label></div>
+      <div class="two"><label class="field"><span>Door code or booking #</span><input id="cStayCode" maxlength="20" value="${esc(st.code || "")}"></label><label class="field"><span>Note</span><input id="cStayNote" maxlength="160" value="${esc(st.note || "")}" placeholder="Deck 11 · Wifi: lakehouse / sunset24"></label></div></details>`)(compose.stay || {})}` : `
       <div class="two">
-        <label class="field"><span id="cEndLbl">${(compose.stops || []).length >= 2 ? "Wraps up" : "End"}</span><input id="cEnd" type="time" value="${compose.end}"></label>
+        <label class="field"><span id="cEndLbl">${many ? "Wraps up" : "End"}</span><input id="cEnd" type="time" value="${compose.end}"></label>
         <label class="field"><span>Max spots</span><input id="cCap" type="number" min="1" max="1000" value="${compose.cap}" placeholder="No limit"></label>
       </div>
-      <label class="field stops-hide ${(compose.stops || []).length >= 2 ? "hidden" : ""}"><span>Where</span><input id="cWhere" maxlength="90" value="${esc(compose.where)}" placeholder="Address or vibe"></label>
-      ${compose.kind === "meeting" ? "" : `<label class="field stops-hide ${(compose.stops || []).length >= 2 ? "hidden" : ""}"><span>Food &amp; drinks <span class="muted">(optional)</span></span><input id="cFood" maxlength="120" value="${esc(compose.food || "")}" placeholder="Tacos and margs · BYOB · we'll order pizza"></label>`}
-      <label class="field"><span>The details</span><textarea id="cNotes" maxlength="600" placeholder="Dress code, what to bring, parking…">${esc(compose.notes)}</textarea></label>
-      ${repeatFields("c", compose)}
+      <label class="field stops-hide ${many ? "hidden" : ""}"><span>Where</span><input id="cWhere" maxlength="90" value="${esc(compose.where)}" placeholder="Address or vibe"></label>
+      ${compose.kind === "meeting" ? "" : `<label class="field stops-hide ${many ? "hidden" : ""}"><span>Food &amp; drinks <span class="muted">(optional)</span></span><input id="cFood" maxlength="120" value="${esc(compose.food || "")}" placeholder="Tacos and margs · BYOB · we'll order pizza"></label>`}`}
+      <label class="field"><span>The details</span><textarea id="cNotes" maxlength="600" placeholder="${trip ? "Passports, the dress code for the fancy night, what to pack…" : "Dress code, what to bring, parking…"}">${esc(compose.notes)}</textarea></label>
+      ${trip ? "" : repeatFields("c", compose)}
       <p class="muted sm" style="margin:-4px 0 0">Guests get a calendar invite at their email on file.</p>
     </div>
 
-    <div class="section-head"><h2>${compose.kind === "meeting" ? "Agenda" : "The plan"}</h2><span class="muted sm" id="stopsHead">${stopsHead()}</span></div>
+    <div class="section-head"><h2>${compose.kind === "meeting" ? "Agenda" : trip ? "Itinerary" : "The plan"}</h2><span class="muted sm" id="stopsHead">${stopsHead()}</span></div>
     <div class="form-card card stops-card" id="stopsCard">${stopsEditor()}</div>
-    ${compose.kind === "meeting" ? "" : `<div class="section-head"><h2>Day of</h2><span class="muted sm">what guests coordinate</span></div>
+    ${compose.kind === "meeting" ? "" : `<div class="section-head"><h2>${trip ? "Travel day" : "Day of"}</h2><span class="muted sm">${trip ? "shared things and rides" : "what guests coordinate"}</span></div>
     <div class="form-card card" id="cDayCard">${composeDayInner()}</div>`}
     <div class="section-head"><h2>Who's invited</h2></div>
     <div class="form-card card">
@@ -3760,7 +3844,7 @@ function coverPanel() {
   if (compose.coverTab === "ai") return have + `<div class="ai-row"><input id="aiPrompt" placeholder="e.g. rooftop taco party at sunset"><button type="button" class="btn primary" id="aiGo">Generate</button></div>
     <div class="style-chips" id="aiStyles">${COVER_STYLES.map(([k, l]) => `<button type="button" class="${(compose.coverStyle || "surprise") === k ? "on" : ""}" data-cstyle="${k}">${l}</button>`).join("")}</div>
     <p class="muted sm" style="margin:8px 0 0">Describe your vibe, pick a look, and AI makes a one-of-a-kind cover.</p>`;
-  return have + `<div class="emoji-pick" id="cEmoji">${COVER_EMOJIS.map(e => `<button type="button" class="${e === compose.emoji ? "on" : ""}" data-e="${e}">${e}</button>`).join("")}</div>`;
+  return have + `<div class="emoji-pick" id="cEmoji">${(compose.kind === "trip" ? TRIP_EMOJIS : COVER_EMOJIS).map(e => `<button type="button" class="${e === compose.emoji ? "on" : ""}" data-e="${e}">${e}</button>`).join("")}</div>`;
 }
 const PARTICLE_LABELS = { confetti: "🎊 Confetti", petals: "🌸 Petals", stars: "✨ Stars", bubbles: "🫧 Bubbles", sparkles: "💫 Sparkles", embers: "🔥 Embers", none: "◯ None" };
 function openCustomThemeDialog() {
@@ -3842,6 +3926,7 @@ function openComposeInviteDialog() {
 }
 function syncCompose() {
   compose.title = el("cTitle").value; compose.date = el("cDate").value; compose.time = el("cTime").value; if (el("cEndDate")) compose.endDate = el("cEndDate").value;
+  if (compose._dupDays && compose.date) { compose.endDate = addDays(compose.date, compose._dupDays - 1); if (el("cEndDate")) el("cEndDate").value = compose.endDate; (compose.stops || []).forEach(x => { if (x._off != null) x.day = addDays(compose.date, x._off); }); }
   if (el("cStayName")) compose.stay = { name: el("cStayName").value.trim(), address: el("cStayAddr").value.trim(), checkIn: el("cStayIn").value.trim(), checkOut: el("cStayOut").value.trim(), code: el("cStayCode").value.trim(), note: el("cStayNote").value.trim() };
   compose.end = el("cEnd").value; compose.where = el("cWhere").value; compose.notes = el("cNotes").value; if (el("cFood")) compose.food = el("cFood").value;
   compose.cap = el("cCap").value; if (el("cApproval")) compose.approval = el("cApproval").checked;
@@ -3858,11 +3943,16 @@ function wireCompose() {
   document.querySelectorAll("[data-idea]").forEach(b => b.onclick = () => applyIdea(+b.dataset.idea));
   composeStop = startParticles(el("cCanvas"), compose.theme, compose.customTheme);
   const upd = () => {
-    el("cPvTitle").textContent = el("cTitle").value.trim() || "Your plan";
-    const dv = el("cDate").value, tv = el("cTime").value;
-    el("cPvDate").textContent = dv ? evDate({ date: dv }).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }) + (tv ? " · " + fmtTime(tv) : "") : "Pick a date";
+    el("cPvTitle").textContent = el("cTitle").value.trim() || (compose.kind === "trip" ? "Your trip" : "Your plan");
+    const dv = el("cDate").value, tv = el("cTime").value, ed = el("cEndDate") && el("cEndDate").value, short = d => evDate({ date: d }).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    el("cPvDate").textContent = !dv ? "Pick a date" : ed && ed > dv ? `${short(dv)} to ${short(ed)} · ${ymdDiff(dv, ed) + 1} days` : evDate({ date: dv }).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }) + (tv ? " · " + fmtTime(tv) : "");
   };
-  ["cTitle", "cDate", "cTime", "cEnd", "cWhere", "cNotes", "cCap"].forEach(id => el(id).oninput = () => { if (id === "cEnd") compose._endAuto = false; syncCompose(); upd(); }); upd();
+  ["cTitle", "cDate", "cTime", "cEnd", "cWhere", "cNotes", "cCap", "cEndDate"].forEach(id => { if (!el(id)) return; el(id).oninput = () => {
+    if (id === "cEnd") compose._endAuto = false;
+    if (id === "cEndDate") compose._dupDays = 0;
+    if (id === "cDate" && el("cEndDate")) { const e = el("cEndDate"), d = el("cDate").value; e.min = d; if (d && (!e.value || e.value < d)) e.value = addDays(d, Math.max(1, (compose._dupDays || 3) - 1)); }
+    syncCompose(); upd(); if (compose.kind === "trip" && (id === "cDate" || id === "cEndDate")) refreshStops(); }; }); upd();
+  if (el("composeImport")) el("composeImport").onclick = () => { syncCompose(); importItinerary({}); };
   document.querySelectorAll("#cApproval").forEach(i => i.onchange = syncCompose);
   // Ticking a co-host also puts them on the guest list (unticking leaves them invited; remove them there if needed).
   document.querySelectorAll("input[name=coh]").forEach(i => i.onchange = () => {
@@ -3885,7 +3975,9 @@ function wireCompose() {
   el("createEventBtn").onclick = () => createEvent();
   if (el("saveDraftBtn")) el("saveDraftBtn").onclick = () => saveDraftToAccount();
   wirePlusFields("c"); wireComposeDay();
-  document.querySelectorAll("[data-kind]").forEach(b => b.onclick = () => { syncCompose(); compose.kind = b.dataset.kind; render(); });
+  document.querySelectorAll("[data-kind]").forEach(b => b.onclick = () => { syncCompose(); compose.kind = b.dataset.kind;
+    if (compose.kind === "trip") { if (compose.emoji === "🎉" && !compose.cover) compose.emoji = "🧳"; if (!compose.endDate || compose.endDate <= (compose.date || "")) compose.endDate = addDays(compose.date || todayStr(), 2); }
+    render(); });
   if (el("composeWhen")) el("composeWhen").onclick = openWhenAsk;
   if (el("discardDraft")) el("discardDraft").onclick = () => { try { LS.remove("friendlyDraft"); } catch {} resetCompose(); compose._restored = true; render(); };
 }
@@ -3935,17 +4027,20 @@ async function createEvent() {
   const phoneInviteesSnapshot = [...compose.phoneInvitees];
   const cohostUids = [...document.querySelectorAll('input[name=coh]:checked')].map(i => i.value).filter(u => u !== myUid());
   const questions = compose.questions.filter(q => q.q.trim()).map(q => ({ id: q.id, q: q.q.trim(), req: q.req !== false }));
-  const stopsOut = (() => { const st = sortStops(cleanStops(compose.stops)); return st.length >= 2 ? st : []; })();
-  if (stopsOut.length) { const last = lastStopTime(stopsOut), end = el("cEnd").value; if (last && end && stopMins(end) < stopMins(last)) return toast("“Wraps up” is before the last stop. Pick a later time.", null, null, "thinking"); }
+  const trip = compose.kind === "trip", endDateOut = trip && el("cEndDate") && el("cEndDate").value > date ? el("cEndDate").value : "";
+  if (trip && !endDateOut) return toast("Pick the last day of the trip (after the first).", null, null, "thinking");
+  const stopsOut = (() => { const st = cleanStops(compose.stops); if (trip) return tripStops({ date, endDate: endDateOut, stops: st }, st).map(({ _i, near, ...x }) => x); const s2 = sortStops(st); return s2.length >= 2 ? s2 : []; })();
+  if (stopsOut.length && !trip) { const last = lastStopTime(stopsOut), end = el("cEnd").value; if (last && end && stopMins(end) < stopMins(last)) return toast("“Wraps up” is before the last stop. Pick a later time.", null, null, "thinking"); }
+  const stayIn = trip && el("cStayName") && el("cStayName").value.trim() ? { name: el("cStayName").value.trim(), address: el("cStayAddr").value.trim(), checkIn: el("cStayIn").value.trim(), checkOut: el("cStayOut").value.trim(), code: el("cStayCode").value.trim(), note: el("cStayNote").value.trim(), kind: (compose.stay || {}).kind || "" } : null;
   const id = newId();
   const ev = {
     hostId: myUid(), hostName: S.profile.name, cohostUids, groupId, invitedUids,
     // Guest names travel with the event so link-joined guests can see who's who.
     names: Object.fromEntries(invitedUids.map(u => [u, u === myUid() ? S.profile.name : nameOf(u)])),
     title, emoji: compose.emoji, theme: compose.theme, customTheme: compose.theme === "custom" ? compose.customTheme : null, cover: compose.cover || "",
-    date, time: stopsOut.length ? ((stopsOut.find(x => x.time) || {}).time || el("cTime").value || "") : (el("cTime").value || ""), endTime: el("cEnd").value || "",
-    location: stopsOut.length ? (stopsOut[0].place || el("cWhere").value.trim()) : el("cWhere").value.trim(), stops: stopsOut, food: stopsOut.length ? "" : el("cFood") ? el("cFood").value.trim() : "", notes: el("cNotes").value.trim(),
-    capacity: Number(el("cCap").value) || 0, approval: !!el("cApproval").checked,
+    date, time: trip ? ((stopsOut.find(x => x.day === date && x.time) || {}).time || "") : stopsOut.length ? ((stopsOut.find(x => x.time) || {}).time || el("cTime").value || "") : (el("cTime").value || ""), endTime: trip ? "" : el("cEnd").value || "",
+    location: trip ? ((stayIn && (stayIn.address || stayIn.name)) || (stopsOut.find(x => x.place) || {}).place || "") : stopsOut.length ? (stopsOut[0].place || el("cWhere").value.trim()) : el("cWhere").value.trim(), stops: stopsOut, food: trip || stopsOut.length ? "" : el("cFood") ? el("cFood").value.trim() : "", notes: el("cNotes").value.trim(),
+    capacity: trip ? 0 : Number(el("cCap").value) || 0, approval: !!el("cApproval").checked,
     tz: (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { return ""; } })(),
     allowPlus: !!(el("cPlusOn") && el("cPlusOn").checked), plusMax: plusMaxVal("c"),
     ...(compose.kind === "meeting" ? {} : { dayBring: compose.bringOn !== false, dayCarpool: compose.carOn !== false }),
@@ -3953,8 +4048,8 @@ async function createEvent() {
     // The event's own unguessable id is the access token behind the "add people" flow
     // (anyone with the link can open + join), so it's always on now.
     openLink: true,
-    kind: compose.kind === "meeting" ? "meeting" : compose.kind === "trip" ? "trip" : "event", endDate: compose.kind === "trip" && el("cEndDate") && el("cEndDate").value > (el("cDate").value || "") ? el("cEndDate").value : "",
-    ...(compose.kind === "trip" && el("cStayName") && el("cStayName").value.trim() ? { stay: { name: el("cStayName").value.trim(), address: el("cStayAddr").value.trim(), checkIn: el("cStayIn").value.trim(), checkOut: el("cStayOut").value.trim(), code: el("cStayCode").value.trim(), note: el("cStayNote").value.trim() } } : {}), ...readRepeat("c"),
+    kind: compose.kind === "meeting" ? "meeting" : trip ? "trip" : "event", endDate: endDateOut,
+    ...(stayIn ? { stay: stayIn } : {}), ...readRepeat("c"),
     invitedPhones, invitedPhoneNames, guestEmails: [], sequence: 0,
     createdAt: Date.now()
   };
@@ -4013,6 +4108,7 @@ function cleanupEvent() { S._evShown = null; S.evSubs.forEach(fn => fn()); S.evS
 // The plan on the event page: a timeline of stops. On the day itself, the stop underway is marked Now,
 // earlier ones fade, and the next one is marked Up next; every stop with a place opens directions.
 function planCardHtml(ev, plain) {
+  if (isTripEv(ev)) return plain ? tripPlainHtml(ev) : "";
   const st = evStops(ev); if (!st.length) return "";
   const meeting = ev.kind === "meeting";
   // Minutes since midnight of the event's own date, so 12:30 AM the night before isn't mistaken for the late part
@@ -4026,6 +4122,14 @@ function planCardHtml(ev, plain) {
         <span class="stop-txt"><b>${esc(x.name || x.place)}${state === "cur" ? ` <span class="stop-pill now">Now</span>` : state === "next" ? ` <span class="stop-pill">Up next</span>` : ""}</b>${x.name && x.place ? `<small>${esc(placeLine(x))}</small>` : ""}${x.note ? `<small class="stop-note">${esc(x.note)}</small>` : ""}</span>
         ${(x.place || x.name) && state !== "done" ? `<a class="stop-dir" href="${esc(stopMapUrl(x))}" target="_blank" rel="noopener">Directions</a>` : ""}</div>${i < st.length - 1 ? transitionLine(x, st[i + 1]) : ""}`; }).join("")}</div>${(f => f ? `<div class="ride-row">${rideLinks(f, st[0].name || placeName(st[0].place))}</div>` : "")(stopFacts(st[0]))}</div>`;
 }
+// The itinerary as a plain day-by-day list, for the public peek page.
+function tripPlainHtml(ev) {
+  const st = evStops(ev); if (!st.length) return "";
+  let last = "", out = "";
+  for (const x of st) { if (x.day !== last) { last = x.day; out += `<div class="tl-dayh">${esc(evDate({ date: x.day }).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" }))}</div>`; }
+    out += `<div class="stop"><span class="t">${x.time ? esc(fmtTime(x.time)) : ""}</span><span class="e">${esc(x.emoji || "📍")}</span><span class="stop-txt"><b>${esc(x.name || placeName(x.place))}</b>${x.name && x.place ? `<small>${esc(placeLine(x))}</small>` : ""}</span></div>`; }
+  return `<div class="card th-plain plan-card" id="planCard"><div class="glass-head">Itinerary <span>${tripLen(ev)} days</span></div><div class="stops">${out}</div></div>`;
+}
 // The event's money in one place: receipts people are still picking from, the event's expenses with your share,
 // and Add expense. Refreshed in place when expenses or shared receipts change.
 function evMoneyInner(ev) {
@@ -4033,16 +4137,19 @@ function evMoneyInner(ev) {
   const xs = [...S.expenses.values()].filter(x => x.eventId === ev.id).sort((a, b) => b.createdAt - a.createdAt), total = xs.reduce((n, x) => n + (x.amountCents || 0), 0);
   const shareOf = x => x.shares ? (x.shares[me] || 0) : ((x.split || []).includes(me) ? Math.round(x.amountCents / x.split.length) : 0);
   const row = (go, title, sub, amt) => `<button type="button" class="ev-x-row" data-evgo="${esc(go)}"><span class="ev-x-ico">🧾</span><span class="ev-x-main"><b>${esc(title)}</b><span class="muted-th sm">${sub}</span></span><span class="ev-x-amt">${amt}</span></button>`;
-  return `<div class="glass-head">Expenses <span>${total ? fmt$(total) + " spent" : ""}</span></div>
+  const trip = isTripEv(ev), paidOut = xs.filter(x => x.paidBy === me).reduce((n, x) => n + (x.amountCents || 0), 0), paidBack = xs.filter(x => x.paidBy !== me && (x.paid || {})[me]).reduce((n, x) => n + shareOf(x), 0), myShare = xs.reduce((n, x) => n + shareOf(x), 0);
+  return `<div class="glass-head">${trip ? "Money" : "Expenses"} <span>${total ? fmt$(total) + " spent" : ""}</span></div>
+    ${trip ? `<div class="trip-tab three"><div><span class="muted-th sm">Trip total</span><b>${fmt$(total)}</b></div><div><span class="muted-th sm">Your share</span><b>${fmt$(myShare)}</b></div><div><span class="muted-th sm">You've paid</span><b>${fmt$(paidOut + paidBack)}</b></div></div>` : ""}
     ${picks.map(t => { const boss = t.createdBy === me, left = pickLeft(t).length; return row("#/pick/" + t.id, t.desc || "Receipt", boss ? (left ? `${left} line${left === 1 ? "" : "s"} nobody has picked` : "Ready to finish") : (t.done || {})[me] ? "You're done · tap to change" : "<b>Pick what you had</b>", fmt$(splitTotal(t))); }).join("")}
     ${xs.map(x => row("#/x/" + x.id, x.desc || "Expense", (x.paidBy === me ? "You paid" : esc(first(nameOf(x.paidBy))) + " paid") + (x.paidBy !== me && shareOf(x) ? " · your share " + fmt$(shareOf(x)) : ""), fmt$(x.amountCents))).join("")}
-    ${picks.length || xs.length ? "" : `<p class="muted-th sm" style="margin:0 0 10px">Nothing yet. Add what you spent and it splits with the crew, or scan the receipt and let everyone pick their own.</p>`}
-    <button type="button" class="btn-th ev-x-add" data-expense>＋ Add expense</button>`;
+    ${picks.length || xs.length ? "" : `<p class="muted-th sm" style="margin:0 0 10px">${trip ? "Nothing on the tab yet. Add what you spent (the cabins, the excursion, dinner) and it splits with everyone on the trip." : "Nothing yet. Add what you spent and it splits with the crew, or scan the receipt and let everyone pick their own."}</p>`}
+    <div class="btnrow" style="gap:8px;flex-wrap:wrap"><button type="button" class="btn-th ev-x-add" data-expense>＋ Add expense</button>${trip ? `<button type="button" class="btn-th" data-scanx>📷 Scan a receipt</button>` : ""}</div>`;
 }
 function wireEvMoney(ev) {
   const card = el("moneyCard"); if (!card) return;
   card.querySelectorAll("[data-evgo]").forEach(b => b.onclick = () => go(b.dataset.evgo));
   const add = card.querySelector("[data-expense]"); if (add) add.onclick = () => openExpense(ev.id, ev.invitedUids, ev.groupId || null);
+  const scan = card.querySelector("[data-scanx]"); if (scan) scan.onclick = () => scanReceipt(ev.id, null, { desc: "", paidBy: myUid(), people: [] }, ev.groupId);
 }
 function refreshEvMoney() {
   if (S.route.name !== "event") return; const card = el("moneyCard"), ev = S.events.get(S.route.id); if (!card || !ev) return;
@@ -4150,7 +4257,7 @@ function eventInner(ev) {
     <h1 class="ev-title">${esc(ev.title)}</h1>
     <div class="ev-when">${esc(fmtWhen(ev))}</div>
     <div class="ev-count">${countdown(ev)}</div>
-    ${evStops(ev).length ? `<div class="ev-where"><button type="button" class="ev-where-btn" data-jump="planCard">🗺️ ${evStops(ev).length} stops, starting with ${esc(evStops(ev)[0].name || evStops(ev)[0].place)}${evStops(ev)[0].time ? " at " + esc(fmtTime(evStops(ev)[0].time)) : ""}</button></div>` : ev.location ? `<div class="ev-where"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}" target="_blank" rel="noopener" title="Open in Google Maps">📍 ${esc(ev.location)}</a></div>${/zoom|meet\.google|teams|http|online|call/i.test(ev.location) ? "" : `<details class="map-wrap"><summary>Show map</summary><iframe class="map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="https://maps.google.com/maps?q=${encodeURIComponent(ev.location)}&output=embed" title="Map"></iframe></details>`}` : ""}
+    ${isTripEv(ev) ? (w => w ? `<div class="ev-where"><button type="button" class="ev-where-btn" data-jump="tripCard">${esc(w)}</button></div>` : "")(tripWhereLine(ev)) : evStops(ev).length ? `<div class="ev-where"><button type="button" class="ev-where-btn" data-jump="planCard">🗺️ ${evStops(ev).length} stops, starting with ${esc(evStops(ev)[0].name || evStops(ev)[0].place)}${evStops(ev)[0].time ? " at " + esc(fmtTime(evStops(ev)[0].time)) : ""}</button></div>` : ev.location ? `<div class="ev-where"><a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}" target="_blank" rel="noopener" title="Open in Google Maps">📍 ${esc(ev.location)}</a></div>${/zoom|meet\.google|teams|http|online|call/i.test(ev.location) ? "" : `<details class="map-wrap"><summary>Show map</summary><iframe class="map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="https://maps.google.com/maps?q=${encodeURIComponent(ev.location)}&output=embed" title="Map"></iframe></details>`}` : ""}
     ${ev.food && !evStops(ev).length ? `<div class="ev-food">🍽️ ${esc(ev.food)}</div>` : ""}
     <div class="ev-hosts"><span class="ev-hosts-names">Hosted by ${hosts.length > 2 ? `${esc(first(nameOf(hosts[0])))}, ${esc(first(nameOf(hosts[1])))} & ${hosts.length - 2} more` : hosts.map(u => esc(first(nameOf(u)))).join(" & ")}</span>${grp ? `<span class="ev-hosts-dot">·</span><span class="grp-tag">${groupMini(grp)} ${esc(grp.name)}</span>` : ""}</div>
     ${ev.capacity > 0 ? `<div class="ev-cap ${full ? "full" : ""}">${going} / ${ev.capacity} spots${full ? " · full" : ""}</div>` : ""}
@@ -4158,24 +4265,23 @@ function eventInner(ev) {
   </div>
 
   <div class="ev-jumpnav">
-    ${evStops(ev).length ? `<button type="button" class="jump-chip" data-jump="planCard">The plan</button>` : ""}
+    ${isTripEv(ev) ? `<button type="button" class="jump-chip" data-jump="tripCard">Itinerary</button>` : evStops(ev).length ? `<button type="button" class="jump-chip" data-jump="planCard">The plan</button>` : ""}
     <button type="button" class="jump-chip" data-jump="rsvpCard">RSVP</button>
     <button type="button" class="jump-chip" data-jump="guestCard">Guests</button>
-    <button type="button" class="jump-chip" data-jump="dayCard">Day of</button>
+    <button type="button" class="jump-chip" data-jump="dayCard">${isTripEv(ev) ? (spansDay(ev, todayStr()) ? "Today" : "Travel day") : "Day of"}</button>
     <button type="button" class="jump-chip" data-jump="pollsCard">Polls</button>
     <button type="button" class="jump-chip" data-jump="playlistCard">Playlist</button>
     <button type="button" class="jump-chip" data-jump="photosCard">Photos</button>
-    <button type="button" class="jump-chip" data-jump="moneyCard">Expenses</button>
+    <button type="button" class="jump-chip" data-jump="moneyCard">${isTripEv(ev) ? "Money" : "Expenses"}</button>
     <button type="button" class="jump-chip" data-jump="wall">Wall</button>
   </div>
 
-  ${planCardHtml(ev)}
+  ${isTripEv(ev) ? `<div class="ev-card-glass trip-card" id="tripCard">${tripInner(ev)}</div>` : planCardHtml(ev)}
   ${ev.notes ? `<div class="ev-card-glass ev-notes">${esc(ev.notes).replace(/\n/g, "<br>")}</div>` : ""}
 
   <div class="ev-card-glass" id="rsvpCard">${rsvpBtns}</div>
   ${ev.timePoll ? `<div class="ev-card-glass" id="whenCard">${whenInner(ev)}</div>` : ""}
   ${(h => h ? `<div class="ev-card-glass" id="bookCard">${h}</div>` : "")(bookingInner(ev))}
-  ${ev.kind === "trip" ? `<div class="ev-card-glass" id="tripCard">${tripInner(ev)}</div>` : ""}
 
   ${!canSeeGuests(ev) ? `<div class="ev-card-glass" id="guestCard"><div class="glass-head">Guest list <span>${going} going</span></div><p class="muted-th sm" style="margin:0">🔒 RSVP above to see who's coming.</p></div>` : (() => { const gOpen = collapsedOpen("friendlyGuestOpen:" + ev.id, true); return `<div class="ev-card-glass inv-card ${gOpen ? "open" : ""}" id="guestCard">
     <button type="button" class="glass-head inv-toggle" id="guestToggle" aria-expanded="${gOpen}"><span>Guest list <span class="muted-th sm">· ${(ev.invitedUids || []).length + (ev.invitedPhones || []).length} invited</span></span><span class="inv-chev">›</span></button>
@@ -4402,7 +4508,8 @@ function openPhoto(ev, p) {
 document.addEventListener("keydown", e => { if (e.key === "Escape" && el("photoViewer")) closePhoto(); });
 window.addEventListener("hashchange", closePhoto);
 function lightbox(src) { const box = document.createElement("div"); box.className = "lightbox"; box.innerHTML = `<img src="${esc(src)}" alt="">`; box.onclick = () => box.remove(); document.body.appendChild(box); }
-function wallInner(ev, title = "Party wall") {
+function wallInner(ev, title) {
+  title = title || (isTripEv(ev) ? "Trip wall" : "Party wall");
   const all = S.comments.filter(c => !c.kind && visibleContent(c)); const me = myUid();
   if (replyTo && replyTo.ctx !== ev.id) replyTo = null;
   const ids = new Set(all.map(c => c.id));
@@ -4514,8 +4621,10 @@ function dayInner(ev) {
   const items = typed("bring"); const rides = typed("ride");
   // Three clear parts: weather and who's on the way, the bring list, and carpool. The host can turn the
   // bring list or carpool off (ev.dayBring / ev.dayCarpool === false) when making or editing the event.
-  return `<div class="glass-head">Day of <span>${esc(fmtDay(ev))}</span></div>
-    <div class="day-sec"><div class="glass-sub">☀️ Weather &amp; arrivals</div>
+  const t = todayStr(), trip = isTripEv(ev);
+  const head = !trip ? `Day of <span>${esc(fmtDay(ev))}</span>` : spansDay(ev, t) ? `Today <span>Day ${tripDayN(ev, t)} of ${tripLen(ev)} · ${esc(fmtDay({ date: t }))}</span>` : evLast(ev) < t ? `The trip <span>${esc(fmtWhen(ev))}</span>` : `Travel day <span>${esc(fmtDay(ev))}</span>`;
+  return `<div class="glass-head">${head}</div>
+    <div class="day-sec"><div class="glass-sub">${trip && !soon ? "☀️ Weather" : "☀️ Weather &amp; arrivals"}</div>
     <div id="wx" class="muted-th sm" style="margin:0 0 8px">${esc(ev._wx || "")}</div>
     ${bookedLines(ev)}<div id="rainNote">${rainNote(ev)}</div><div class="ride-row" id="dayRide">${dayRideInner(ev)}</div>
     ${statuses.length ? `<div class="chipwrap">${statuses.map(c => `<span class="day-chip">${LIVE_ICON[c.status] || "🚗"} ${esc(first(c.authorName || nameOf(c.authorId)))} is ${lateWord(c)} <i>${ago(c.createdAt)}</i></span>`).join("")}</div>` : ""}
@@ -4609,16 +4718,22 @@ async function geocodePlace(str) {
   return null;
 }
 async function loadWeather(ev) {
-  const box = el("wx"); if (!box || !ev.location || /zoom|meet\.google|teams|http|online|call/i.test(ev.location)) return;
-  const du = daysUntil(ev); if (du < 0 || du > 15) return;
-  const key = "wx2:" + ev.date + ":" + ev.location; let cached = null; try { cached = JSON.parse(LS.get(key) || "null"); } catch {}
+  const box = el("wx"); if (!box) return;
+  const trip = isTripEv(ev), t = todayStr();
+  // On a trip the forecast is for the day you're on (or the first day, before it starts), where that day's stops are.
+  const wxDay = trip && t > ev.date ? (t <= evLast(ev) ? t : evLast(ev)) : ev.date;
+  const online = v => /zoom|meet\.google|teams|http|online|call/i.test(v || "");
+  const places = [...(trip ? tripStopsOn(ev, wxDay).map(x => x.place) : []), ...(trip && ev.stay ? [ev.stay.address] : []), ev.location, ...evStops(ev).map(x => x.place)].filter(p => p && !online(p));
+  if (!places.length) return;
+  const du = daysUntil({ date: wxDay }); if (du < 0 || du > 15) return;
+  const key = "wx2:" + wxDay + ":" + places[0]; let cached = null; try { cached = JSON.parse(LS.get(key) || "null"); } catch {}
   const show = txt => { ev._wx = txt; const b = el("wx"); if (b) b.textContent = txt; const rn = el("rainNote"); if (rn) rn.innerHTML = rainNote(ev); };
   if (cached && Date.now() - cached.at < 36e5) { ev._rain = cached.rain || 0; return show(cached.txt); }
   try {
     // The event's address first; with several stops, any stop that names a city will do.
-    let hit = null; for (const place of [ev.location, ...evStops(ev).map(x => x.place)].filter(Boolean)) { hit = await geocodePlace(place); if (hit) break; }
+    let hit = null; for (const place of places) { hit = await geocodePlace(place); if (hit) break; }
     if (!hit) return;
-    const f = await (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${hit.latitude}&longitude=${hit.longitude}&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&temperature_unit=fahrenheit&timezone=auto&start_date=${ev.date}&end_date=${ev.date}`)).json();
+    const f = await (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${hit.latitude}&longitude=${hit.longitude}&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&temperature_unit=fahrenheit&timezone=auto&start_date=${wxDay}&end_date=${wxDay}`)).json();
     const d = f.daily; if (!d || !d.weather_code) return;
     const rain = d.precipitation_probability_max && d.precipitation_probability_max[0] != null ? +d.precipitation_probability_max[0] : 0; ev._rain = rain;
     const txt = `${WX[d.weather_code[0]] || "🌡"} · ${Math.round(d.temperature_2m_max[0])}° / ${Math.round(d.temperature_2m_min[0])}°${rain ? " · " + rain + "% rain" : ""} · ${hit.name}`;
@@ -4631,7 +4746,7 @@ function eventIcs(ev) {
   const dt = (d, t) => d.replace(/-/g, "") + "T" + (t || "09:00").replace(":", "") + "00";
   const end = () => { if (ev.endTime) return dt(ev.date, ev.endTime); const [h, m] = (ev.time || "09:00").split(":").map(Number); const e = new Date(2000, 0, 1, h + 2, m); return dt(ev.date, String(e.getHours()).padStart(2, "0") + ":" + String(e.getMinutes()).padStart(2, "0")); };
   const escI = v => String(v || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
-  return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Friendly//officialfriendly.com//EN", "BEGIN:VEVENT", "UID:" + ev.id + "@officialfriendly.com", "DTSTAMP:" + new Date().toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z", "DTSTART:" + dt(ev.date, ev.time), "DTEND:" + end(), "SUMMARY:" + escI((ev.emoji ? ev.emoji + " " : "") + ev.title), ev.location ? "LOCATION:" + escI(ev.location) : "", "DESCRIPTION:" + escI((stopsText(ev) ? "The plan:\n" + stopsText(ev) + "\n\n" : "") + (ev.notes ? ev.notes + "\n\n" : "") + "https://officialfriendly.com/#/e/" + ev.id), "END:VEVENT", "END:VCALENDAR"].filter(Boolean).join("\r\n");
+  return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Friendly//officialfriendly.com//EN", "BEGIN:VEVENT", "UID:" + ev.id + "@officialfriendly.com", "DTSTAMP:" + new Date().toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z", ...(isTripEv(ev) ? ["DTSTART;VALUE=DATE:" + ev.date.replace(/-/g, ""), "DTEND;VALUE=DATE:" + addDays(evLast(ev), 1).replace(/-/g, "")] : ["DTSTART:" + dt(ev.date, ev.time), "DTEND:" + end()]), "SUMMARY:" + escI((ev.emoji ? ev.emoji + " " : "") + ev.title), ev.location ? "LOCATION:" + escI(ev.location) : "", "DESCRIPTION:" + escI((stopsText(ev) ? "The plan:\n" + stopsText(ev) + "\n\n" : "") + (ev.notes ? ev.notes + "\n\n" : "") + "https://officialfriendly.com/#/e/" + ev.id), "END:VEVENT", "END:VCALENDAR"].filter(Boolean).join("\r\n");
 }
 function openCalendarDialog(ev) {
   const dt = (d, t) => d.replace(/-/g, "") + "T" + (t || "09:00").replace(":", "") + "00";
@@ -4674,7 +4789,7 @@ async function factsFor(name, near, opts = {}) {
   })();
   factsPending.set(k, job); return job;
 }
-const nearOf = x => (x && x.place) || (S.profile && S.profile.city) || "";
+const nearOf = x => (x && (x.near || x.place)) || (S.profile && S.profile.city) || "";
 const stopFacts = x => x ? factsCached(x.name || x.place, nearOf(x)) : null;
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 // "Saturday: 11:00 AM – 11:00 PM" → "11 AM to 11 PM" for the day in question.
@@ -4721,13 +4836,15 @@ const goingTotal = ev => (ev.invitedUids || []).reduce((n, u) => (ev.rsvps || {}
 const ticketLink = ev => ev.ticketUrl || ((/Tickets: (https?:\/\/\S+)/.exec(ev.notes || "") || [])[1] || "");
 // Places on the plan worth booking: named stops (not someone's house), or the plan's single venue.
 function bookableStops(ev) {
+  if (isTripEv(ev)) return evStops(ev).filter(x => VENUE_KINDS.includes(x.kind) && (x.place || (x.name && !/^(dinner|lunch|brunch|breakfast|drinks?|supper|snacks?)\b/i.test(x.name))) && !homey(x.name) && x.near)
+    .map(x => ({ key: bkey(x) + "-" + x.day.slice(5), name: x.name || placeName(x.place), place: x.near, time: x.time || "", emoji: x.emoji || "📍", kind: x.kind, day: x.day }));
   const st = evStops(ev).filter(x => (x.name || x.place) && !homey(x.name));
   if (st.length) return st.map(x => ({ key: bkey(x), name: x.name || placeName(x.place), place: nearOf(x), time: x.time || "", emoji: x.emoji || "📍" }));
   if (ev.location && !homey(ev.location) && !/zoom|meet\.google|teams|http|online|call/i.test(ev.location)) return [{ key: "main", name: placeName(ev.location), place: ev.location, time: ev.time || "", emoji: ev.emoji || "📍" }];
   return [];
 }
 function bookingInner(ev) {
-  if (ev.kind === "meeting" || (ev.date || "") < todayStr()) return "";
+  if (ev.kind === "meeting" || evLast(ev) < todayStr()) return "";
   const me = myUid(), b = ev.booking || {}, stops = bookableStops(ev), tix = ticketLink(ev), going = goingTotal(ev);
   if (!stops.length && !tix) return "";
   const rows = stops.map(s => {
@@ -4737,22 +4854,22 @@ function bookingInner(ev) {
       : ["Not booked yet", f && f.reservable === true ? "takes reservations" : f && f.reservable === false ? "walk-in" : "", f && f.phone ? esc(f.phone) : ""].filter(Boolean).join(" · ");
     const pill = booked ? `<span class="pill ok">Booked</span>` : claimed ? `<span class="pill due">Booking…</span>` : `<span class="pill due">Not booked</span>`;
     const acts = booked ? `${v.photo ? `<button type="button" class="btn-th small" data-bphoto="${esc(s.key)}">📷 Confirmation</button>` : ""}${f && f.phone ? `<a class="btn-th small" href="${esc(telHref(f.phone))}">📞 Call</a>` : ""}<button type="button" class="btn-th small" data-bedit="${esc(s.key)}">Change</button>`
-      : `<a class="btn-th small accent" data-breserve="${esc(s.key)}" href="${esc(reserveUrl(f, s.name))}" target="_blank" rel="noopener">📅 ${f && f.reservable === false ? "Open in Maps" : "Reserve a table"}</a>${f && f.phone ? `<a class="btn-th small" href="${esc(telHref(f.phone))}">📞 Call</a>` : ""}<button type="button" class="btn-th small" data-bdone="${esc(s.key)}">✓ I booked it</button>`;
+      : `<a class="btn-th small accent" data-breserve="${esc(s.key)}" href="${esc(reserveUrl(f, s.name))}" target="_blank" rel="noopener">📅 ${f && f.reservable === false ? "Open in Maps" : s.kind && s.kind !== "meal" ? "Book it" : "Reserve a table"}</a>${f && f.phone ? `<a class="btn-th small" href="${esc(telHref(f.phone))}">📞 Call</a>` : ""}<button type="button" class="btn-th small" data-bdone="${esc(s.key)}">✓ I booked it</button>`;
     const claim = booked ? "" : claimed ? (mine ? `<button type="button" class="linkish" data-bunclaim="${esc(s.key)}">Not me after all</button>` : "")
       : `<div class="day-row" style="align-items:center;padding-top:4px"><span style="flex:1;min-width:0"><b>Who's booking?</b><div class="muted-th sm">Nobody yet. Claim it and Dot reminds you two days before.</div></span><button type="button" class="btn-th small" data-bclaim="${esc(s.key)}">I'm on it</button></div>`;
     const nudge = booked && v.size && going && going !== v.size && v.sizeAck !== going ? `<div class="dot-note">${dot("thinking", 40)}<span>RSVPs are at ${going} now, the booking says ${v.size}. Update it?</span></div><div class="btnrow" style="gap:6px;margin:4px 0 8px"><button type="button" class="btn-th small accent" data-bsize="${esc(s.key)}|${going}">Update to ${going}</button><button type="button" class="btn-th small" data-bkeep="${esc(s.key)}|${going}">Keep it at ${v.size}</button></div>` : "";
-    return `<div class="bk-row"><div class="day-row" style="align-items:center"><span style="flex:1;min-width:0"><b>${esc(s.emoji)} ${esc(s.name)}${s.time ? " · " + esc(fmtTime(s.time)) : ""}</b><div class="muted-th sm">${sub}</div></span>${pill}</div><div class="btnrow" style="margin:6px 0 4px;flex-wrap:wrap;gap:6px">${acts}</div>${nudge}${claim}</div>`; }).join("");
+    return `<div class="bk-row"><div class="day-row" style="align-items:center"><span style="flex:1;min-width:0"><b>${esc(s.emoji)} ${esc(s.name)}${s.day ? " · " + esc(evDate({ date: s.day }).toLocaleDateString("en-US", { weekday: "short" })) : ""}${s.time ? " · " + esc(fmtTime(s.time)) : ""}</b><div class="muted-th sm">${sub}</div></span>${pill}</div><div class="btnrow" style="margin:6px 0 4px;flex-wrap:wrap;gap:6px">${acts}</div>${nudge}${claim}</div>`; }).join("");
   const tixRow = tix ? `<div class="bk-row"><div class="day-row" style="align-items:center"><span style="flex:1;min-width:0"><b>🎟️ Tickets</b><div class="muted-th sm">${going} going so far</div></span></div><div class="btnrow" style="margin:6px 0 4px;gap:6px;flex-wrap:wrap"><a class="btn-th small accent" href="${esc(tix)}" target="_blank" rel="noopener">🎟️ Get tickets</a><button type="button" class="btn-th small" data-bpitch="1">🎁 Pitch in</button></div></div>` : "";
   const allBooked = stops.length > 0 && stops.every(s => (b[s.key] || {}).state === "booked");
   return `<div class="glass-head">Booking <span>${allBooked ? "✓ all set" : (stops.length + (tix ? 1 : 0)) + " to sort"}</span></div>
-    ${stops.length && !allBooked ? `<div class="muted-th sm" style="margin:0 0 6px">${going ? `Table for ${going}, following the RSVPs.` : "The headcount follows the RSVPs."} Dot asks if that changes after you book.</div>` : ""}${rows}${tixRow}`;
+    ${stops.length && !allBooked ? `<div class="muted-th sm" style="margin:0 0 6px">${going ? `${isTripEv(ev) ? "Party of" : "Table for"} ${going}, following the RSVPs.` : "The headcount follows the RSVPs."} Dot asks if that changes after you book.</div>` : ""}${rows}${tixRow}`;
 }
 const repaintBooking = ev => { const c = el("bookCard"); const cur = S.events.get(ev.id) || ev; const html = bookingInner(cur); if (!c || !html) return; c.innerHTML = html; wireBooking(cur); };
 const repaintPlan = ev => { const c = el("planCard"); if (!c) return; const cur = S.events.get(ev.id) || ev; const html = planCardHtml(cur, c.classList.contains("th-plain")); if (html) c.outerHTML = html; };
 // Facts for the plan's places arrive after the first paint; the cards repaint as they do.
 function warmPlanFacts(ev) {
   const seen = new Set();
-  [...bookableStops(ev), ...evStops(ev).map(x => ({ name: x.name || x.place, place: nearOf(x) }))].forEach(s => { const k = s.name + "|" + s.place; if (!s.name || seen.has(k) || factsCached(s.name, s.place) !== null) return; seen.add(k);
+  [...bookableStops(ev), ...(isTripEv(ev) ? evStops(ev).filter(x => ["flight", "boarding", "ferry", "train"].includes(x.kind) && x.place && daysUntil({ date: x.day }) >= 0 && daysUntil({ date: x.day }) <= 1).map(x => ({ name: placeName(x.place), place: x.place })) : evStops(ev).map(x => ({ name: x.name || x.place, place: nearOf(x) })))].forEach(s => { const k = s.name + "|" + s.place; if (!s.name || seen.has(k) || factsCached(s.name, s.place) !== null) return; seen.add(k);
     factsFor(s.name, s.place).then(f => { if (f) { repaintBooking(ev); repaintPlan(ev); const d = el("dayCard"); if (d) { const row = el("dayRide"); if (row) row.innerHTML = dayRideInner(ev); } } }); });
 }
 function wireBooking(ev) {
@@ -4762,7 +4879,7 @@ function wireBooking(ev) {
   const patchB = (key, patch) => updateDoc(doc(db, "events", ev.id), Object.fromEntries(Object.entries(patch).map(([k, v]) => ["booking." + key + "." + k, v]))).catch(e => toast(e.message));
   card.querySelectorAll("[data-bclaim]").forEach(b => b.onclick = () => { const s = stop(b.dataset.bclaim); setB(b.dataset.bclaim, { state: "claimed", by: myUid(), byName: S.profile.name, what: s ? s.name : "the table", at: Date.now() }); toast("You're on it. Dot reminds you two days before.", null, null, "happy"); });
   card.querySelectorAll("[data-bunclaim]").forEach(b => b.onclick = () => setB(b.dataset.bunclaim, deleteField()));
-  card.querySelectorAll("[data-breserve]").forEach(a => a.onclick = e => { e.preventDefault(); bookingHandoff(ev, stop(a.dataset.breserve), a.href); });
+  card.querySelectorAll("[data-breserve]").forEach(a => a.onclick = e => { e.preventDefault(); const st = stop(a.dataset.breserve), f = st && factsCached(st.name, st.place); bookingHandoff(ev, st, (f && f.maps) || (st && isTripEv(ev) ? "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(st.name + " " + st.place) : a.href)); });
   card.querySelectorAll("[data-bdone]").forEach(b => b.onclick = () => askBooked(ev, stop(b.dataset.bdone)));
   card.querySelectorAll("[data-bedit]").forEach(b => b.onclick = () => askBooked(ev, stop(b.dataset.bedit), (ev.booking || {})[b.dataset.bedit]));
   card.querySelectorAll("[data-bsize]").forEach(b => b.onclick = () => { const [k, n] = b.dataset.bsize.split("|"); patchB(k, { size: +n, sizeAck: +n }); toast("Updated to " + n + ". Let the restaurant know too.", null, null, "happy"); });
@@ -4823,10 +4940,12 @@ function transitionLine(a, b) {
   const leave = stopMins(b.time) < 99999 ? ` · leave by ${fmtTime(minsToHm(stopMins(b.time) - leaveIn))}` : "";
   return `<div class="tl-go muted-th sm">${onFoot ? `🚶 ${walk} min walk${km > 0.4 ? ` · or 🚗 ${Math.round(km / 0.5) + 2} min` : ""}` : `🚗 about ${drive} min · ${km < 10 ? (km * 0.621).toFixed(1) : Math.round(km * 0.621)} mi`}${leave}</div>`;
 }
-const dayRideInner = ev => { const s = bookableStops(ev)[0]; const f = s && factsCached(s.name, s.place); return f ? rideLinks(f, s.name) : ""; };
+const dayRideInner = ev => {
+  if (isTripEv(ev)) { const leg = evStops(ev).find(x => ["flight", "boarding", "ferry", "train"].includes(x.kind) && x.place && daysUntil({ date: x.day }) >= 0 && daysUntil({ date: x.day }) <= 1); const f = leg && factsCached(placeName(leg.place), leg.place); return f ? rideLinks(f, placeName(leg.place)) : ""; }
+  const s = bookableStops(ev)[0]; const f = s && factsCached(s.name, s.place); return f ? rideLinks(f, s.name) : ""; };
 const outdoorStop = ev => { const st = evStops(ev).length ? evStops(ev) : [{ name: ev.location || "", place: ev.location || "", note: "" }]; return st.find(x => (stopFacts(x) || {}).outdoor || /patio|rooftop|\bpark\b|garden|outdoor|lawn|pavilion|trail|lake|beach|pool/i.test([x.name, x.note].join(" "))); };
 function rainNote(ev) {
-  if (!(ev._rain >= 50) || (ev.date || "") < todayStr()) return ""; let ok = []; try { ok = JSON.parse(LS.get("friendlyRainOk") || "[]"); } catch {} if (ok.includes(ev.id + "|" + ev.date)) return "";
+  if (!(ev._rain >= 50) || evLast(ev) < todayStr()) return ""; let ok = []; try { ok = JSON.parse(LS.get("friendlyRainOk") || "[]"); } catch {} if (ok.includes(ev.id + "|" + ev.date)) return "";
   const o = outdoorStop(ev); if (!o) return ""; const name = o.name || placeName(o.place);
   return `<div class="dot-note">${dot("thinking", 40)}<span>${ev._rain}% chance of rain. ${esc(name)} may move inside; want an indoor swap ready?</span></div><div class="btnrow" style="gap:6px;margin:4px 0 8px"><button type="button" class="btn-th small accent" data-rainplan="${esc(name)}">See the rain plan</button><button type="button" class="btn-th small" data-rainok="${esc(ev.id + "|" + ev.date)}">We'll risk it</button></div>`;
 }
@@ -4957,7 +5076,7 @@ function conciergeToPlan(o, act) {
   ideaToPlan({ title: o.name, emoji: o.kind === "eat" ? "🍽️" : "🎟️", place: o.name, area: o.area || city, blurb: [o.blurb, o.parking ? "Parking: " + o.parking : ""].filter(Boolean).join(" "), price: o.price, url: o.url, time: act && act.time ? act.time : to24h(o.bestTime) });
 }
 function wireEventPage(ev) {
-  wireWhen(ev); if (ev.kind === "trip") wireTrip(ev); wireBooking(ev); warmPlanFacts(ev);
+  wireWhen(ev); if (isTripEv(ev)) wireTrip(ev); wireBooking(ev); warmPlanFacts(ev);
   if (ev.coverFull) fullCoverOf(ev).then(c => { const img = document.querySelector(".event-cover img"); if (img && c && img.getAttribute("src") !== c) img.src = c; });
   const id = ev.id;
   markPeeked("#/e/" + ev.id);
@@ -5019,58 +5138,223 @@ function wireEventPage(ev) {
 // ---------- TRIPS (a plan that spans days: day-by-day stops, Staying with rooms, rides, packing, one tab) ----------
 // A trip is an event with kind "trip" and endDate. Stops carry a day; rooms are bring-list entries of kind "room"
 // (claims are the people in the room); rides and the shared packing list are the Day-of card's carpool and bring list.
-const tripDays = ev => { const out = []; let d = ev.date; for (let i = 0; i < 14 && d <= (ev.endDate || ev.date); i++) { out.push(d); d = addDays(d, 1); } return out; };
+const tripDays = ev => { const out = []; let d = ev.date; for (let i = 0; i < 60 && d <= (ev.endDate || ev.date); i++) { out.push(d); d = addDays(d, 1); } return out; };
 const dayShort = d => evDate({ date: d }).toLocaleDateString("en-US", { weekday: "short" });
 const dayLong = d => evDate({ date: d }).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+const dayMid = d => evDate({ date: d }).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+// The small print under a stop: where (when the stop is named), the note, the confirmation number.
+const stopSub = x => [x.name && x.place ? placeLine(x) : "", x.note || "", x.conf ? "Conf. " + x.conf : ""].filter(Boolean);
+function tripStopRow(ev, x, manage, withDay) {
+  const sub = stopSub(x), dir = x.place || (VENUE_KINDS.includes(x.kind) && x.name) ? `<a class="stop-dir" href="${esc(stopMapUrl(x))}" target="_blank" rel="noopener">Directions</a>` : "";
+  const when = [withDay ? dayMid(x.day) : "", x.time ? fmtTime(x.time) : ""].filter(Boolean).join(" · ");
+  return `<div class="tstop" data-stopi="${x._i}" role="button" tabindex="0"><span class="tstop-e">${esc(x.emoji || "📍")}</span><span class="tstop-txt">${when ? `<small class="tstop-t">${esc(when)}</small>` : ""}<b>${esc(x.name || placeName(x.place))}</b>${sub.length ? `<small>${sub.map(esc).join(" · ")}</small>` : ""}</span>${dir}<span class="tstop-chev" aria-hidden="true">›</span></div>`;
+}
+// The Itinerary card: a strip of the trip's days (a dot on days with something planned), the chosen day in full,
+// every other day as one line, then Getting there, where everyone's staying (with rooms or cabins to take),
+// and a folded packing list with Dot's suggestions. Money moved to the Money card, so it's counted once.
 function tripInner(ev) {
-  const me = myUid(), manage = canManage(ev), days = tripDays(ev), t = todayStr();
-  if (!S._tripDay || !days.includes(S._tripDay) && S._tripDay !== "all") S._tripDay = days.find(d => d >= t) || days[0];
-  const sel = S._tripDay, all = cleanStops(ev.stops), stopsOf = d => sortStops(all.filter(x => (x.day || ev.date) === d));
-  const dayBlock = d => { const st = stopsOf(d); return `<div class="trip-day"><div class="trip-day-h"><b>${esc(dayLong(d))}</b>${manage ? `<button type="button" class="btn-th ghost small" data-addstop="${d}">＋ Add a stop</button>` : ""}</div>
-    ${st.length ? `<div class="stops">${st.map(x => `<div class="stop"><span class="t">${x.time ? esc(fmtTime(x.time)) : ""}</span><span><b>${esc(x.emoji || "")} ${esc(x.name || x.place)}</b>${x.name && x.place ? `<small><a href="${esc(stopMapUrl(x))}" target="_blank" rel="noopener">${esc(x.place)}</a></small>` : ""}${x.note ? `<small>${esc(x.note)}</small>` : ""}</span>${manage ? `<button type="button" class="wall-del" data-delstop="${esc(x.day || ev.date)}|${esc(x.name)}|${esc(x.time)}" title="Remove">✕</button>` : ""}</div>`).join("")}</div>` : `<p class="muted-th sm" style="margin:4px 0 0">Nothing planned yet${manage ? ". Add the first stop." : "."}</p>`}</div>`; };
-  const stay = ev.stay || {}, rooms = typed("room");
-  const xs = [...S.expenses.values()].filter(x => x.eventId === ev.id), total = xs.reduce((n, x) => n + (x.amountCents || 0), 0);
-  const share = xs.reduce((n, x) => n + (x.shares ? (x.shares[me] || 0) : ((x.split || []).includes(me) ? Math.round(x.amountCents / x.split.length) : 0)), 0);
-  const bal = pairwise().filter(p => p.from === me), owe = bal.reduce((n, p) => n + p.amount, 0);
-  return `<div class="glass-head">The trip <span>${days.length} day${days.length === 1 ? "" : "s"}</span></div>
-    <div class="chiprow trip-days">${days.map(d => `<button type="button" class="fchip ${sel === d ? "on" : ""}" data-tripday="${d}">${esc(dayShort(d))}${d === t ? " · today" : ""}</button>`).join("")}<button type="button" class="fchip ${sel === "all" ? "on" : ""}" data-tripday="all">Everything</button></div>
-    ${(sel === "all" ? days : [sel]).map(dayBlock).join("")}
-    <div class="day-sec" style="margin-top:14px"><div class="glass-sub">🏡 Staying ${manage ? `<button type="button" class="btn-th ghost small" id="editStay">${stay.name ? "Edit" : "＋ Add"}</button>` : ""}</div>
-    ${stay.name ? `<div class="day-row"><span style="flex:1;min-width:0"><b>${esc(stay.name)}</b><div class="muted-th sm">${[stay.address, stay.checkIn ? "check-in " + esc(stay.checkIn) : "", stay.checkOut ? "check-out " + esc(stay.checkOut) : "", stay.code ? "code " + esc(stay.code) : ""].filter(Boolean).join(" · ")}</div>${stay.note ? `<div class="muted-th sm">${esc(stay.note)}</div>` : ""}</span>${stay.address ? `<a class="btn-th small" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stay.address)}" target="_blank" rel="noopener">Map</a>` : ""}</div>` : `<p class="muted-th sm" style="margin:2px 0 6px">${manage ? "Add where everyone's staying: address, check-in, the gate code." : "The host hasn't added the place yet."}</p>`}
-    <div class="trip-rooms">${rooms.map(c => { const st = bringState(c), inRoom = st.who.includes(me); return `<div class="day-row"><span style="flex:1;min-width:0"><b>${esc(c.item)}</b>${c.qty ? ` <span class="muted-th sm">· sleeps ${esc(c.qty)}</span>` : ""}<div class="muted-th sm">${st.who.length ? `<span class="hd-faces">${st.who.slice(0, 5).map(u => avatar(u, "xs")).join("")}</span> ${st.who.map(u => esc(first(claimerName(c, u) || "A guest"))).join(", ")}` : "Nobody in here yet"}${st.hasTarget && !st.covered ? ` · ${st.remaining} spot${st.remaining === 1 ? "" : "s"} left` : ""}</div></span>
-      ${inRoom ? `<button type="button" class="btn-th small accent" data-claim="${c.id}" title="Tap to leave">✓ You're in</button>` : st.covered ? `<span class="muted-th sm">Full</span>` : `<button type="button" class="btn-th small" data-claim="${c.id}">Take a spot</button>`}${manage ? `<button type="button" class="wall-del" data-delc="${c.id}" title="Remove">✕</button>` : ""}</div>`; }).join("")}
-    ${manage ? `<button type="button" class="btn-th ghost small" id="addRoom" style="margin-top:6px">＋ Add a room</button>` : ""}</div></div>
-    <div class="day-sec"><div class="glass-sub">🎒 Packing</div><p class="muted-th sm" style="margin:2px 0 8px">Shared things (cooler, speaker, firewood) go on the bring list below so people can claim them. Your own list stays on this phone.</p>
-    <div class="trip-pack">${packList(ev).map((p, i) => `<label class="trip-pack-row"><input type="checkbox" data-pack="${i}" ${p.done ? "checked" : ""}><span class="${p.done ? "done" : ""}">${esc(p.t)}</span><button type="button" class="wall-del" data-packdel="${i}" title="Remove">✕</button></label>`).join("")}</div>
-    <form class="trip-pack-add" id="packAdd"><input id="packText" maxlength="40" placeholder="Swimsuit, sunscreen, charger…" aria-label="Add to your packing list"><button type="submit" class="btn-th small">Add</button></form></div>
-    <div class="day-sec"><div class="glass-sub">💸 Running tab <a class="btn-th ghost small" data-go="#/money">Money ›</a></div>
-    <div class="trip-tab"><div><span class="muted-th sm">Trip total</span><b>${fmt$(total)}</b><span class="muted-th sm">${xs.length ? xs.slice(0, 3).map(x => esc(x.desc || "expense")).join(", ") + (xs.length > 3 ? ", and more" : "") : "nothing on it yet"}</span></div><div><span class="muted-th sm">Your share so far</span><b>${fmt$(share)}</b><span class="muted-th sm">${owe ? "you owe " + fmt$(owe) + " overall" : "you're square"}</span></div></div>
-    <div class="btnrow" style="margin-top:10px"><button type="button" class="btn-th accent small" id="tripAddX">＋ Add expense</button><button type="button" class="btn-th small" id="tripScan">📷 Scan a receipt</button></div></div>`;
+  const me = myUid(), manage = canManage(ev), days = tripDays(ev), t = todayStr(), n = days.length, all = evStops(ev);
+  if (!S._tripDay || (S._tripDay !== "all" && !days.includes(S._tripDay))) S._tripDay = days.find(d => d >= t) || days[0];
+  const sel = S._tripDay, on = d => all.filter(x => x.day === d);
+  const chip = d => { const st = on(d), dd = evDate({ date: d }); return `<button type="button" class="tday ${sel === d ? "on" : ""} ${d === t ? "today" : ""}" data-tripday="${d}" aria-pressed="${sel === d}" aria-label="${esc(dayLong(d))}${st.length ? ", " + st.length + " planned" : ""}"><small>${esc(dd.toLocaleDateString("en-US", { weekday: "short" }))}</small><b>${dd.getDate()}</b><i class="${st.length ? "has" : ""}"></i></button>`; };
+  const dayHead = (d, full) => `<div class="trip-day-h"><div><b>${esc(full ? dayLong(d) : dayMid(d))}</b><span class="muted-th sm"> · Day ${tripDayN(ev, d)} of ${n}${d === t ? " · today" : ""}</span></div>${manage ? `<button type="button" class="btn-th ghost small" data-addstop="${d}">＋ Add</button>` : ""}</div>`;
+  const dayBlock = (d, full) => { const st = on(d); return `<div class="trip-day ${d === t ? "is-today" : ""}">${dayHead(d, full)}${st.length ? `<div class="tstops">${st.map(x => tripStopRow(ev, x, manage)).join("")}</div>` : `<p class="muted-th sm trip-empty">${!full ? "Nothing planned." : manage ? "Nothing planned yet. Tap Add, or import the itinerary below." : "Nothing planned yet. A free day, or the host hasn't filled it in."}</p>`}</div>`; };
+  const line = d => { const st = on(d); return `<button type="button" class="trip-line" data-tripday="${d}"><span class="trip-line-d">${esc(dayMid(d))}${d === t ? `<small>today</small>` : ""}</span><span class="trip-line-s ${st.length ? "" : "muted-th"}">${st.length ? esc(st.slice(0, 3).map(x => (x.emoji || "") + " " + (x.name || placeName(x.place))).join(" · ")) + (st.length > 3 ? ` · +${st.length - 3}` : "") : "Nothing planned"}</span><span class="chev">›</span></button>`; };
+  const itinerary = sel === "all" ? days.map(d => dayBlock(d, false)).join("") : dayBlock(sel, true) + (n > 1 ? `<div class="trip-lines">${days.filter(d => d !== sel).map(line).join("")}</div>` : "");
+  // Getting there: flights, boarding, transfers, with confirmation numbers; a ride only once the leg is today or tomorrow.
+  const legs = all.filter(x => TRAVEL_KINDS.includes(x.kind));
+  const legRow = x => { const du = daysUntil({ date: x.day }), f = du >= 0 && du <= 1 && x.place ? factsCached(placeName(x.place), x.place) : null; return tripStopRow(ev, x, manage, true) + (f ? `<div class="ride-row">${rideLinks(f, placeName(x.place))}</div>` : ""); };
+  const gettingThere = `<div class="day-sec"><div class="glass-sub">✈️ Getting there ${manage ? `<button type="button" class="btn-th ghost small" data-addstop="${days[0]}|flight">＋ Add</button>` : ""}</div>${legs.length ? `<div class="tstops">${legs.map(legRow).join("")}</div>` : `<p class="muted-th sm" style="margin:2px 0 4px">Flights, boarding times, and confirmation numbers${manage ? ". Add them here and they show up on the day they happen." : " show up here once the host adds them."}</p>`}</div>`;
+  // Staying: the ship, hotel, or house, and the rooms (cabins on a ship) people take a spot in.
+  const stay = ev.stay || {}, W = stayWords(stay), rooms = typed("room");
+  const roomRow = c => { const st = bringState(c), inRoom = st.who.includes(me); return `<div class="day-row"><span style="flex:1;min-width:0"><b>${esc(c.item)}</b>${c.qty ? ` <span class="muted-th sm">· sleeps ${esc(c.qty)}</span>` : ""}<div class="muted-th sm">${st.who.length ? `<span class="hd-faces">${st.who.slice(0, 5).map(u => avatar(u, "xs")).join("")}</span> ${st.who.map(u => esc(first(claimerName(c, u) || "A guest"))).join(", ")}` : "Nobody in here yet"}${st.hasTarget && !st.covered ? ` · ${st.remaining} spot${st.remaining === 1 ? "" : "s"} left` : ""}</div></span>
+      ${inRoom ? `<button type="button" class="btn-th small accent" data-claim="${c.id}" title="Tap to leave">✓ You're in</button>` : st.covered ? `<span class="muted-th sm">Full</span>` : `<button type="button" class="btn-th small" data-claim="${c.id}">Take a spot</button>`}${manage ? `<button type="button" class="wall-del" data-delc="${c.id}" title="Remove" aria-label="Remove ${esc(c.item)}">✕</button>` : ""}</div>`; };
+  const stayBlock = `<div class="day-sec"><div class="glass-sub">${W.emoji} ${esc(W.title)} ${manage ? `<button type="button" class="btn-th ghost small" id="editStay">${stay.name ? "Edit" : "＋ Add"}</button>` : ""}</div>
+    ${stay.name ? `<div class="day-row" style="border-top:0;padding-top:2px"><span style="flex:1;min-width:0"><b>${esc(stay.name)}</b><div class="muted-th sm">${[stay.address ? esc(stay.address) : "", stay.checkIn ? W.inLbl + " " + esc(stay.checkIn) : "", stay.checkOut ? W.outLbl + " " + esc(stay.checkOut) : "", stay.code ? "code " + esc(stay.code) : ""].filter(Boolean).join(" · ")}</div>${stay.note ? `<div class="muted-th sm">${esc(stay.note)}</div>` : ""}</span>${stay.address ? `<a class="btn-th small" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stay.address)}" target="_blank" rel="noopener">Map</a>` : ""}</div>` : `<p class="muted-th sm" style="margin:2px 0 6px">${manage ? "Where everyone's staying: the ship, hotel, or house, with check-in and the door code." : "The host hasn't added where everyone's staying yet."}</p>`}
+    ${rooms.length ? `<div class="trip-rooms">${rooms.map(roomRow).join("")}</div>` : ""}
+    ${manage ? `<div class="btnrow" style="margin-top:6px"><button type="button" class="btn-th ghost small" id="addRoom">＋ Add a ${W.room}</button></div>` : ""}</div>`;
+  // Packing: your own list on this phone, folded until you want it, with Dot's suggestions for this trip.
+  const list = packList(ev), packed = list.filter(p => p.done).length, pOpen = collapsedOpen("friendlyPackOpen:" + ev.id, false);
+  const ideas = dotPackIdeas(ev).filter(i => !list.some(p => p.t.toLowerCase() === i.toLowerCase())), dest = tripRoute(ev)[0] || "";
+  const packBlock = `<div class="day-sec trip-fold ${pOpen ? "open" : ""}" id="packSec"><button type="button" class="glass-sub inv-toggle" id="packToggle" aria-expanded="${pOpen}"><span>🎒 Packing <span class="muted-th sm">· ${list.length ? `${packed} of ${list.length} packed` : "your list"}</span></span><span class="inv-chev">›</span></button>
+    <div class="inv-body"><p class="muted-th sm" style="margin:0 0 6px">Your own list, kept on this phone. Things the group shares go on the bring list in the ${spansDay(ev, t) ? "Today" : "Travel day"} card.</p>
+    <div class="trip-pack">${list.map((p, i) => `<label class="trip-pack-row"><input type="checkbox" data-pack="${i}" ${p.done ? "checked" : ""}><span class="${p.done ? "done" : ""}">${esc(p.t)}</span><button type="button" class="wall-del" data-packdel="${i}" aria-label="Remove ${esc(p.t)}">✕</button></label>`).join("")}</div>
+    <form class="trip-pack-add" id="packAdd"><input id="packText" maxlength="40" placeholder="Swimsuit, sunscreen, charger…" aria-label="Add to your packing list"><button type="submit" class="btn-th small">Add</button></form>
+    ${ideas.length ? `<div class="dot-note" style="margin-top:10px">${dot("happy", 40)}<span>${list.length ? "A few more for this trip" : `For ${n} day${n === 1 ? "" : "s"}${dest ? " in " + esc(dest) : ""}`}: ${esc(ideas.slice(0, 5).join(", "))}${ideas.length > 5 ? ", and more" : ""}.</span></div><button type="button" class="btn-th small accent" id="packDot" style="margin-top:4px">＋ Add Dot's ${ideas.length} item${ideas.length === 1 ? "" : "s"}</button>` : ""}</div></div>`;
+  return `<div class="glass-head">Itinerary <span>${n} day${n === 1 ? "" : "s"}${all.length ? ` · ${all.length} stop${all.length === 1 ? "" : "s"}` : ""}</span></div>
+    <div class="trip-strip" id="tripStrip">${days.map(chip).join("")}<button type="button" class="tday all ${sel === "all" ? "on" : ""}" data-tripday="all" aria-pressed="${sel === "all"}"><small>All</small><b>${n}</b><i></i></button></div>
+    ${itinerary}
+    ${manage ? `<div class="btnrow" style="margin-top:10px"><button type="button" class="btn-th small" id="tripImport">📷 Import an itinerary</button></div>` : ""}
+    ${gettingThere}${stayBlock}${packBlock}`;
+}
+// What Dot would pack for this trip, from where it goes, how long it is, and the forecast. Deterministic, no AI call.
+function dotPackIdeas(ev) {
+  const txt = [ev.title, ev.notes, (ev.stay || {}).name, (ev.stay || {}).address, ...evStops(ev).map(x => [x.name, x.place, x.note].join(" "))].join(" ").toLowerCase(), has = re => re.test(txt);
+  const n = tripLen(ev), out = ["Phone charger", "Toiletries", "Medications", `${Math.min(n, 10)} outfit${n === 1 ? "" : "s"}`];
+  const ship = isShipStay(ev.stay) || has(/cruise|ship\b|port day|boarding|\bdeck\b|cabin|at sea/) || evStops(ev).some(x => x.kind === "boarding" || x.kind === "port");
+  if (ship || has(/beach|island|pool|lake|swim|snorkel|bahamas|bimini|cancun|caribbean|hawaii|florida|miami|resort|cabo|cozumel|key west/) || evStops(ev).some(x => x.kind === "beach")) out.push("Swimsuit", "Sunscreen", "Sunglasses", "Flip flops", "Hat");
+  if (ship) out.push("Passport or ID", "Lanyard for your ship card", "Seasickness tablets", "Outfit for the dressy night", "Small bag for port days");
+  else if (has(/passport|international|mexico|canada|europe|london|paris|rome|tokyo|dominican|jamaica|puerto plata|costa rica|italy|spain|france|greece|japan|iceland|portugal|ireland/)) out.push("Passport", "Plug adapter");
+  if (has(/\bski|snow|mountain|colorado|utah|tahoe|denver|aspen|breckenridge|vail|winter|whistler/)) out.push("Warm jacket", "Gloves and beanie", "Layers");
+  if (has(/\bcamp|tent|trail|hike|hiking|national park|lake|cabin|yellowstone|yosemite|zion|smok(y|ies)/)) out.push("Bug spray", "Flashlight", "Reusable water bottle", "Comfortable shoes");
+  if (evStops(ev).some(x => x.kind === "flight") || has(/flight|airport|✈️|\bfly\b/)) out.push("Headphones", "Travel pillow", "Snacks for the flight");
+  if (has(/wedding|gala|formal|dress code|black tie/)) out.push("Dress clothes");
+  if (ev._rain >= 50) out.push("Rain jacket");
+  return [...new Set(out)];
 }
 const packKey = ev => "friendlyPack:" + ev.id;
 function packList(ev) { try { return JSON.parse(LS.get(packKey(ev)) || "[]"); } catch { return []; } }
 function savePack(ev, list) { try { LS.set(packKey(ev), JSON.stringify(list.slice(0, 60))); } catch {} const tc = el("tripCard"); if (tc) { tc.innerHTML = tripInner(ev); wireTrip(ev); wireDay(ev); } }
 function wireTrip(ev) {
-  const me = myUid();
-  document.querySelectorAll("[data-tripday]").forEach(b => b.onclick = () => { S._tripDay = b.dataset.tripday; const tc = el("tripCard"); if (tc) { tc.innerHTML = tripInner(ev); wireTrip(ev); wireDay(ev); } });
-  document.querySelectorAll("[data-addstop]").forEach(b => b.onclick = () => dialog(`<h3>Add a stop</h3><p class="muted" style="margin-top:-6px">${esc(dayLong(b.dataset.addstop))}</p><label class="field"><span>What</span><input id="tsName" maxlength="60" placeholder="Check in at the cabin"></label><label class="field"><span>Where <span class="muted">(optional)</span></span><input id="tsPlace" maxlength="120" placeholder="1250 Lakeshore Dr"></label><div class="two"><label class="field"><span>Time</span><input id="tsTime" type="time"></label><label class="field"><span>Emoji</span><input id="tsEmoji" maxlength="4" value="📍"></label></div><label class="field"><span>Note <span class="muted">(optional)</span></span><input id="tsNote" maxlength="160" placeholder="Gate code in the Staying card"></label>`, "Add", async () => {
-    const name = el("tsName").value.trim(); if (!name) return toast("Say what the stop is.");
-    const stops = [...cleanStops(ev.stops), { day: b.dataset.addstop, name, place: el("tsPlace").value.trim(), time: el("tsTime").value || "", emoji: el("tsEmoji").value.trim() || "📍", note: el("tsNote").value.trim() }];
-    try { await updateDoc(doc(db, "events", ev.id), { stops }); closeDialog(); } catch (e) { toast(e.message); }
-  }));
-  document.querySelectorAll("[data-delstop]").forEach(b => b.onclick = async () => { const [day, name, time] = b.dataset.delstop.split("|"); if (!confirm(`Remove “${name}”?`)) return;
-    const stops = cleanStops(ev.stops).filter(x => !((x.day || ev.date) === day && x.name === name && (x.time || "") === time)); try { await updateDoc(doc(db, "events", ev.id), { stops }); } catch (e) { toast(e.message); } });
-  if (el("editStay")) el("editStay").onclick = () => { const st = ev.stay || {}; dialog(`<h3>Where everyone's staying</h3><label class="field"><span>Place</span><input id="stName" maxlength="80" value="${esc(st.name || "")}" placeholder="Cedar Point Cabin"></label><label class="field"><span>Address</span><input id="stAddr" maxlength="160" value="${esc(st.address || "")}" placeholder="1250 Lakeshore Dr, Pottsboro"></label><div class="two"><label class="field"><span>Check-in</span><input id="stIn" maxlength="20" value="${esc(st.checkIn || "")}" placeholder="4 PM"></label><label class="field"><span>Check-out</span><input id="stOut" maxlength="20" value="${esc(st.checkOut || "")}" placeholder="11 AM"></label></div><div class="two"><label class="field"><span>Door or gate code</span><input id="stCode" maxlength="20" value="${esc(st.code || "")}"></label><label class="field"><span>Note</span><input id="stNote" maxlength="160" value="${esc(st.note || "")}" placeholder="Wifi: lakehouse / sunset24"></label></div>`, "Save", async () => {
-    const name = el("stName").value.trim(); if (!name) return toast("Give the place a name.");
-    try { await updateDoc(doc(db, "events", ev.id), { stay: { name, address: el("stAddr").value.trim(), checkIn: el("stIn").value.trim(), checkOut: el("stOut").value.trim(), code: el("stCode").value.trim(), note: el("stNote").value.trim() } }); closeDialog(); } catch (e) { toast(e.message); } }); };
-  if (el("addRoom")) el("addRoom").onclick = () => dialog(`<h3>Add a room</h3><div class="two"><label class="field"><span>Room</span><input id="rmName" maxlength="40" placeholder="Lake room, Loft, Pullout"></label><label class="field"><span>Sleeps</span><input id="rmBeds" inputmode="numeric" value="2"></label></div><p class="muted sm">People take their own spot. Leave Sleeps blank for no limit.</p>`, "Add", async () => {
-    const item = el("rmName").value.trim(); if (!item) return toast("Name the room."); const qty = el("rmBeds").value.trim();
-    try { await addDoc(subCol(ev, "comments"), { kind: "room", item, qty: /^\d+$/.test(qty) ? qty : "", authorId: me, authorName: S.profile.name, text: "", createdAt: Date.now() }); closeDialog(); } catch (e) { toast(e.message); } });
+  const me = myUid(), repaint = () => { const tc = el("tripCard"); if (tc) { tc.innerHTML = tripInner(ev); wireTrip(ev); wireDay(ev); } };
+  { const strip = el("tripStrip"), on = strip && strip.querySelector(".tday.on"); if (strip && on && (on.offsetLeft < strip.scrollLeft || on.offsetLeft + on.clientWidth > strip.scrollLeft + strip.clientWidth)) strip.scrollLeft = Math.max(0, on.offsetLeft - strip.clientWidth / 2 + on.clientWidth / 2); }
+  document.querySelectorAll("#tripCard [data-tripday]").forEach(b => b.onclick = () => { S._tripDay = b.dataset.tripday; repaint(); });
+  document.querySelectorAll("#tripCard [data-addstop]").forEach(b => b.onclick = () => { const [day, kind] = b.dataset.addstop.split("|"); openStopSheet(ev, null, { day, kind }); });
+  document.querySelectorAll("#tripCard [data-stopi]").forEach(r => { const open = e => { if (e.target.closest("a")) return; const x = evStops(ev).find(y => y._i === +r.dataset.stopi); if (x) openStopSheet(ev, x); }; r.onclick = open; r.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(e); } }; });
+  if (el("tripImport")) el("tripImport").onclick = () => importItinerary({ ev });
+  if (el("editStay")) el("editStay").onclick = () => { const st = ev.stay || {}, W = stayWords(st);
+    dialog(`<h3>Where everyone's staying</h3>
+      <div class="chiprow" id="stKind" style="flex-wrap:wrap;overflow:visible;padding-bottom:0;margin-bottom:8px">${[["ship", "🚢 Ship"], ["hotel", "🏨 Hotel"], ["house", "🏡 House or cabin"], ["camp", "🏕️ Campsite"]].map(([k, l]) => `<button type="button" class="fchip ${W.kind === k ? "on" : ""}" data-stkind="${k}">${l}</button>`).join("")}</div>
+      <label class="field"><span>Name</span><input id="stName" maxlength="80" value="${esc(st.name || "")}" placeholder="${W.kind === "ship" ? "Scarlet Lady" : "Cedar Point Cabin"}"></label>
+      <label class="field"><span>Address${W.kind === "ship" ? " or port" : ""}</span><input id="stAddr" maxlength="160" value="${esc(st.address || "")}" placeholder="${W.kind === "ship" ? "PortMiami, Terminal V" : "1250 Lakeshore Dr, Pottsboro"}"></label>
+      <div class="two"><label class="field"><span id="stInLbl">${W.kind === "ship" ? "Boarding" : "Check-in"}</span><input id="stIn" maxlength="20" value="${esc(st.checkIn || "")}" placeholder="${W.kind === "ship" ? "1:30 PM" : "4 PM"}"></label><label class="field"><span id="stOutLbl">${W.kind === "ship" ? "Off the ship by" : "Check-out"}</span><input id="stOut" maxlength="20" value="${esc(st.checkOut || "")}" placeholder="${W.kind === "ship" ? "10:30 AM" : "11 AM"}"></label></div>
+      <div class="two"><label class="field"><span>${W.kind === "ship" ? "Booking number" : "Door or gate code"}</span><input id="stCode" maxlength="20" value="${esc(st.code || "")}"></label><label class="field"><span>Note</span><input id="stNote" maxlength="160" value="${esc(st.note || "")}" placeholder="${W.kind === "ship" ? "Deck 11, Sea Terrace" : "Wifi: lakehouse / sunset24"}"></label></div>`, "Save", async () => {
+      const name = el("stName").value.trim(); if (!name) return toast("Give the place a name.");
+      const kind = (document.querySelector("#stKind .fchip.on") || { dataset: {} }).dataset.stkind || "";
+      try { await updateDoc(doc(db, "events", ev.id), { stay: { name, address: el("stAddr").value.trim(), checkIn: el("stIn").value.trim(), checkOut: el("stOut").value.trim(), code: el("stCode").value.trim(), note: el("stNote").value.trim(), kind } }); closeDialog(); } catch (e) { toast(e.message); } });
+    document.querySelectorAll("#stKind [data-stkind]").forEach(b => b.onclick = () => { document.querySelectorAll("#stKind .fchip").forEach(x => x.classList.toggle("on", x === b)); const ship = b.dataset.stkind === "ship"; el("stInLbl").textContent = ship ? "Boarding" : "Check-in"; el("stOutLbl").textContent = ship ? "Off the ship by" : "Check-out"; });
+    attachPlaces(el("stAddr")); };
+  if (el("addRoom")) el("addRoom").onclick = () => { const W = stayWords(ev.stay); dialog(`<h3>Add a ${W.room}</h3><div class="two"><label class="field"><span>${W.room[0].toUpperCase() + W.room.slice(1)}</span><input id="rmName" maxlength="40" placeholder="${W.kind === "ship" ? "Sea Terrace 11432, Insider 8201" : "Lake room, Loft, Pullout"}"></label><label class="field"><span>Sleeps</span><input id="rmBeds" inputmode="numeric" value="2"></label></div><p class="muted sm">People take their own spot. Leave Sleeps blank for no limit.</p>`, "Add", async () => {
+    const item = el("rmName").value.trim(); if (!item) return toast(`Name the ${W.room}.`); const qty = el("rmBeds").value.trim();
+    try { await addDoc(subCol(ev, "comments"), { kind: "room", item, qty: /^\d+$/.test(qty) ? qty : "", authorId: me, authorName: S.profile.name, text: "", createdAt: Date.now() }); closeDialog(); } catch (e) { toast(e.message); } }); };
+  if (el("packToggle")) el("packToggle").onclick = () => { const sec = el("packSec"), open = !sec.classList.contains("open"); sec.classList.toggle("open", open); el("packToggle").setAttribute("aria-expanded", open); try { LS.set("friendlyPackOpen:" + ev.id, open ? "1" : "0"); } catch {} };
   document.querySelectorAll("[data-pack]").forEach(cb => cb.onchange = () => { const l = packList(ev); if (l[+cb.dataset.pack]) l[+cb.dataset.pack].done = cb.checked; savePack(ev, l); });
   document.querySelectorAll("[data-packdel]").forEach(b => b.onclick = () => { const l = packList(ev); l.splice(+b.dataset.packdel, 1); savePack(ev, l); });
   if (el("packAdd")) el("packAdd").onsubmit = e => { e.preventDefault(); const t = el("packText").value.trim(); if (!t) return; savePack(ev, [...packList(ev), { t, done: false }]); const inp = el("packText"); if (inp) inp.focus(); };
-  if (el("tripAddX")) el("tripAddX").onclick = () => openExpense(ev.id, null);
-  if (el("tripScan")) el("tripScan").onclick = () => scanReceipt(ev.id, null, { desc: "", paidBy: me, people: [] }, ev.groupId);
+  if (el("packDot")) el("packDot").onclick = () => { const l = packList(ev), add = dotPackIdeas(ev).filter(i => !l.some(p => p.t.toLowerCase() === i.toLowerCase())); savePack(ev, [...l, ...add.map(t => ({ t, done: false }))]); toast(`Added ${add.length} to your list`, null, null, "happy"); };
+}
+// One stop on the itinerary: add or edit it (hosts), or see it (guests). Removing takes two taps, no system pop-up.
+const STOP_SHEET_EMOJIS = [...new Set([...Object.values(TRIP_KINDS).map(k => k[0]), ...STOP_EMOJIS])];
+function openStopSheet(ev, x, opts = {}) {
+  const manage = canManage(ev), days = tripDays(ev), editing = !!x;
+  if (!manage) {
+    if (!x) return;
+    if (VENUE_KINDS.includes(x.kind) && (x.place || (x.name && !/^(dinner|lunch|brunch|breakfast|drinks?|supper|snacks?)\b/i.test(x.name)))) return openFactsSheet(x.name || placeName(x.place), x.near || "", null);
+    dialog(`<h3 style="margin:0 0 2px">${esc(x.emoji || "📍")} ${esc(x.name || placeName(x.place))}</h3><div class="muted sm" style="margin:0 0 10px">${esc(dayLong(x.day))}${x.time ? " · " + esc(fmtTime(x.time)) : ""}</div>
+      ${x.place ? `<p style="margin:0 0 6px">📍 ${esc(x.place)}</p>` : ""}${x.note ? `<p style="margin:0 0 6px">${esc(x.note)}</p>` : ""}${x.conf ? `<p style="margin:0 0 6px">Confirmation <b>${esc(x.conf)}</b></p>` : ""}
+      ${x.place ? `<a class="btn primary" href="${esc(stopMapUrl(x))}" target="_blank" rel="noopener" style="width:100%;margin-top:6px">🧭 Directions</a>` : ""}`, null, null);
+    return;
+  }
+  const kind0 = TRIP_KINDS[opts.kind] ? opts.kind : "";
+  const v = x || { day: opts.day && days.includes(opts.day) ? opts.day : (days.find(d => d >= todayStr()) || days[0]), kind: kind0, emoji: kind0 ? TRIP_KINDS[kind0][0] : "📍", name: kind0 && kind0 !== "other" ? TRIP_KINDS[kind0][1] : "", place: "", time: "", note: "", conf: "" };
+  const chips = Object.entries(TRIP_KINDS).filter(([k]) => k !== "other").map(([k, [e, l]]) => `<button type="button" class="fchip ${v.kind === k ? "on" : ""}" data-skind="${k}" data-slabel="${esc(l)}">${e} ${l}</button>`).join("");
+  dialog(`<h3>${editing ? "Edit stop" : "Add a stop"}</h3>
+    <div class="chiprow" id="skChips" style="flex-wrap:wrap;overflow:visible;padding-bottom:0;margin-bottom:8px">${chips}</div>
+    <div class="two"><label class="field"><span>Day</span><select id="tsDay">${days.map(d => `<option value="${d}" ${d === v.day ? "selected" : ""}>${esc(dayMid(d))}</option>`).join("")}</select></label><label class="field"><span>Time <span class="muted">(optional)</span></span><input id="tsTime" type="time" value="${esc(v.time || "")}"></label></div>
+    <label class="field"><span>What</span><span class="st-emo-row"><button type="button" class="st-emoji" id="tsEmojiBtn" aria-label="Change emoji">${esc(v.emoji || "📍")}</button><input id="tsName" maxlength="60" value="${esc(v.name || "")}" placeholder="Flight to Miami, Board the ship, Dinner at…"></span></label>
+    <div class="st-emo-pick hidden" id="tsEmojiPick">${STOP_SHEET_EMOJIS.map(e => `<button type="button" data-pe="${e}">${e}</button>`).join("")}</div>
+    <label class="field"><span>Where <span class="muted">(optional)</span></span><input id="tsPlace" maxlength="120" value="${esc(v.place || "")}" placeholder="Airport, port, hotel, or restaurant" autocomplete="off"></label>
+    <label class="field"><span>Note <span class="muted">(optional)</span></span><input id="tsNote" maxlength="200" value="${esc(v.note || "")}" placeholder="AA 1234 · seat 14C · doors at 6"></label>
+    <label class="field"><span>Confirmation # <span class="muted">(optional)</span></span><input id="tsConf" maxlength="40" value="${esc(v.conf || "")}" placeholder="From the email"></label>
+    ${editing ? `<button type="button" class="btn danger" id="tsRemove" style="width:100%;margin-top:4px">Remove this stop</button>` : ""}`, editing ? "Save" : "Add", async () => {
+    const name = el("tsName").value.trim(), place = el("tsPlace").value.trim(); if (!name && !place) return toast("Say what the stop is.");
+    const kind = (document.querySelector("#skChips .fchip.on") || { dataset: {} }).dataset.skind || "";
+    const stop = { day: el("tsDay").value, time: el("tsTime").value || "", emoji: el("tsEmojiBtn").textContent.trim() || "📍", name, place, note: el("tsNote").value.trim(), conf: el("tsConf").value.trim(), ...(kind ? { kind } : {}) };
+    const stops = cleanStops(ev.stops); if (!editing && stops.length >= 60) return toast("Sixty stops is the most one trip can hold.");
+    if (editing) stops[x._i] = stop; else stops.push(stop);
+    try { await updateDoc(doc(db, "events", ev.id), { stops: cleanStops(stops) }); S._tripDay = stop.day; closeDialog(); toast(editing ? "Saved" : "Added to " + dayMid(stop.day), null, null, "happy"); } catch (e) { toast(e.message); }
+  });
+  document.querySelectorAll("#skChips [data-skind]").forEach(b => b.onclick = () => {
+    const was = b.classList.contains("on"); document.querySelectorAll("#skChips .fchip").forEach(c => c.classList.toggle("on", c === b && !was));
+    if (was) return; el("tsEmojiBtn").textContent = TRIP_KINDS[b.dataset.skind][0];
+    const nm = el("tsName"), labels = Object.values(TRIP_KINDS).map(k => k[1]); if (!nm.value.trim() || labels.includes(nm.value.trim())) nm.value = b.dataset.slabel;
+  });
+  el("tsEmojiBtn").onclick = () => el("tsEmojiPick").classList.toggle("hidden");
+  document.querySelectorAll("#tsEmojiPick [data-pe]").forEach(b => b.onclick = () => { el("tsEmojiBtn").textContent = b.dataset.pe; el("tsEmojiPick").classList.add("hidden"); });
+  attachPlaces(el("tsPlace"));
+  if (editing) { const rm = el("tsRemove"); rm.onclick = async () => { if (!rm.dataset.sure) { rm.dataset.sure = "1"; rm.textContent = "Tap again to remove it"; setTimeout(() => { if (rm.isConnected) { delete rm.dataset.sure; rm.textContent = "Remove this stop"; } }, 4000); return; }
+    const stops = cleanStops(ev.stops); stops.splice(x._i, 1); try { await updateDoc(doc(db, "events", ev.id), { stops }); closeDialog(); toast("Removed"); } catch (e) { toast(e.message); } }; }
+  setTimeout(() => { const nm = el("tsName"); if (nm && !editing && !nm.value) nm.focus(); }, 50);
+}
+// ---- Import an itinerary: a photo, screenshot, or PDF of the booking (or the confirmation email pasted in), read by
+// Dot into days and stops. From the composer it sets up a new plan; from a trip page it adds to the itinerary.
+function pickFiles(accept, what) { return new Promise(res => { const i = document.createElement("input"); i.type = "file"; i.accept = accept; i.multiple = true; i.style.cssText = "position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0";
+  document.body.appendChild(i); window.__picker = i; const finish = fs => { if (window.__picker === i) window.__picker = null; setTimeout(() => i.remove(), 1000); pickerMark(null); res(fs); };
+  pickerMark(what, "picker open"); i.onchange = () => finish([...i.files]); i.oncancel = () => finish([]); i.click(); }); }
+const dataUrlToBlob = u => fetch(u).then(r => r.blob());
+async function importItinerary(ctx = {}) {
+  if (isDemo()) return toast("Importing itineraries is off in the demo. Add stops by hand to try the trip page.");
+  const ev = ctx.ev || null;
+  dialog(`<div class="dot-say">${dot("happy", 56)}<div class="say-bubble">Show me the itinerary and I'll lay it out day by day${ev ? " on this trip" : ""}. A photo or screenshot works, so does the PDF or the confirmation email.</div></div>
+    <div class="stack"><button type="button" class="btn primary" id="itPhoto">📷 Photo or screenshot</button><button type="button" class="btn" id="itPdf">📄 PDF</button><button type="button" class="btn" id="itPaste">📋 Paste the email or text</button></div>
+    <p class="muted sm" style="margin:10px 0 0">Cruise documents, flights, hotel confirmations, tour bookings. Several photos are fine, one per page.</p>`, null, null);
+  el("itPhoto").onclick = async () => { const fs = await pickFiles("image/*", "itinerary"); if (fs.length) runItineraryRead(ctx, { files: fs }); };
+  el("itPdf").onclick = async () => { const f = await pickFile("application/pdf,.pdf", "itinerary"); if (f) runItineraryRead(ctx, { files: [f] }); };
+  el("itPaste").onclick = () => { dialog(`<h3>Paste the itinerary</h3><label class="field"><span>The confirmation email, or the itinerary as text</span><textarea id="itText" rows="9" maxlength="12000" placeholder="Paste it here…"></textarea></label>`, "Read it", () => { const text = el("itText").value.trim(); if (text.length < 20) return toast("Paste the whole thing, dates and all."); runItineraryRead(ctx, { text }); }); setTimeout(() => { const t = el("itText"); if (t) t.focus(); }, 50); };
+}
+async function runItineraryRead(ctx, src) {
+  const limit = (pr, ms, what) => Promise.race([pr, new Promise((_, no) => setTimeout(() => no(new Error(what)), ms))]);
+  dialog(`<div class="scan-prog"><div style="flex:1;min-width:0"><b id="itStage">Preparing…</b><span class="muted sm" id="itNote">Usually 15 to 30 seconds.</span></div></div>`, null, null);
+  const prog = t => { const b = el("itStage"); if (b) b.textContent = t; };
+  try {
+    const payload = { ...nowCtx(), hint: ctx.ev ? { title: ctx.ev.title || "", date: ctx.ev.date || "", endDate: ctx.ev.endDate || "" } : { title: "", date: compose.date || "", endDate: compose.endDate || "" } };
+    if (src.text) payload.text = src.text.slice(0, 12000);
+    else {
+      const reqId = newId(), files = [], all = src.files.slice(0, 8);
+      for (const [i, f] of all.entries()) {
+        const pdf = /pdf/i.test(f.type || "") || /\.pdf$/i.test(f.name || "");
+        if (pdf && f.size > 19e6) throw new Error("that PDF is over 19 MB");
+        prog(all.length > 1 ? `Preparing page ${i + 1} of ${all.length}…` : "Preparing it…");
+        const blob = pdf ? f : await dataUrlToBlob(await limit(compressImage(f, 1800, 0.85, 900000), 25000, "a photo took too long to prepare"));
+        const path = `itineraries/${myUid()}/${reqId}/${i}.${pdf ? "pdf" : "jpg"}`;
+        prog(all.length > 1 ? `Sending page ${i + 1} of ${all.length}…` : "Sending it to Dot…");
+        await limit(uploadBytes(storageRef(getStorage(), path), blob, { contentType: pdf ? "application/pdf" : "image/jpeg" }), 90000, "the upload took too long");
+        files.push({ path, mime: pdf ? "application/pdf" : "image/jpeg" });
+      }
+      payload.files = files;
+    }
+    prog("Dot is reading it…");
+    const res = await requestViaFirestore("itineraryRequests", payload, 170000);
+    closeDialog(); reviewItinerary(ctx, res.data || {});
+  } catch (e) { closeDialog(); toast("Couldn't read that itinerary: " + String(e.message || "").replace(/\.+$/, "") + ". Try a clearer photo, or paste the text.", null, null, "thinking"); }
+}
+function reviewItinerary(ctx, d) {
+  const ev = ctx.ev || null, stops = (d.stops || []).filter(x => /^\d{4}-\d{2}-\d{2}$/.test(x.day || ""));
+  const start = d.startDate || (stops[0] || {}).day || "", end = d.endDate && d.endDate >= start ? d.endDate : ((stops[stops.length - 1] || {}).day || start);
+  if (!start) return toast("I couldn't find dates in that. Try a clearer photo, or paste the text.", null, null, "thinking");
+  const trip = end > start, days = [...new Set(stops.map(x => x.day))].sort(), stay = d.stay && d.stay.name ? d.stay : null;
+  const existing = ev ? evStops(ev) : [], isDup = x => existing.some(y => y.day === x.day && (y.name || "").toLowerCase() === (x.name || "").toLowerCase());
+  const rows = days.map(day => `<div class="it-day"><b>${esc(dayLong(day))}</b>${stops.map((x, i) => [x, i]).filter(([x]) => x.day === day).map(([x, i]) => { const dup = ev && isDup(x), sub = [x.name && x.place ? x.place : "", x.note || "", x.conf ? "Conf. " + x.conf : "", dup ? "already on the trip" : ""].filter(Boolean);
+    return `<label class="it-row ${dup ? "dup" : ""}"><input type="checkbox" data-iti="${i}" ${dup ? "" : "checked"}><span class="tstop-e">${esc(x.emoji || "📍")}</span><span class="tstop-txt">${x.time ? `<small class="tstop-t">${esc(fmtTime(x.time))}</small>` : ""}<b>${esc(x.name || x.place)}</b>${sub.length ? `<small>${sub.map(esc).join(" · ")}</small>` : ""}</span></label>`; }).join("")}</div>`).join("");
+  const datesDiffer = ev && (start !== ev.date || (trip ? end : "") !== (ev.endDate || ""));
+  dialog(`<div class="dot-say">${dot("happy", 56)}<div class="say-bubble"><b>${esc(d.summary || "Here's what I read.")}</b><div class="muted sm" style="margin-top:4px">${[d.title, `${dayMid(start)}${trip ? ` to ${dayMid(end)} · ${ymdDiff(start, end) + 1} days` : ""}`, stay ? `${stayWords(stay).emoji} ${stay.name}` : ""].filter(Boolean).map(esc).join(" · ")}</div></div></div>
+    <div class="it-list">${rows || `<p class="muted sm" style="margin:4px 0">No day-by-day items, just the dates${stay ? " and where you're staying" : ""}.</p>`}</div>
+    ${ev ? `<p class="muted sm" style="margin:8px 0 0">Ticked items get added to the trip. Nothing already on it is removed.</p>
+      ${datesDiffer ? `<label class="switch" style="margin-top:6px"><input type="checkbox" id="itDates" checked><span>Change the dates to ${esc(dayMid(start))}${trip ? " to " + esc(dayMid(end)) : ""}</span></label>` : ""}
+      ${stay && !(ev.stay && ev.stay.name) ? `<label class="switch"><input type="checkbox" id="itStay" checked><span>Set ${esc(stayWords(stay).title.toLowerCase())}: ${esc(stay.name)}</span></label>` : ""}`
+    : `<p class="muted sm" style="margin:8px 0 0">Untick anything that's wrong. You can fix the rest on the next screen, before anyone's invited.</p>`}`,
+    ev ? "Add to the trip" : "Set it up", async () => {
+      const picked = stops.filter((x, i) => { const cb = document.querySelector(`[data-iti="${i}"]`); return cb && cb.checked; })
+        .map(x => ({ day: x.day, time: x.time || "", emoji: x.emoji || (TRIP_KINDS[x.kind] || [])[0] || "📍", name: x.name || "", place: x.place || "", note: x.note || "", conf: x.conf || "", ...(TRIP_KINDS[x.kind] && x.kind !== "other" ? { kind: x.kind } : {}) }));
+      const stayObj = stay ? { name: stay.name, address: stay.address || "", checkIn: stay.checkIn || "", checkOut: stay.checkOut || "", code: "", note: stay.note || "", kind: stay.kind || "" } : null;
+      if (ev) {
+        const patch = { stops: cleanStops([...cleanStops(ev.stops), ...picked]), updatedBy: myUid() };
+        if (el("itDates") && el("itDates").checked) { patch.date = start; patch.endDate = trip ? end : ""; if (trip) patch.kind = "trip"; }
+        if (el("itStay") && el("itStay").checked && stayObj) patch.stay = stayObj;
+        if (d.notes && !(ev.notes || "").trim()) patch.notes = d.notes.slice(0, 600);
+        try { await updateDoc(doc(db, "events", ev.id), patch); S._tripDay = null; closeDialog(); toast(picked.length ? `Added ${picked.length} ${picked.length === 1 ? "stop" : "stops"} to the itinerary` : "Updated", null, null, "coral:party"); } catch (e) { toast(e.message); }
+        return;
+      }
+      closeDialog(); resetCompose(); compose._restored = true;
+      compose.kind = trip ? "trip" : "event"; compose.title = String(d.title || "").slice(0, 80); compose.date = start; compose.endDate = trip ? end : "";
+      compose.emoji = stayObj && stayWords(stayObj).kind === "ship" ? "🚢" : picked.some(x => x.kind === "flight") ? "✈️" : trip ? "🧳" : "🎟️";
+      if (stayObj) compose.stay = stayObj;
+      compose.notes = String(d.notes || "").slice(0, 600);
+      if (trip) compose.stops = picked;
+      else { const st = sortStops(cleanStops(picked)); if (st.length >= 2) { compose.stops = st; compose.time = (st.find(x => x.time) || {}).time || ""; compose.where = st[0].place || ""; } else if (st.length === 1) { compose.time = st[0].time || ""; compose.where = st[0].place || st[0].name || ""; } }
+      compose._plan = { summary: d.summary || "Here's the plan, laid out from your itinerary.", missing: ["guests"], unmatched: [], bring: [], ideas: [] };
+      openComposer();
+    });
 }
 // ---------- WHEN WORKS? (the host offers a few times; everyone taps the ones that work) ----------
 // events/{id}.timePoll: { options: [{id, date, time}], votes: {uid: [optionIds]}, lockedId }
@@ -5157,7 +5441,8 @@ function wireWhen(ev) {
   if (el("lockWhen")) el("lockWhen").onclick = async () => { const o = (ev.timePoll.options || []).find(x => x.id === el("lockWhen").dataset.lock); if (!o) return; if (!confirm(`Lock in ${twWhen(o)}? Everyone invited hears the new time.`)) return;
     try { await updateDoc(doc(db, "events", ev.id), { date: o.date, time: o.time || ev.time || "", updatedBy: myUid(), "timePoll.lockedId": o.id }); toast("Locked in. Everyone's been told.", null, null, "coral:party"); } catch (e) { toast(e.message); } };
 }
-function pollsInner(ev, hint = "Add a poll to help decide: food, time, theme.") {
+function pollsInner(ev, hint) {
+  hint = hint || (isTripEv(ev) ? "Add a poll to help decide: where to eat, which excursion, which day." : "Add a poll to help decide: food, time, theme.");
   const me = myUid(); const manage = canManage(ev);
   const list = S.polls.map(p => {
     const total = Object.keys(p.votes || {}).length || 0;
@@ -5242,7 +5527,7 @@ function addSongDialog(ev) {
 function photosInner(ev) {
   const ps = S.photos.filter(visibleContent);
   const tiles = ps.map(p => `<div class="photo-tile"><img src="${esc(p.img)}" data-photo="${p.id}" alt="" loading="lazy">${photoBadges(p)}${p.addedBy === myUid() || isAdmin() ? `<button class="photo-act" data-delphoto="${p.id}" title="Remove">✕</button>` : `<button class="photo-act" data-more="photo|${p.id}" title="Report">⚑</button>`}</div>`).join("");
-  return `<div class="glass-head">Photos <span>${ps.length}</span></div>${albumRowHtml(ev, ps)}<div class="photo-grid"><button class="photo-add" id="addPhoto">＋</button>${tiles || ""}</div>${ps.length ? "" : `<p class="muted-th" style="margin-top:8px">Share pics from the night.</p>`}`;
+  return `<div class="glass-head">Photos <span>${ps.length}</span></div>${albumRowHtml(ev, ps)}<div class="photo-grid"><button class="photo-add" id="addPhoto">＋</button>${tiles || ""}</div>${ps.length ? "" : `<p class="muted-th" style="margin-top:8px">${isTripEv(ev) ? "Photos from the trip go here, for everyone who went." : "Share pics from the night."}</p>`}`;
 }
 function wirePhotos(ev) {
   if (el("addPhoto")) el("addPhoto").onclick = async () => {
@@ -5562,9 +5847,9 @@ function openComposerForEdit(ev) {
   go("#/new");
 }
 function editEvent(ev) {
-  const E = { stops: evStops(ev).map(x => ({ ...x })), time: ev.time || "", where: ev.location || "", emoji: ev.emoji || "📍", kind: ev.kind || "event" };
+  const E = { stops: evStops(ev).map(({ _i, near, ...x }) => ({ ...x })), time: ev.time || "", where: ev.location || "", emoji: ev.emoji || "📍", kind: ev.kind || "event", date: ev.date, endDate: ev.endDate || "" };
   const ectx = { h: E, card: "eStopsCard", head: "eStopsHead", time: "eTime", where: "eWhere", hide: "estops-hide", save: () => {}, before: null };
-  const many = E.stops.length >= 2;
+  const many = E.stops.length >= 2 || E.kind === "trip";
   dialog(`<h3>Edit ${E.kind === "trip" ? "trip" : E.kind === "meeting" ? "meeting" : "event"}</h3>
     <label class="field"><span>Title</span><input id="eTitle" value="${esc(ev.title)}"></label>
     <div class="field-label" style="margin:2px 0 6px">This is a…</div><div class="chiprow" id="eKind" style="flex-wrap:wrap;overflow:visible;padding-bottom:0">${[["event", "🎉 Event"], ["meeting", "📅 Meeting"], ["trip", "⛵ Trip"]].map(([k, l]) => `<button type="button" class="fchip ${E.kind === k ? "on" : ""}" data-ekind="${k}">${l}</button>`).join("")}</div>
@@ -5574,7 +5859,7 @@ function editEvent(ev) {
     <div class="two"><span></span>
     <label class="field estops-hide ${many ? "hidden" : ""}"><span>Start</span><input id="eTime" type="time" value="${ev.time || ""}"></label></div>
     <label class="field estops-hide ${many ? "hidden" : ""}"><span>Where</span><input id="eWhere" value="${esc(ev.location || "")}"></label>
-    <span class="field-label" style="display:flex;justify-content:space-between;margin-top:6px">${ev.kind === "meeting" ? "Agenda" : "The plan"} <small class="muted" id="eStopsHead">${stopsHead(ectx)}</small></span><div class="stops-card in-dialog" id="eStopsCard">${stopsEditor(ectx)}</div>
+    <span class="field-label" style="display:flex;justify-content:space-between;margin-top:6px">${ev.kind === "meeting" ? "Agenda" : E.kind === "trip" ? "Itinerary" : "The plan"} <small class="muted" id="eStopsHead">${stopsHead(ectx)}</small></span><div class="stops-card in-dialog" id="eStopsCard">${stopsEditor(ectx)}</div>
     ${ev.kind === "meeting" ? "" : `<label class="field estops-hide ${many ? "hidden" : ""}"><span>Food &amp; drinks</span><input id="eFood" maxlength="120" value="${esc(ev.food || "")}" placeholder="Tacos and margs · BYOB"></label>`}
     ${repeatFields("e", ev)}
     <label class="field"><span>Details</span><textarea id="eNotes">${esc(ev.notes || "")}</textarea></label>
@@ -5584,7 +5869,7 @@ function editEvent(ev) {
     "Save", async () => {
       const cohostUids = [...document.querySelectorAll("input[name=ecoh]:checked")].map(i => i.value).filter(u => u !== ev.hostId);
       const kindNow = (document.querySelector("#eKind .on") || { dataset: { ekind: E.kind } }).dataset.ekind, endDateNow = kindNow === "trip" ? (el("eEndDate") && el("eEndDate").value > el("eDate").value ? el("eEndDate").value : addDays(el("eDate").value, 1)) : "";
-      try { await updateDoc(doc(db, "events", ev.id), { cohostUids, ...(cohostUids.length ? { invitedUids: arrayUnion(...cohostUids) } : {}), updatedBy: myUid(), kind: kindNow, endDate: endDateNow, title: el("eTitle").value.trim(), date: el("eDate").value, ...(() => { const st = sortStops(cleanStops(E.stops)); return st.length >= 2 ? { stops: st, time: (st.find(x => x.time) || {}).time || el("eTime").value, location: st[0].place || el("eWhere").value.trim(), food: "" } : { stops: [], time: el("eTime").value, location: el("eWhere").value.trim() }; })(), ...(el("eFood") && cleanStops(E.stops).length < 2 ? { food: el("eFood").value.trim() } : {}), notes: el("eNotes").value.trim(), allowPlus: el("ePlusOn").checked, plusMax: plusMaxVal("e"), ...(el("eBringOn") ? { dayBring: el("eBringOn").checked, dayCarpool: el("eCarOn").checked } : {}), ...readRepeat("e") }); closeDialog(); toast("Saved"); } catch (e) { toast(e.message); }
+      try { await updateDoc(doc(db, "events", ev.id), { cohostUids, ...(cohostUids.length ? { invitedUids: arrayUnion(...cohostUids) } : {}), updatedBy: myUid(), kind: kindNow, endDate: endDateNow, title: el("eTitle").value.trim(), date: el("eDate").value, ...(() => { if (kindNow === "trip") return { stops: cleanStops(E.stops), time: el("eTime").value, location: el("eWhere").value.trim() }; const st = sortStops(cleanStops(E.stops)); return st.length >= 2 ? { stops: st, time: (st.find(x => x.time) || {}).time || el("eTime").value, location: st[0].place || el("eWhere").value.trim(), food: "" } : { stops: [], time: el("eTime").value, location: el("eWhere").value.trim() }; })(), ...(el("eFood") && cleanStops(E.stops).length < 2 ? { food: el("eFood").value.trim() } : {}), notes: el("eNotes").value.trim(), allowPlus: el("ePlusOn").checked, plusMax: plusMaxVal("e"), ...(el("eBringOn") ? { dayBring: el("eBringOn").checked, dayCarpool: el("eCarOn").checked } : {}), ...readRepeat("e") }); closeDialog(); toast("Saved"); } catch (e) { toast(e.message); }
     });
   attachPlaces(el("eWhere"));
   stopCtx = ectx; wireStops(); wireRepeat("e"); wirePlusFields("e");
@@ -6852,9 +7137,9 @@ function messagesBody(tab = "messages") {
 // each other's photos); comments between you load once the page is open, from the plans you shared.
 function fsData(u) {
   const me = myUid(), t = todayStr(), f = friendshipWith(u);
-  const both = ev => { const r = ev.rsvps || {}, inv = new Set(ev.invitedUids || []); if (!inv.has(me) || !inv.has(u) || ev.kind === "meeting") return false; return ev.date < t ? r[me] === "going" && r[u] === "going" : r[me] !== "no" && r[u] !== "no"; };
+  const both = ev => { const r = ev.rsvps || {}, inv = new Set(ev.invitedUids || []); if (!inv.has(me) || !inv.has(u) || ev.kind === "meeting") return false; return evLast(ev) < t ? r[me] === "going" && r[u] === "going" : r[me] !== "no" && r[u] !== "no"; };
   const evs = [...S.events.values()].filter(both);
-  const past = evs.filter(ev => ev.date < t).sort((a, b) => b.date.localeCompare(a.date)), next = evs.filter(ev => ev.date >= t).sort((a, b) => a.date.localeCompare(b.date));
+  const past = evs.filter(ev => evLast(ev) < t).sort((a, b) => b.date.localeCompare(a.date)), next = evs.filter(ev => evLast(ev) >= t).sort((a, b) => a.date.localeCompare(b.date));
   const photos = past.flatMap(ev => (S.memories.get(ev.id) || []).map(p => ({ p, ev })));
   const xs = [...S.expenses.values()].filter(x => (x.involved || []).includes(u) && (x.involved || []).includes(me)).sort((a, b) => b.createdAt - a.createdAt);
   const ss = [...S.settlements.values()].filter(s => (s.from === u && s.to === me) || (s.from === me && s.to === u)).sort((a, b) => b.createdAt - a.createdAt);
@@ -7642,6 +7927,13 @@ function wirePhotosPage() {
 // ---------- sprint 3b helpers: countdown, group tab, simplify, search, drafts, duplicate, magic link ----------
 function countdown(ev) {
   if (!ev.date) return "";
+  if (isTripEv(ev)) {
+    // A trip counts its own days: "Day 4 of 7 · Wednesday in Puerto Plata", not "2 days ago" from day 3.
+    const t = todayStr(), n = tripLen(ev);
+    if (spansDay(ev, t)) { const k = tripDayN(ev, t); return `Day ${k} of ${n}${k === n && n > 1 ? " · last day" : k === 1 ? " · travel day" : ""} · ${tripTodayLine(ev, t, true)}`; }
+    if (ev.date > t) { const days = ymdDiff(t, ev.date); return days === 1 ? "Tomorrow" : "In " + days + " days"; }
+    const ago = ymdDiff(evLast(ev), t); return ago === 1 ? "Wrapped up yesterday" : `Wrapped up ${ago} days ago`;
+  }
   const [y, m, d] = ev.date.split("-").map(Number); const [sh, sm] = (ev.time || "09:00").split(":").map(Number);
   const start = new Date(y, m - 1, d, sh, sm).getTime();
   const end = ev.endTime ? new Date(y, m - 1, d, ...ev.endTime.split(":").map(Number)).getTime() : start + 3 * 3600e3;
@@ -7827,8 +8119,10 @@ async function fullCoverOf(ev) {
 async function duplicateEvent(ev) {
   if (ev.coverFull) { toast("Copying…"); ev = { ...ev, cover: await Promise.race([fullCoverOf(ev), new Promise(r => setTimeout(() => r(ev.cover), 5000))]) }; }
   resetCompose(); compose._restored = true;
-  Object.assign(compose, { stops: evStops(ev).map(x => ({ ...x })), title: ev.title, emoji: ev.emoji || "🎉", theme: ev.theme || DEFAULT_THEME, customTheme: ev.customTheme || null, cover: ev.cover || null, coverTab: ev.cover ? "upload" : "emoji", time: ev.time || "", end: ev.endTime || "", where: ev.location || "", notes: ev.notes || "", cap: ev.capacity ? String(ev.capacity) : "", approval: !!ev.approval, questions: (ev.questions || []).map(q => ({ ...q, id: newId() })), groupId: ev.groupId || "", invitees: new Set(ev.groupId ? [] : (ev.invitedUids || []).filter(u => u !== myUid())), phoneInvitees: ev.groupId ? [] : Object.entries(ev.invitedPhoneNames || {}).map(([e164, name]) => ({ e164, name })), cohosts: new Set(ev.cohostUids || []), kind: ev.kind || "event", repeat: ev.repeat || "", date: "" });
-  go("#/new"); toast("Copied. Pick a date and it's ready.");
+  Object.assign(compose, { stops: evStops(ev).map(x => ({ ...x })), title: ev.title, emoji: ev.emoji || "🎉", theme: ev.theme || DEFAULT_THEME, customTheme: ev.customTheme || null, cover: ev.cover || null, coverTab: ev.cover ? "upload" : "emoji", time: ev.time || "", end: ev.endTime || "", where: ev.location || "", notes: ev.notes || "", cap: ev.capacity ? String(ev.capacity) : "", approval: !!ev.approval, questions: (ev.questions || []).map(q => ({ ...q, id: newId() })), groupId: ev.groupId || "", invitees: new Set(ev.groupId ? [] : (ev.invitedUids || []).filter(u => u !== myUid())), phoneInvitees: ev.groupId ? [] : Object.entries(ev.invitedPhoneNames || {}).map(([e164, name]) => ({ e164, name })), cohosts: new Set(ev.cohostUids || []), kind: ev.kind || "event", repeat: ev.repeat || "", date: "", endDate: "", stay: ev.stay ? { ...ev.stay } : null });
+  // A copied trip keeps its shape: each stop remembers how many days in it falls, and follows the new first day.
+  if (isTripEv(ev)) { compose._dupDays = tripLen(ev); compose.stops = evStops(ev).map(({ _i, near, ...x }) => ({ ...x, _off: ymdDiff(ev.date, x.day), day: "" })); }
+  go("#/new"); toast(isTripEv(ev) ? "Copied. Pick the first day and the stops follow." : "Copied. Pick a date and it's ready.");
 }
 // ---------- passwordless sign-in (email link) ----------
 async function sendMagicLink() {

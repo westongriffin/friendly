@@ -415,6 +415,16 @@ service cloud.firestore {
         && request.resource.data.status == "pending" && !isDemoUser();
     }
 
+    // ---- Itinerary reads (a photo, PDF, or pasted email of the booking; the pages go to Storage under
+    //      itineraries/{uid}/, a function writes back the days and stops and deletes the pages) ----
+    match /itineraryRequests/{reqId} {
+      allow read, delete: if signedIn() && uid() == resource.data.uid;
+      allow create: if signedIn() && request.resource.data.uid == uid()
+        && request.resource.data.status == "pending" && !isDemoUser()
+        && (!('text' in request.resource.data) || (request.resource.data.text is string && request.resource.data.text.size() <= 12000))
+        && (!('files' in request.resource.data) || request.resource.data.files.size() <= 8);
+    }
+
     // ---- "Let me plan it" (same pattern: client writes what it heard, a function writes back a draft) ----
     match /planRequests/{reqId} {
       allow read, delete: if signedIn() && uid() == resource.data.uid;

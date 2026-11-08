@@ -849,6 +849,77 @@ exports.onPlanRequest = onDocumentCreated({ document: "planRequests/{id}", regio
   catch (err) { logger.error("plan draft failed (" + (d.mode || "event") + "): " + err.message); await ref.update({ status: "error", error: (d.mode === "curate-city" || d.mode === "night" || d.mode === "ideas") ? err.message.slice(0, 120) : "couldn't work that out" }); }
 });
 
+// ---- Itinerary reading (Gemini): a photo, PDF, or pasted confirmation becomes dated stops the app lays out by day ----
+// Same request/response-doc pattern as receipts: the app writes itineraryRequests/{id} with the pages (uploaded to
+// Storage under itineraries/{uid}/{req}/) or pasted text; we write back the dates, where everyone's staying, and
+// every dated line as a stop with a day, kind, and confirmation number, then delete the uploaded pages.
+const ITIN_MODEL = "gemini-2.5-flash";
+const ITIN_KINDS = ["flight", "boarding", "port", "checkin", "checkout", "meal", "excursion", "beach", "ride", "drive", "train", "ferry", "activity", "other"];
+const ITIN_SCHEMA = { type: "OBJECT", required: ["stops", "summary"], properties: {
+  title: str, startDate: str, endDate: str,
+  stay: { type: "OBJECT", properties: { name: str, address: str, checkIn: str, checkOut: str, note: str, kind: { type: "STRING", enum: ["ship", "hotel", "house", "camp", "other"] } } },
+  stops: { type: "ARRAY", items: { type: "OBJECT", required: ["day", "name"], properties: { day: str, time: str, kind: { type: "STRING", enum: ITIN_KINDS }, name: str, place: str, note: str, conf: str, emoji: str } } },
+  travelers: { type: "ARRAY", items: str }, notes: str, summary: str } };
+const itinPrompt = d => `${DOT}
+Read this travel itinerary (a cruise document, a flight or hotel confirmation, a tour booking, or a trip plan) and lay it out day by day. ${whenContext(d)}${d.hint && d.hint.date ? ` The user's trip is currently set to ${sv(d.hint.date, 10)}${d.hint.endDate ? " to " + sv(d.hint.endDate, 10) : ""}${d.hint.title ? ` and called "${sv(d.hint.title, 80)}"` : ""}; prefer the dates printed in the document.` : ""}
+Rules:
+- Dates as YYYY-MM-DD. When the year is not printed, use the next time that date comes after today. Times as 24-hour HH:MM in the local time of that place; empty when none is printed. Never invent a time or a date.
+- startDate and endDate: the first and last day of the trip (departure day through the day everyone gets home). For a single-day event they are the same day.
+- stay: where the group sleeps: a ship (the ship's name, kind ship), a hotel, a rental house, or a campsite, with check-in and check-out as printed (the boarding window for a ship), the address or port if printed, and a short note (cabin or room, deck, resort fee).
+- stops: EVERY dated line, in the order it happens, one per flight leg, boarding, port call, check-in, check-out, excursion, dinner reservation, show, transfer, or activity. day is the date it happens.
+  - A port call or a day at a destination is one stop of kind port named after the place ("Puerto Plata"), with place the port or city. A day at sea on a cruise is one stop of kind other named "At sea".
+  - A flight: kind flight, name like "Flight DFW → MIA", place the departure airport with its city, note the airline, flight number, departure and arrival times, seats, and terminal.
+  - Boarding a ship: kind boarding, name "Board the <ship>", place the port and city, time when boarding opens. Leaving the ship on the last day: kind checkout.
+  - Hotel check-in or check-out: kinds checkin and checkout, place the hotel's address.
+  - conf: the confirmation, booking, or record locator printed for that line. emoji: one emoji for the stop. Never list a stop twice; never add stops that are not in the document.
+- title: a short name for the trip the way the document gives it (the ship, the destination, or the event), without dates.
+- travelers: the guest names printed, if any. notes: anything the group needs to know that is not a dated stop (documents required, dress codes, baggage rules, what's included), briefly.
+- summary: one warm sentence in Dot's voice starting "Here's what I read:", for example "Here's what I read: a 7-day cruise on the Scarlet Lady out of Miami, March 14 to 20, with days in Puerto Plata and Bimini." No emoji.`;
+async function askItinerary(parts) {
+  const token = (await (await gauth.getClient()).getAccessToken()).token;
+  const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${LOCATION}/publishers/google/models/${ITIN_MODEL}:generateContent`;
+  const body = { contents: [{ role: "user", parts }], generationConfig: { temperature: 0, responseMimeType: "application/json", responseSchema: ITIN_SCHEMA } };
+  const r = await fetch(url, { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error(ITIN_MODEL + " " + r.status + ": " + (await r.text()).slice(0, 160));
+  const j = await r.json();
+  return JSON.parse(((((j.candidates || [])[0] || {}).content || {}).parts || []).map(p => p.text || "").join(""));
+}
+function tidyItinerary(out) {
+  const ymd = v => /^\d{4}-\d{2}-\d{2}$/.test(v || "") ? v : "", hm = v => /^\d{2}:\d{2}$/.test(v || "") ? v : "";
+  const emo = v => noLone(sv(v, 8).replace(/[A-Za-z0-9\s]/g, "").slice(0, 4));
+  const KE = { flight: "✈️", boarding: "🚢", port: "⚓", checkin: "🏨", checkout: "🧳", meal: "🍽️", excursion: "🎟️", beach: "🏖️", ride: "🚕", drive: "🚗", train: "🚆", ferry: "⛴️", activity: "🎳", other: "📍" };
+  const stops = (Array.isArray(out.stops) ? out.stops : []).map(x => x || {}).map(x => ({ day: ymd(x.day), time: hm(x.time), kind: ITIN_KINDS.includes(x.kind) ? x.kind : "other", name: sv(x.name, 60), place: sv(x.place, 120), note: sv(x.note, 200), conf: sv(x.conf, 40), emoji: emo(x.emoji) || KE[x.kind] || "📍" }))
+    .filter(x => x.day && (x.name || x.place)).sort((a, b) => a.day.localeCompare(b.day) || a.time.localeCompare(b.time)).slice(0, 60);
+  let startDate = ymd(out.startDate), endDate = ymd(out.endDate);
+  if (stops.length) { if (!startDate || startDate > stops[0].day) startDate = stops[0].day; if (!endDate || endDate < stops[stops.length - 1].day) endDate = stops[stops.length - 1].day; }
+  if (endDate && startDate && endDate < startDate) endDate = startDate;
+  const st = out.stay && typeof out.stay === "object" ? out.stay : {};
+  const stay = sv(st.name, 80) ? { name: sv(st.name, 80), address: sv(st.address, 160), checkIn: sv(st.checkIn, 20), checkOut: sv(st.checkOut, 20), note: sv(st.note, 160), kind: ["ship", "hotel", "house", "camp"].includes(st.kind) ? st.kind : "" } : null;
+  return { title: sv(out.title, 80), startDate, endDate, stay, stops, travelers: clean(out.travelers, 20, 60), notes: sv(out.notes, 600), summary: sv(out.summary, 300) || "Here's what I read." };
+}
+exports.onItineraryRequest = onDocumentCreated({ document: "itineraryRequests/{id}", region: "us-central1", timeoutSeconds: 240, memory: "1GiB" }, async e => {
+  const d = e.data && e.data.data(); if (!d) return; const ref = e.data.ref;
+  const files = (Array.isArray(d.files) ? d.files : []).slice(0, 8), bucket = getStorage().bucket();
+  try {
+    const parts = [];
+    for (const f of files) {
+      const path = String((f && f.path) || ""); if (!path.startsWith(`itineraries/${d.uid}/`)) throw new Error("bad path");
+      const [buf] = await bucket.file(path).download(); if (buf.length > 19e6) throw new Error("file too big");
+      parts.push({ inlineData: { mimeType: /pdf/i.test(String(f.mime || "")) ? "application/pdf" : "image/jpeg", data: buf.toString("base64") } });
+    }
+    if (d.image) { const m = /^data:(image\/[a-z]+);base64,(.+)$/i.exec(String(d.image)); if (m) parts.push({ inlineData: { mimeType: m[1], data: m[2] } }); }
+    const text = sv(d.text, 12000); if (text) parts.push({ text: "The itinerary, as text:\n" + text });
+    if (!parts.length) throw new Error("nothing to read");
+    const data = tidyItinerary(await askItinerary([...parts, { text: itinPrompt(d) }]));
+    if (!data.stops.length && !data.startDate) throw new Error("no dates found");
+    logger.info(`itinerary read: ${data.stops.length} stops, ${data.startDate} to ${data.endDate}`);
+    await ref.update({ status: "done", data, image: FieldValue.delete() });
+  } catch (err) {
+    logger.error("itinerary read failed: " + err.message);
+    await ref.update({ status: "error", error: /too big|no dates/.test(err.message) ? err.message : "couldn't read that itinerary", image: FieldValue.delete() });
+  } finally { await Promise.all(files.map(f => bucket.file(String((f && f.path) || "")).delete().catch(() => {}))); }
+});
+
 // ---- Email calendar invites (iMIP over Resend) ----
 // One email per guest with an invite.ics (METHOD:REQUEST / CANCEL) so Gmail,
 // Apple Mail and Outlook show Accept/Decline and file it on the calendar.

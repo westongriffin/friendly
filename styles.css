@@ -1484,10 +1484,10 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 /* Trips */
 .trip-days{margin:4px 0 10px;flex-wrap:wrap;overflow:visible;padding-bottom:0}
 .trip-day{margin-top:8px}.trip-day-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
-.trip-rooms{display:flex;flex-direction:column}.trip-rooms .hd-faces{display:inline-flex;vertical-align:middle;margin-right:4px}
+.trip-rooms{display:flex;flex-direction:column}.trip-rooms .hd-faces{display:inline-flex;vertical-align:middle;margin-right:4px}.trip-rooms .wall-del{font-size:.9rem}
 .trip-pack{display:flex;flex-direction:column;gap:4px}.trip-pack-row{display:flex;align-items:center;gap:10px;padding:6px 0;min-height:36px}.trip-pack-row input{width:20px;height:20px;accent-color:var(--th-accent)}.trip-pack-row span{flex:1;min-width:0}.trip-pack-row span.done{opacity:.55;text-decoration:line-through}
 .trip-pack-add{display:flex;gap:8px;margin-top:8px}.trip-pack-add input{flex:1;min-width:0;border-radius:12px;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.1);color:inherit;padding:9px 12px;font:inherit}
-.trip-tab{display:grid;grid-template-columns:1fr 1fr;gap:10px}.trip-tab>div{display:flex;flex-direction:column;gap:2px}.trip-tab b{font-family:var(--mono,inherit);font-size:1.25rem}
+.trip-tab{display:grid;grid-template-columns:1fr 1fr;gap:10px}.trip-tab>div{display:flex;flex-direction:column;gap:2px}.trip-tab b{font-family:var(--mono,inherit);font-size:1.25rem}.trip-tab.three{grid-template-columns:1fr 1fr 1fr;margin:0 0 12px}.trip-tab.three b{font-size:1.05rem}
 
 /* Today's plan as the hero */
 .hd-hero.today{box-shadow:0 0 0 2.5px var(--sun),0 10px 28px rgba(255,193,69,.35)}
@@ -1633,7 +1633,7 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 .th-plain .bk-row{border-top-color:var(--line)}
 .tl-go{padding:2px 0 2px 74px;font-weight:600;opacity:.85}
 .pill{display:inline-block}.pill.due{background:#FFF0EC;color:#B4412F}
-.ev-card-glass .pill.due{background:rgba(255,255,255,.14);color:#FFD9A8}.ev-card-glass .pill.ok{background:rgba(37,165,106,.28);color:#D9F6E6}
+.ev-card-glass .pill.due{background:color-mix(in srgb,var(--th-ink) 9%,transparent);color:var(--th-ink);border:1px solid color-mix(in srgb,var(--th-ink) 24%,transparent)}.ev-card-glass .pill.ok{background:color-mix(in srgb,#25A56A 22%,transparent);color:var(--th-ink);border:1px solid color-mix(in srgb,#25A56A 45%,transparent)}
 /* Concierge chat */
 .chat{display:flex;flex-direction:column;gap:10px;margin:0 0 10px}.chat-u{align-self:flex-end;background:var(--accent);color:#fff;border-radius:14px 14px 4px 14px;padding:9px 12px;max-width:84%;font-size:.875rem;line-height:1.35}
 .chat-opt{display:flex;gap:8px;padding:7px 0;border-top:1px solid var(--line);align-items:flex-start}.chat-opt:first-child{border-top:0}.chat-opt b.n{width:18px;flex:none;color:var(--accent-strong)}.chat-opt .m{flex:1;min-width:0}
@@ -1642,3 +1642,30 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 .crew-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line)}.crew-row:first-of-type{border-top:0}.crew-row>span:first-child{flex:1;min-width:0}
 .faces-sm{display:inline-flex;vertical-align:middle}.faces-sm .av,.faces-sm img{width:20px;height:20px;font-size:.6rem}.faces-sm>*+*{margin-left:-6px}
 .lv-after-how{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:8px 0 2px;padding:8px 0 0;border-top:1px solid var(--line)}
+
+/* ---- Trips: the Itinerary card (day strip, stop rows, one-line days, Getting there, folded packing) ---- */
+.trip-strip{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:2px 2px 8px;margin:0 -2px 4px;scroll-behavior:smooth}.trip-strip::-webkit-scrollbar{display:none}
+.tday{flex:none;display:flex;flex-direction:column;align-items:center;gap:1px;min-width:50px;padding:7px 8px 6px;border-radius:14px;background:var(--th-chip);color:var(--th-ink);font-weight:700;line-height:1.1}
+.tday small{font-size:.66rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;opacity:.75}.tday b{font-size:1.05rem}
+.tday i{display:block;width:5px;height:5px;border-radius:50%;background:transparent;margin-top:3px}.tday i.has{background:currentColor;opacity:.7}
+.tday.on{background:var(--th-accent);color:var(--th-on-accent)}.tday.today:not(.on){box-shadow:inset 0 0 0 2px var(--th-accent)}.tday.all b{font-size:.95rem}
+.trip-day{margin-top:6px}.trip-day-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0 6px}.trip-day-h>div{min-width:0}.trip-day-h b{font-size:.95rem}
+.tstops{display:flex;flex-direction:column;gap:6px}
+.tstop{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:14px;background:color-mix(in srgb,var(--th-chip,#fff) 70%,transparent);cursor:pointer;text-align:left;min-height:48px}
+.tstop-e{flex:none;width:34px;height:34px;display:grid;place-items:center;border-radius:11px;background:color-mix(in srgb,var(--th-accent) 16%,transparent);font-size:1.1rem}
+.tstop-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}.tstop-txt b{font-size:.92rem;line-height:1.25}.tstop-txt small{font-size:.76rem;opacity:.8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tstop-txt small.tstop-t{font-weight:700;opacity:1;color:var(--th-accent)}
+.tstop-chev{opacity:.5;font-size:1.2rem;flex:none;line-height:1}
+.trip-empty{margin:4px 0 2px;padding:10px 12px;border-radius:12px;border:1px dashed color-mix(in srgb,currentColor 25%,transparent)}
+.trip-lines{display:flex;flex-direction:column;margin-top:10px;border-top:1px solid color-mix(in srgb,currentColor 14%,transparent)}
+.trip-line{display:flex;align-items:center;gap:10px;width:100%;padding:9px 2px;border-bottom:1px solid color-mix(in srgb,currentColor 14%,transparent);color:inherit;font:inherit;text-align:left;min-height:42px}
+.trip-line-d{flex:none;width:92px;font-weight:700;font-size:.82rem;display:flex;flex-direction:column;line-height:1.15}.trip-line-d small{font-weight:600;font-size:.66rem;opacity:.7;text-transform:uppercase;letter-spacing:.04em}
+.trip-line-s{flex:1;min-width:0;font-size:.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.trip-line .chev{color:inherit;opacity:.5;font-size:1.1rem}
+.trip-fold .inv-body{display:none}.trip-fold.open .inv-body{display:block}.trip-fold .inv-toggle{margin-top:0}
+.it-list{display:flex;flex-direction:column;gap:8px;max-height:46vh;overflow:auto;margin:4px 0}.it-day>b{display:block;font-size:.85rem;margin:6px 0 4px}
+.it-row{display:flex;align-items:center;gap:10px;padding:6px 0;cursor:pointer}.it-row input{width:20px;height:20px;accent-color:var(--accent);flex:none}.it-row.dup{opacity:.55}.it-row .tstop-e{background:var(--surface2)}.it-row .tstop-t{color:var(--accent)}
+.tl-dayh{font-weight:700;font-size:.8rem;color:var(--muted);margin:8px 0 2px;letter-spacing:.02em}.tl-dayh:first-child{margin-top:0}
+.tl-trip .stop-bot{flex-wrap:wrap}.tl-trip .st-f-day{flex:1 1 130px}.tl-trip .st-f-time{flex:1 1 118px;max-width:none}.tl-trip .st-f-place{flex-basis:100%}
+.stop-edit select{border:1px solid var(--line);border-radius:10px;padding:7px 32px 7px 9px;background-color:var(--surface);min-width:0;width:100%}
+.st-emo-row{display:flex;gap:6px;align-items:center}.st-emo-row input{flex:1;min-width:0}
+.app-dialog .st-emo-pick{margin:-4px 0 10px}
+#moneyCard .btnrow .ev-x-add{flex:1;width:auto}

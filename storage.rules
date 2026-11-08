@@ -11,5 +11,13 @@ service firebase.storage {
         && request.resource.contentType.matches('image/.*');
       allow delete: if false;
     }
+    // Pages of an itinerary being read (photos or a PDF): the owner uploads, only the server reads and deletes.
+    match /itineraries/{uid}/{reqId}/{file} {
+      allow read: if false;
+      allow create: if request.auth != null && request.auth.uid == uid
+        && request.resource.size < 20 * 1024 * 1024
+        && (request.resource.contentType.matches('image/.*') || request.resource.contentType == 'application/pdf');
+      allow update, delete: if false;
+    }
   }
 }
