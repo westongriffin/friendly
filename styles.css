@@ -1669,3 +1669,21 @@ body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 .st-emo-row{display:flex;gap:6px;align-items:center}.st-emo-row input{flex:1;min-width:0}
 .app-dialog .st-emo-pick{margin:-4px 0 10px}
 #moneyCard .btnrow .ev-x-add{flex:1;width:auto}
+/* Button edges (Nov 2026 audit). Themed buttons take the theme's chip tinted with 18% of its accent and an edge of its ink at 55%,
+   so they read on dark and light themes alike. App buttons and chips get a warm tan edge that holds 3:1 on cream and white. */
+.btn-th,.jump-chip,.rb{background:linear-gradient(color-mix(in srgb,var(--th-accent,var(--accent)) 18%,transparent),color-mix(in srgb,var(--th-accent,var(--accent)) 18%,transparent)),var(--th-chip,var(--surface2));box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--th-ink,var(--ink)) 55%,transparent)}
+.btn-th.ghost{background:transparent}
+.btn-th.ghost,.btn-th.accent,.btn-th.danger,.rb.on{box-shadow:none}
+.photo-add{border-color:color-mix(in srgb,var(--th-ink,var(--ink)) 55%,transparent)}
+.btn{box-shadow:inset 0 0 0 1.5px #9E8A72}
+.btn.primary,.btn.ghost,.btn.danger-ghost,.btn.venmo,.btn.apple,.btn.cashapp,.btn.zelle,.btn.ride,.btn.scan,.btn.tell-dot,.btn.pick-send,.btn.demo-btn{box-shadow:none}
+.fchip,.icon-btn{border-color:#9E8A72}
+.rb.on.going{background:#1F7F50}
+.btn.venmo{background:#0074D4}
+
+/* Trip cards: a first line that says what the card is for; travel rows; the host's assign list. */
+.trip-why{margin:-6px 0 10px;line-height:1.35}
+.trav-row{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:14px;background:color-mix(in srgb,var(--th-chip,#fff) 70%,transparent);min-height:48px;text-align:left}
+.trav-row.own{cursor:pointer}.trav-row .wall-del{font-size:.9rem}
+.trav-meet{margin:0 0 8px;padding:7px 10px;border-radius:10px;background:color-mix(in srgb,currentColor 7%,transparent)}
+.assign-list{display:flex;flex-direction:column;max-height:50vh;overflow:auto}.assign-list .trip-pack-row{min-height:44px}.assign-list .trip-pack-row input{accent-color:var(--accent)}

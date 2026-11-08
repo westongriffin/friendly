@@ -3800,7 +3800,7 @@ function composeBody() {
 
     <div class="section-head"><h2>${compose.kind === "meeting" ? "Agenda" : trip ? "Itinerary" : "The plan"}</h2><span class="muted sm" id="stopsHead">${stopsHead()}</span></div>
     <div class="form-card card stops-card" id="stopsCard">${stopsEditor()}</div>
-    ${compose.kind === "meeting" ? "" : `<div class="section-head"><h2>${trip ? "Travel day" : "Day of"}</h2><span class="muted sm">${trip ? "shared things and rides" : "what guests coordinate"}</span></div>
+    ${compose.kind === "meeting" ? "" : `<div class="section-head"><h2>${trip ? "First day" : "Day of"}</h2><span class="muted sm">${trip ? "shared things and rides" : "what guests coordinate"}</span></div>
     <div class="form-card card" id="cDayCard">${composeDayInner()}</div>`}
     <div class="section-head"><h2>Who's invited</h2></div>
     <div class="form-card card">
@@ -4178,7 +4178,7 @@ function renderEventPage(root, id) {
   S.evSubs.forEach(fn => fn()); S.evSubs = [];
   S.comments = []; S.photos = []; S.polls = []; S.songs = [];
   const sub = (name, fn) => S.evSubs.push(onSnapshot(collection(db, "events", id, name), snap => fn(snap.docs.map(d => ({ id: d.id, ...d.data() }))), err => console.warn("listener event/" + name + ":", err.code || err.message)));
-  sub("comments", rows => { S.comments = rows.sort((a, b) => a.createdAt - b.createdAt); withInputKept(() => { const b = el("wall"); if (b) { b.innerHTML = wallInner(ev); wireWall(ev); } const dc = el("dayCard"); if (dc) { dc.innerHTML = dayInner(ev); wireDay(ev); } const tc = el("tripCard"); if (tc) { tc.innerHTML = tripInner(ev); wireTrip(ev); wireDay(ev); } }); });
+  sub("comments", rows => { S.comments = rows.sort((a, b) => a.createdAt - b.createdAt); withInputKept(() => { const b = el("wall"); if (b) { b.innerHTML = wallInner(ev); wireWall(ev); } const dc = el("dayCard"); if (dc) { dc.innerHTML = dayInner(ev); wireDay(ev); } S._commentsReady = ev.id; paintTripCards(ev); }); });
   sub("photos", rows => { const seen = S._photoIds && S._photoIds.get(id); const fresh = seen ? rows.filter(p => !seen.has(p.id) && p.addedBy !== myUid() && Date.now() - (p.createdAt || 0) < 300e3) : [];
     (S._photoIds = S._photoIds || new Map()).set(id, new Set(rows.map(p => p.id)));
     if (fresh.length) { const who = first(nameOf(fresh[0].addedBy)); toast(`Ooh, ${who} just added ${fresh.length === 1 ? "a photo" : fresh.length + " photos"}!`, null, null, "coral:party"); }
@@ -4265,10 +4265,10 @@ function eventInner(ev) {
   </div>
 
   <div class="ev-jumpnav">
-    ${isTripEv(ev) ? `<button type="button" class="jump-chip" data-jump="tripCard">Itinerary</button>` : evStops(ev).length ? `<button type="button" class="jump-chip" data-jump="planCard">The plan</button>` : ""}
+    ${isTripEv(ev) ? `<button type="button" class="jump-chip" data-jump="tripCard">Itinerary</button><button type="button" class="jump-chip" data-jump="travelCard">Travel</button><button type="button" class="jump-chip" data-jump="stayCard">${esc(stayWords(ev.stay).title)}</button><button type="button" class="jump-chip" data-jump="packCard">Packing</button>` : evStops(ev).length ? `<button type="button" class="jump-chip" data-jump="planCard">The plan</button>` : ""}
     <button type="button" class="jump-chip" data-jump="rsvpCard">RSVP</button>
     <button type="button" class="jump-chip" data-jump="guestCard">Guests</button>
-    <button type="button" class="jump-chip" data-jump="dayCard">${isTripEv(ev) ? (spansDay(ev, todayStr()) ? "Today" : "Travel day") : "Day of"}</button>
+    <button type="button" class="jump-chip" data-jump="dayCard">${isTripEv(ev) ? (spansDay(ev, todayStr()) ? "Today" : "First day") : "Day of"}</button>
     <button type="button" class="jump-chip" data-jump="pollsCard">Polls</button>
     <button type="button" class="jump-chip" data-jump="playlistCard">Playlist</button>
     <button type="button" class="jump-chip" data-jump="photosCard">Photos</button>
@@ -4276,7 +4276,7 @@ function eventInner(ev) {
     <button type="button" class="jump-chip" data-jump="wall">Wall</button>
   </div>
 
-  ${isTripEv(ev) ? `<div class="ev-card-glass trip-card" id="tripCard">${tripInner(ev)}</div>` : planCardHtml(ev)}
+  ${isTripEv(ev) ? `<div class="ev-card-glass trip-card" id="tripCard">${tripInner(ev)}</div><div class="ev-card-glass trip-card" id="travelCard">${travelInner(ev)}</div><div class="ev-card-glass trip-card" id="stayCard">${stayInner(ev)}</div><div class="ev-card-glass trip-card" id="packCard">${packInner(ev)}</div>` : planCardHtml(ev)}
   ${ev.notes ? `<div class="ev-card-glass ev-notes">${esc(ev.notes).replace(/\n/g, "<br>")}</div>` : ""}
 
   <div class="ev-card-glass" id="rsvpCard">${rsvpBtns}</div>
@@ -4622,7 +4622,7 @@ function dayInner(ev) {
   // Three clear parts: weather and who's on the way, the bring list, and carpool. The host can turn the
   // bring list or carpool off (ev.dayBring / ev.dayCarpool === false) when making or editing the event.
   const t = todayStr(), trip = isTripEv(ev);
-  const head = !trip ? `Day of <span>${esc(fmtDay(ev))}</span>` : spansDay(ev, t) ? `Today <span>Day ${tripDayN(ev, t)} of ${tripLen(ev)} · ${esc(fmtDay({ date: t }))}</span>` : evLast(ev) < t ? `The trip <span>${esc(fmtWhen(ev))}</span>` : `Travel day <span>${esc(fmtDay(ev))}</span>`;
+  const head = !trip ? `Day of <span>${esc(fmtDay(ev))}</span>` : spansDay(ev, t) ? `Today <span>Day ${tripDayN(ev, t)} of ${tripLen(ev)} · ${esc(fmtDay({ date: t }))}</span>` : evLast(ev) < t ? `The trip <span>${esc(fmtWhen(ev))}</span>` : `First day <span>${esc(fmtDay(ev))}</span>`;
   return `<div class="glass-head">${head}</div>
     <div class="day-sec"><div class="glass-sub">${trip && !soon ? "☀️ Weather" : "☀️ Weather &amp; arrivals"}</div>
     <div id="wx" class="muted-th sm" style="margin:0 0 8px">${esc(ev._wx || "")}</div>
@@ -5076,7 +5076,7 @@ function conciergeToPlan(o, act) {
   ideaToPlan({ title: o.name, emoji: o.kind === "eat" ? "🍽️" : "🎟️", place: o.name, area: o.area || city, blurb: [o.blurb, o.parking ? "Parking: " + o.parking : ""].filter(Boolean).join(" "), price: o.price, url: o.url, time: act && act.time ? act.time : to24h(o.bestTime) });
 }
 function wireEventPage(ev) {
-  wireWhen(ev); if (isTripEv(ev)) wireTrip(ev); wireBooking(ev); warmPlanFacts(ev);
+  wireWhen(ev); if (isTripEv(ev)) wireTripCards(ev); wireBooking(ev); warmPlanFacts(ev);
   if (ev.coverFull) fullCoverOf(ev).then(c => { const img = document.querySelector(".event-cover img"); if (img && c && img.getAttribute("src") !== c) img.src = c; });
   const id = ev.id;
   markPeeked("#/e/" + ev.id);
@@ -5145,7 +5145,7 @@ const dayMid = d => evDate({ date: d }).toLocaleDateString("en-US", { weekday: "
 // The small print under a stop: where (when the stop is named), the note, the confirmation number.
 const stopSub = x => [x.name && x.place ? placeLine(x) : "", x.note || "", x.conf ? "Conf. " + x.conf : ""].filter(Boolean);
 function tripStopRow(ev, x, manage, withDay) {
-  const sub = stopSub(x), dir = x.place || (VENUE_KINDS.includes(x.kind) && x.name) ? `<a class="stop-dir" href="${esc(stopMapUrl(x))}" target="_blank" rel="noopener">Directions</a>` : "";
+  const sub = stopSub(x), dir = x.place || (VENUE_KINDS.includes(x.kind) && x.name && !/^(dinner|lunch|brunch|breakfast|drinks?|supper|snacks?)\b/i.test(x.name)) ? `<a class="stop-dir" href="${esc(stopMapUrl(x))}" target="_blank" rel="noopener">Directions</a>` : "";
   const when = [withDay ? dayMid(x.day) : "", x.time ? fmtTime(x.time) : ""].filter(Boolean).join(" · ");
   return `<div class="tstop" data-stopi="${x._i}" role="button" tabindex="0"><span class="tstop-e">${esc(x.emoji || "📍")}</span><span class="tstop-txt">${when ? `<small class="tstop-t">${esc(when)}</small>` : ""}<b>${esc(x.name || placeName(x.place))}</b>${sub.length ? `<small>${sub.map(esc).join(" · ")}</small>` : ""}</span>${dir}<span class="tstop-chev" aria-hidden="true">›</span></div>`;
 }
@@ -5154,38 +5154,17 @@ function tripStopRow(ev, x, manage, withDay) {
 // and a folded packing list with Dot's suggestions. Money moved to the Money card, so it's counted once.
 function tripInner(ev) {
   const me = myUid(), manage = canManage(ev), days = tripDays(ev), t = todayStr(), n = days.length, all = evStops(ev);
-  if (!S._tripDay || (S._tripDay !== "all" && !days.includes(S._tripDay))) S._tripDay = days.find(d => d >= t) || days[0];
+  if (!S._tripDay || (S._tripDay !== "all" && !days.includes(S._tripDay))) S._tripDay = "all";
   const sel = S._tripDay, on = d => all.filter(x => x.day === d);
   const chip = d => { const st = on(d), dd = evDate({ date: d }); return `<button type="button" class="tday ${sel === d ? "on" : ""} ${d === t ? "today" : ""}" data-tripday="${d}" aria-pressed="${sel === d}" aria-label="${esc(dayLong(d))}${st.length ? ", " + st.length + " planned" : ""}"><small>${esc(dd.toLocaleDateString("en-US", { weekday: "short" }))}</small><b>${dd.getDate()}</b><i class="${st.length ? "has" : ""}"></i></button>`; };
   const dayHead = (d, full) => `<div class="trip-day-h"><div><b>${esc(full ? dayLong(d) : dayMid(d))}</b><span class="muted-th sm"> · Day ${tripDayN(ev, d)} of ${n}${d === t ? " · today" : ""}</span></div>${manage ? `<button type="button" class="btn-th ghost small" data-addstop="${d}">＋ Add</button>` : ""}</div>`;
   const dayBlock = (d, full) => { const st = on(d); return `<div class="trip-day ${d === t ? "is-today" : ""}">${dayHead(d, full)}${st.length ? `<div class="tstops">${st.map(x => tripStopRow(ev, x, manage)).join("")}</div>` : `<p class="muted-th sm trip-empty">${!full ? "Nothing planned." : manage ? "Nothing planned yet. Tap Add, or import the itinerary below." : "Nothing planned yet. A free day, or the host hasn't filled it in."}</p>`}</div>`; };
-  const line = d => { const st = on(d); return `<button type="button" class="trip-line" data-tripday="${d}"><span class="trip-line-d">${esc(dayMid(d))}${d === t ? `<small>today</small>` : ""}</span><span class="trip-line-s ${st.length ? "" : "muted-th"}">${st.length ? esc(st.slice(0, 3).map(x => (x.emoji || "") + " " + (x.name || placeName(x.place))).join(" · ")) + (st.length > 3 ? ` · +${st.length - 3}` : "") : "Nothing planned"}</span><span class="chev">›</span></button>`; };
-  const itinerary = sel === "all" ? days.map(d => dayBlock(d, false)).join("") : dayBlock(sel, true) + (n > 1 ? `<div class="trip-lines">${days.filter(d => d !== sel).map(line).join("")}</div>` : "");
-  // Getting there: flights, boarding, transfers, with confirmation numbers; a ride only once the leg is today or tomorrow.
-  const legs = all.filter(x => TRAVEL_KINDS.includes(x.kind));
-  const legRow = x => { const du = daysUntil({ date: x.day }), f = du >= 0 && du <= 1 && x.place ? factsCached(placeName(x.place), x.place) : null; return tripStopRow(ev, x, manage, true) + (f ? `<div class="ride-row">${rideLinks(f, placeName(x.place))}</div>` : ""); };
-  const gettingThere = `<div class="day-sec"><div class="glass-sub">✈️ Getting there ${manage ? `<button type="button" class="btn-th ghost small" data-addstop="${days[0]}|flight">＋ Add</button>` : ""}</div>${legs.length ? `<div class="tstops">${legs.map(legRow).join("")}</div>` : `<p class="muted-th sm" style="margin:2px 0 4px">Flights, boarding times, and confirmation numbers${manage ? ". Add them here and they show up on the day they happen." : " show up here once the host adds them."}</p>`}</div>`;
-  // Staying: the ship, hotel, or house, and the rooms (cabins on a ship) people take a spot in.
-  const stay = ev.stay || {}, W = stayWords(stay), rooms = typed("room");
-  const roomRow = c => { const st = bringState(c), inRoom = st.who.includes(me); return `<div class="day-row"><span style="flex:1;min-width:0"><b>${esc(c.item)}</b>${c.qty ? ` <span class="muted-th sm">· sleeps ${esc(c.qty)}</span>` : ""}<div class="muted-th sm">${st.who.length ? `<span class="hd-faces">${st.who.slice(0, 5).map(u => avatar(u, "xs")).join("")}</span> ${st.who.map(u => esc(first(claimerName(c, u) || "A guest"))).join(", ")}` : "Nobody in here yet"}${st.hasTarget && !st.covered ? ` · ${st.remaining} spot${st.remaining === 1 ? "" : "s"} left` : ""}</div></span>
-      ${inRoom ? `<button type="button" class="btn-th small accent" data-claim="${c.id}" title="Tap to leave">✓ You're in</button>` : st.covered ? `<span class="muted-th sm">Full</span>` : `<button type="button" class="btn-th small" data-claim="${c.id}">Take a spot</button>`}${manage ? `<button type="button" class="wall-del" data-delc="${c.id}" title="Remove" aria-label="Remove ${esc(c.item)}">✕</button>` : ""}</div>`; };
-  const stayBlock = `<div class="day-sec"><div class="glass-sub">${W.emoji} ${esc(W.title)} ${manage ? `<button type="button" class="btn-th ghost small" id="editStay">${stay.name ? "Edit" : "＋ Add"}</button>` : ""}</div>
-    ${stay.name ? `<div class="day-row" style="border-top:0;padding-top:2px"><span style="flex:1;min-width:0"><b>${esc(stay.name)}</b><div class="muted-th sm">${[stay.address ? esc(stay.address) : "", stay.checkIn ? W.inLbl + " " + esc(stay.checkIn) : "", stay.checkOut ? W.outLbl + " " + esc(stay.checkOut) : "", stay.code ? "code " + esc(stay.code) : ""].filter(Boolean).join(" · ")}</div>${stay.note ? `<div class="muted-th sm">${esc(stay.note)}</div>` : ""}</span>${stay.address ? `<a class="btn-th small" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stay.address)}" target="_blank" rel="noopener">Map</a>` : ""}</div>` : `<p class="muted-th sm" style="margin:2px 0 6px">${manage ? "Where everyone's staying: the ship, hotel, or house, with check-in and the door code." : "The host hasn't added where everyone's staying yet."}</p>`}
-    ${rooms.length ? `<div class="trip-rooms">${rooms.map(roomRow).join("")}</div>` : ""}
-    ${manage ? `<div class="btnrow" style="margin-top:6px"><button type="button" class="btn-th ghost small" id="addRoom">＋ Add a ${W.room}</button></div>` : ""}</div>`;
-  // Packing: your own list on this phone, folded until you want it, with Dot's suggestions for this trip.
-  const list = packList(ev), packed = list.filter(p => p.done).length, pOpen = collapsedOpen("friendlyPackOpen:" + ev.id, false);
-  const ideas = dotPackIdeas(ev).filter(i => !list.some(p => p.t.toLowerCase() === i.toLowerCase())), dest = tripRoute(ev)[0] || "";
-  const packBlock = `<div class="day-sec trip-fold ${pOpen ? "open" : ""}" id="packSec"><button type="button" class="glass-sub inv-toggle" id="packToggle" aria-expanded="${pOpen}"><span>🎒 Packing <span class="muted-th sm">· ${list.length ? `${packed} of ${list.length} packed` : "your list"}</span></span><span class="inv-chev">›</span></button>
-    <div class="inv-body"><p class="muted-th sm" style="margin:0 0 6px">Your own list, kept on this phone. Things the group shares go on the bring list in the ${spansDay(ev, t) ? "Today" : "Travel day"} card.</p>
-    <div class="trip-pack">${list.map((p, i) => `<label class="trip-pack-row"><input type="checkbox" data-pack="${i}" ${p.done ? "checked" : ""}><span class="${p.done ? "done" : ""}">${esc(p.t)}</span><button type="button" class="wall-del" data-packdel="${i}" aria-label="Remove ${esc(p.t)}">✕</button></label>`).join("")}</div>
-    <form class="trip-pack-add" id="packAdd"><input id="packText" maxlength="40" placeholder="Swimsuit, sunscreen, charger…" aria-label="Add to your packing list"><button type="submit" class="btn-th small">Add</button></form>
-    ${ideas.length ? `<div class="dot-note" style="margin-top:10px">${dot("happy", 40)}<span>${list.length ? "A few more for this trip" : `For ${n} day${n === 1 ? "" : "s"}${dest ? " in " + esc(dest) : ""}`}: ${esc(ideas.slice(0, 5).join(", "))}${ideas.length > 5 ? ", and more" : ""}.</span></div><button type="button" class="btn-th small accent" id="packDot" style="margin-top:4px">＋ Add Dot's ${ideas.length} item${ideas.length === 1 ? "" : "s"}</button>` : ""}</div></div>`;
+  const itinerary = sel === "all" ? days.map(d => dayBlock(d, false)).join("") : dayBlock(sel, true);
   return `<div class="glass-head">Itinerary <span>${n} day${n === 1 ? "" : "s"}${all.length ? ` · ${all.length} stop${all.length === 1 ? "" : "s"}` : ""}</span></div>
-    <div class="trip-strip" id="tripStrip">${days.map(chip).join("")}<button type="button" class="tday all ${sel === "all" ? "on" : ""}" data-tripday="all" aria-pressed="${sel === "all"}"><small>All</small><b>${n}</b><i></i></button></div>
+    <p class="muted-th sm trip-why">Where we'll be, day by day.${manage ? " Tap a stop to edit it, or a day to see just that day." : " Tap a day to see just that day, or a stop for details and directions."}</p>
+    <div class="trip-strip" id="tripStrip"><button type="button" class="tday all ${sel === "all" ? "on" : ""}" data-tripday="all" aria-pressed="${sel === "all"}"><small>${n} day${n === 1 ? "" : "s"}</small><b>All</b><i></i></button>${days.map(chip).join("")}</div>
     ${itinerary}
-    ${manage ? `<div class="btnrow" style="margin-top:10px"><button type="button" class="btn-th small" id="tripImport">📷 Import an itinerary</button></div>` : ""}
-    ${gettingThere}${stayBlock}${packBlock}`;
+    ${manage ? `<div class="btnrow" style="margin-top:10px"><button type="button" class="btn-th small" id="tripImport">📷 Import an itinerary</button></div>` : ""}`;
 }
 // What Dot would pack for this trip, from where it goes, how long it is, and the forecast. Deterministic, no AI call.
 function dotPackIdeas(ev) {
@@ -5203,8 +5182,18 @@ function dotPackIdeas(ev) {
   return [...new Set(out)];
 }
 const packKey = ev => "friendlyPack:" + ev.id;
-function packList(ev) { try { return JSON.parse(LS.get(packKey(ev)) || "[]"); } catch { return []; } }
-function savePack(ev, list) { try { LS.set(packKey(ev), JSON.stringify(list.slice(0, 60))); } catch {} const tc = el("tripCard"); if (tc) { tc.innerHTML = tripInner(ev); wireTrip(ev); wireDay(ev); } }
+// Your packing list lives in a comment doc of kind "pack" (one per person per trip): items you added and which of the
+// host's everyone-items you've ticked. Lists kept on the phone before this move up the first time comments load.
+const myPackDoc = ev => typed("pack", () => true).find(c => c.authorId === myUid()) || null;
+function packList(ev) { const d = myPackDoc(ev); if (d) return Array.isArray(d.items) ? d.items.map(p => ({ t: String(p.t || ""), done: !!p.done })) : []; try { return JSON.parse(LS.get(packKey(ev)) || "[]"); } catch { return []; } }
+async function savePack(ev, list, ticked) {
+  const d = myPackDoc(ev), items = list.slice(0, 60).map(p => ({ t: String(p.t).slice(0, 40), done: !!p.done })), tk = (ticked || (d && d.ticked) || []).slice(0, 60);
+  try {
+    if (d) await updateDoc(doc(subCol(ev, "comments"), d.id), { items, ticked: tk });
+    else await addDoc(subCol(ev, "comments"), { kind: "pack", items, ticked: tk, authorId: myUid(), authorName: S.profile.name || "", text: "", createdAt: Date.now() });
+    try { LS.set(packKey(ev), "[]"); } catch {}
+  } catch (e) { toast(e.message); }
+}
 function wireTrip(ev) {
   const me = myUid(), repaint = () => { const tc = el("tripCard"); if (tc) { tc.innerHTML = tripInner(ev); wireTrip(ev); wireDay(ev); } };
   { const strip = el("tripStrip"), on = strip && strip.querySelector(".tday.on"); if (strip && on && (on.offsetLeft < strip.scrollLeft || on.offsetLeft + on.clientWidth > strip.scrollLeft + strip.clientWidth)) strip.scrollLeft = Math.max(0, on.offsetLeft - strip.clientWidth / 2 + on.clientWidth / 2); }
@@ -5227,11 +5216,120 @@ function wireTrip(ev) {
   if (el("addRoom")) el("addRoom").onclick = () => { const W = stayWords(ev.stay); dialog(`<h3>Add a ${W.room}</h3><div class="two"><label class="field"><span>${W.room[0].toUpperCase() + W.room.slice(1)}</span><input id="rmName" maxlength="40" placeholder="${W.kind === "ship" ? "Sea Terrace 11432, Insider 8201" : "Lake room, Loft, Pullout"}"></label><label class="field"><span>Sleeps</span><input id="rmBeds" inputmode="numeric" value="2"></label></div><p class="muted sm">People take their own spot. Leave Sleeps blank for no limit.</p>`, "Add", async () => {
     const item = el("rmName").value.trim(); if (!item) return toast(`Name the ${W.room}.`); const qty = el("rmBeds").value.trim();
     try { await addDoc(subCol(ev, "comments"), { kind: "room", item, qty: /^\d+$/.test(qty) ? qty : "", authorId: me, authorName: S.profile.name, text: "", createdAt: Date.now() }); closeDialog(); } catch (e) { toast(e.message); } }); };
-  if (el("packToggle")) el("packToggle").onclick = () => { const sec = el("packSec"), open = !sec.classList.contains("open"); sec.classList.toggle("open", open); el("packToggle").setAttribute("aria-expanded", open); try { LS.set("friendlyPackOpen:" + ev.id, open ? "1" : "0"); } catch {} };
-  document.querySelectorAll("[data-pack]").forEach(cb => cb.onchange = () => { const l = packList(ev); if (l[+cb.dataset.pack]) l[+cb.dataset.pack].done = cb.checked; savePack(ev, l); });
-  document.querySelectorAll("[data-packdel]").forEach(b => b.onclick = () => { const l = packList(ev); l.splice(+b.dataset.packdel, 1); savePack(ev, l); });
-  if (el("packAdd")) el("packAdd").onsubmit = e => { e.preventDefault(); const t = el("packText").value.trim(); if (!t) return; savePack(ev, [...packList(ev), { t, done: false }]); const inp = el("packText"); if (inp) inp.focus(); };
-  if (el("packDot")) el("packDot").onclick = () => { const l = packList(ev), add = dotPackIdeas(ev).filter(i => !l.some(p => p.t.toLowerCase() === i.toLowerCase())); savePack(ev, [...l, ...add.map(t => ({ t, done: false }))]); toast(`Added ${add.length} to your list`, null, null, "happy"); };
+}
+
+// ---- The trip's other cards. Each one is for one thing, said in its first line.
+const TRAVEL_MODES = { flight: ["✈️", "Flying"], drive: ["🚗", "Driving"], train: ["🚆", "Train"], bus: ["🚌", "Bus"], ride: ["🚕", "Ride or taxi"], other: ["📍", "Other"] };
+const evPeople = ev => [ev.hostId, ...(ev.cohostUids || []), ...(ev.invitedUids || [])].filter((u, i, a) => u && a.indexOf(u) === i);
+// Travel: how each person gets to the trip and back home, so rides and pickups are easy to sort out.
+function travelInner(ev) {
+  const me = myUid(), manage = canManage(ev), days = tripDays(ev), last = days[days.length - 1], all = evStops(ev), st = ev.stay || {}, W = stayWords(st);
+  const plans = typed("travel", () => true);
+  // the group's own anchor from the itinerary: boarding or check-in on day 1, off the ship or check-out on the last day
+  const meet = leg => {
+    const x = leg === "there" ? all.find(y => y.day === days[0] && ["boarding", "checkin"].includes(y.kind)) : all.find(y => y.day === last && y.kind === "checkout");
+    if (x) return `${x.emoji || "📍"} ${x.name || placeName(x.place)} · ${dayMid(x.day)}${x.time ? " · " + fmtTime(x.time) : ""}${x.place ? " · " + placeName(x.place) : ""}`;
+    const tm = leg === "there" ? st.checkIn : st.checkOut;
+    if (st.name && tm) return `${W.emoji} ${leg === "there" ? (W.kind === "ship" ? "Boarding" : "Check-in") : (W.kind === "ship" ? "Off the ship" : "Check-out")} · ${dayMid(leg === "there" ? days[0] : last)} · ${tm}${st.address ? " · " + placeName(st.address) : ""}`;
+    return "";
+  };
+  const row = c => { const own = c.authorId === me, m = TRAVEL_MODES[c.mode] || TRAVEL_MODES.other;
+    return `<div class="trav-row ${own ? "own" : ""}" ${own ? `data-trav="${c.id}" role="button" tabindex="0" aria-label="Edit your travel"` : ""}>${avatar(c.authorId, "xs")}<span class="tstop-txt"><b>${own ? "You" : esc(first(c.authorName || nameOf(c.authorId)))} · ${m[0]} ${esc(c.what || m[1])}</b><small>${[c.day ? dayMid(c.day) : "", c.time ? (c.leg === "home" ? "leaving " : "arriving ") + fmtTime(c.time) : "", c.note || ""].filter(Boolean).map(esc).join(" · ")}</small></span>${own ? `<span class="tstop-chev" aria-hidden="true">›</span>` : manage ? `<button type="button" class="wall-del" data-delc="${c.id}" aria-label="Remove">✕</button>` : ""}</div>`; };
+  const sec = (leg, title, emoji, blurb) => { const mine = plans.filter(c => c.leg === leg).sort((a, b) => (a.day || "").localeCompare(b.day || "") || (a.time || "").localeCompare(b.time || "")), mt = meet(leg), own = mine.some(c => c.authorId === me);
+    return `<div class="day-sec"><div class="glass-sub">${emoji} ${title} <button type="button" class="btn-th ghost small" data-travadd="${leg}">${own ? "＋ Add another" : "＋ Add yours"}</button></div>
+      ${mt ? `<p class="muted-th sm trav-meet">${esc(mt)}</p>` : ""}
+      ${mine.length ? `<div class="tstops">${mine.map(row).join("")}</div>` : `<p class="muted-th sm" style="margin:2px 0 4px">${blurb}</p>`}</div>`; };
+  return `<div class="glass-head">✈️ Travel <span>there and back</span></div>
+    <p class="muted-th sm trip-why">How each of us is getting to the trip and back home. Add yours so rides and pickups are easy to sort out.</p>
+    ${sec("there", "Getting there", "🛫", "No one's added theirs yet. Flight, drive, or train: say when you land or roll in.")}
+    ${sec("home", "Getting home", "🛬", "No one's added theirs yet. Say when you're heading out.")}`;
+}
+// The ship, hotel, house, or campsite, and who sleeps where. Guests take a spot; hosts can also assign people.
+function stayInner(ev) {
+  const me = myUid(), manage = canManage(ev), st = ev.stay || {}, W = stayWords(st), rooms = typed("room");
+  const roomRow = c => { const s = bringState(c), inRoom = s.who.includes(me);
+    return `<div class="day-row"><span style="flex:1;min-width:0"><b>${esc(c.item)}</b>${c.qty ? ` <span class="muted-th sm">· sleeps ${esc(c.qty)}</span>` : ""}<div class="muted-th sm">${s.who.length ? `<span class="hd-faces">${s.who.slice(0, 5).map(u => avatar(u, "xs")).join("")}</span> ${s.who.map(u => esc(first(claimerName(c, u)))).join(", ")}` : "Nobody yet"}</div></span>
+      ${inRoom ? `<button type="button" class="btn-th small accent" data-claim="${c.id}" title="Tap to leave">✓ You're in</button>` : s.covered ? `<span class="muted-th sm">Full</span>` : `<button type="button" class="btn-th small" data-claim="${c.id}">Take a spot</button>`}${manage ? `<button type="button" class="btn-th ghost small" data-assign="${c.id}">Assign</button><button type="button" class="wall-del" data-delc="${c.id}" title="Remove" aria-label="Remove ${esc(c.item)}">✕</button>` : ""}</div>`; };
+  const details = [st.address ? esc(st.address) : "", st.checkIn ? W.inLbl + " " + esc(st.checkIn) : "", st.checkOut ? W.outLbl + " " + esc(st.checkOut) : "", st.code ? "code " + esc(st.code) : ""].filter(Boolean).join(" · ");
+  return `<div class="glass-head">${W.emoji} ${esc(W.title)} <span>${st.name ? esc(st.name) : "where we sleep"}</span></div>
+    <p class="muted-th sm trip-why">Where we're sleeping.${rooms.length || manage ? ` Take a ${W.room} so everyone knows who's where${manage ? ", or assign people yourself" : ""}.` : ""}</p>
+    ${st.name ? `<div class="day-row" style="border-top:0;padding-top:2px"><span style="flex:1;min-width:0"><b>${esc(st.name)}</b>${details ? `<div class="muted-th sm">${details}</div>` : ""}${st.note ? `<div class="muted-th sm">${esc(st.note)}</div>` : ""}</span>${st.address ? `<a class="btn-th small" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(st.address)}" target="_blank" rel="noopener">Map</a>` : ""}${manage ? `<button type="button" class="btn-th ghost small" id="editStay">Edit</button>` : ""}</div>`
+      : `<p class="muted-th sm" style="margin:2px 0 6px">${manage ? "Add the ship, hotel, or house, then the cabins or rooms people can take." : "The host hasn't added where we're staying yet."}</p>${manage ? `<button type="button" class="btn-th small" id="editStay">＋ Add where everyone's staying</button>` : ""}`}
+    ${rooms.length ? `<div class="trip-rooms">${rooms.map(roomRow).join("")}</div>` : ""}
+    ${manage ? `<div class="btnrow" style="margin-top:6px"><button type="button" class="btn-th ghost small" id="addRoom">＋ Add a ${W.room}</button></div>` : ""}`;
+}
+// Packing: your own checklist for your bag, synced to your account, with the host's items for everyone on top.
+function packInner(ev) {
+  const manage = canManage(ev), t = todayStr(), d = myPackDoc(ev);
+  if (!d && S._commentsReady === ev.id && S._packMig !== ev.id && packList(ev).length) { S._packMig = ev.id; savePack(ev, packList(ev)); }
+  const list = packList(ev), ticked = (d && Array.isArray(d.ticked) ? d.ticked : []), shared = (ev.pack || []).slice(0, 40), n = tripLen(ev);
+  const packed = list.filter(p => p.done).length + shared.filter(s => ticked.includes(s)).length, total = list.length + shared.length;
+  const ideas = dotPackIdeas(ev).filter(i => !list.some(p => p.t.toLowerCase() === i.toLowerCase()) && !shared.some(s => s.toLowerCase() === i.toLowerCase())), dest = tripRoute(ev)[0] || "";
+  const row = (txt, done, data, del) => `<label class="trip-pack-row"><input type="checkbox" ${data} ${done ? "checked" : ""}><span class="${done ? "done" : ""}">${esc(txt)}</span>${del ? `<button type="button" class="wall-del" ${del} aria-label="Remove ${esc(txt)}">✕</button>` : ""}</label>`;
+  return `<div class="glass-head">🎒 Packing <span>${total ? `${packed} of ${total} packed` : "your checklist"}</span></div>
+    <p class="muted-th sm trip-why">Your own checklist for your bag. Only you see what you've ticked. Things the group shares, like snacks or a speaker, go on the bring list in the ${spansDay(ev, t) ? "Today" : "First day"} card.</p>
+    ${shared.length || manage ? `<div class="day-sec"><div class="glass-sub">Everyone should pack ${manage ? `<button type="button" class="btn-th ghost small" id="packShared">＋ Add</button>` : ""}</div>
+      ${shared.length ? `<div class="trip-pack">${shared.map(s => row(s, ticked.includes(s), `data-packall="${esc(s)}"`, manage ? `data-packalldel="${esc(s)}"` : "")).join("")}</div>` : `<p class="muted-th sm" style="margin:2px 0 4px">Things the whole crew needs, like a passport or an outfit for theme night. They show on everyone's list.</p>`}</div>` : ""}
+    <div class="day-sec"><div class="glass-sub">Your list</div>
+      ${list.length ? `<div class="trip-pack">${list.map((p, i) => row(p.t, p.done, `data-pack="${i}"`, `data-packdel="${i}"`)).join("")}</div>` : ""}
+      <form class="trip-pack-add" id="packAdd"><input id="packText" maxlength="40" placeholder="Swimsuit, sunscreen, charger…" aria-label="Add to your packing list"><button type="submit" class="btn-th small">Add</button></form>
+      ${ideas.length ? `<div class="dot-note" style="margin-top:10px">${dot("happy", 40)}<span>${list.length ? "A few more for this trip" : `For ${n} day${n === 1 ? "" : "s"}${dest ? " in " + esc(dest) : ""}`}: ${esc(ideas.slice(0, 5).join(", "))}${ideas.length > 5 ? ", and more" : ""}.</span></div><button type="button" class="btn-th small accent" id="packDot" style="margin-top:4px">＋ Add Dot's ideas</button>` : ""}</div>`;
+}
+function paintTripCards(ev) {
+  const put = (id, html) => { const n = el(id); if (n) n.innerHTML = html; return !!n; };
+  if (!put("tripCard", tripInner(ev))) return;
+  put("travelCard", travelInner(ev)); put("stayCard", stayInner(ev)); put("packCard", packInner(ev));
+  wireTripCards(ev);
+}
+function wireTripCards(ev) { wireTrip(ev); wireTravel(ev); wireStay(ev); wirePack(ev); wireDay(ev); }
+function wireTravel(ev) {
+  document.querySelectorAll("#travelCard [data-travadd]").forEach(b => b.onclick = () => openTravelSheet(ev, b.dataset.travadd, null));
+  document.querySelectorAll("#travelCard [data-trav]").forEach(r => { const open = () => { const c = S.comments.find(x => x.id === r.dataset.trav); if (c) openTravelSheet(ev, c.leg, c); }; r.onclick = open; r.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } }; });
+  document.querySelectorAll("#travelCard [data-delc]").forEach(b => b.onclick = () => deleteComment(ev, b.dataset.delc));
+}
+function wireStay(ev) {
+  document.querySelectorAll("#stayCard [data-assign]").forEach(b => b.onclick = () => { const c = S.comments.find(x => x.id === b.dataset.assign); if (c) openAssignSheet(ev, c); });
+  document.querySelectorAll("#stayCard [data-delc]").forEach(b => b.onclick = () => deleteComment(ev, b.dataset.delc));
+}
+function wirePack(ev) {
+  document.querySelectorAll("#packCard [data-pack]").forEach(cb => cb.onchange = () => { const l = packList(ev); if (l[+cb.dataset.pack]) l[+cb.dataset.pack].done = cb.checked; savePack(ev, l); });
+  document.querySelectorAll("#packCard [data-packdel]").forEach(b => b.onclick = () => { const l = packList(ev); l.splice(+b.dataset.packdel, 1); savePack(ev, l); });
+  document.querySelectorAll("#packCard [data-packall]").forEach(cb => cb.onchange = () => { const d = myPackDoc(ev), tk = new Set((d && d.ticked) || []); if (cb.checked) tk.add(cb.dataset.packall); else tk.delete(cb.dataset.packall); savePack(ev, packList(ev), [...tk]); });
+  document.querySelectorAll("#packCard [data-packalldel]").forEach(b => b.onclick = async () => { try { await updateDoc(doc(db, "events", ev.id), { pack: arrayRemove(b.dataset.packalldel) }); } catch (e) { toast(e.message); } });
+  if (el("packAdd")) el("packAdd").onsubmit = e => { e.preventDefault(); const t = el("packText").value.trim(); if (!t) return; savePack(ev, [...packList(ev), { t, done: false }]); el("packText").value = ""; el("packText").focus(); };
+  if (el("packDot")) el("packDot").onclick = () => { const l = packList(ev), add = dotPackIdeas(ev).filter(i => !l.some(p => p.t.toLowerCase() === i.toLowerCase()) && !(ev.pack || []).some(s => s.toLowerCase() === i.toLowerCase())); savePack(ev, [...l, ...add.map(t => ({ t, done: false }))]); toast(`Added ${add.length} to your list`, null, null, "happy"); };
+  if (el("packShared")) el("packShared").onclick = () => { dialog(`<h3>Everyone should pack</h3><p class="muted sm" style="margin:0 0 8px">These show on every guest's packing list. One per line.</p><label class="field"><span>Items</span><textarea id="packSharedText" rows="4" placeholder="Passport&#10;Outfit for theme night&#10;Reusable water bottle"></textarea></label>`, "Add", async () => {
+    const items = el("packSharedText").value.split(/\n|,/).map(s => s.trim().slice(0, 40)).filter(Boolean).slice(0, 20); if (!items.length) return toast("Add at least one thing.");
+    try { await updateDoc(doc(db, "events", ev.id), { pack: arrayUnion(...items) }); closeDialog(); } catch (e) { toast(e.message); } }); setTimeout(() => { const t = el("packSharedText"); if (t) t.focus(); }, 50); };
+}
+// Your own way there or home. Everyone on the trip sees it; only you can change it (hosts can remove it).
+function openTravelSheet(ev, leg, c) {
+  const me = myUid(), days = tripDays(ev), day0 = days[0], last = days[days.length - 1], there = leg !== "home";
+  const opts = there ? [addDays(day0, -1), ...days] : [...days, addDays(last, 1)];
+  const v = c || { mode: "flight", what: "", day: there ? day0 : last, time: "", note: "" };
+  const ph = { flight: "AA 1234, DFW to MIA", drive: "Driving from Dallas, room for 2", train: "Amtrak from Fort Worth", bus: "Bus from Austin", ride: "Uber from the airport", other: there ? "How you're getting there" : "How you're getting home" };
+  dialog(`<h3>${c ? "Your way" : "How are you getting"} ${there ? "there" : "home"}${c ? "" : "?"}</h3>
+    <div class="chiprow" id="tvModes" style="flex-wrap:wrap;overflow:visible;padding-bottom:0;margin-bottom:8px">${Object.entries(TRAVEL_MODES).map(([k, [e, l]]) => `<button type="button" class="fchip ${v.mode === k ? "on" : ""}" data-tvmode="${k}">${e} ${l}</button>`).join("")}</div>
+    <label class="field"><span>Details</span><input id="tvWhat" maxlength="80" value="${esc(v.what || "")}" placeholder="${esc(ph[v.mode] || ph.other)}"></label>
+    <div class="two"><label class="field"><span>Day</span><select id="tvDay">${opts.map(d => `<option value="${d}" ${d === v.day ? "selected" : ""}>${esc(dayMid(d))}${d < day0 ? " (day before)" : d > last ? " (day after)" : ""}</option>`).join("")}</select></label><label class="field"><span>${there ? "Arriving" : "Leaving"} <span class="muted">(optional)</span></span><input id="tvTime" type="time" value="${esc(v.time || "")}"></label></div>
+    <label class="field"><span>Note <span class="muted">(optional)</span></span><input id="tvNote" maxlength="120" value="${esc(v.note || "")}" placeholder="Confirmation, seats, need a ride from the airport…"></label>
+    <p class="muted sm" style="margin:0 0 4px">Everyone on the trip sees this.</p>
+    ${c ? `<button type="button" class="btn danger-ghost" id="tvRemove" style="width:100%;margin-top:4px">Remove</button>` : ""}`, c ? "Save" : "Add", async () => {
+    const what = el("tvWhat").value.trim(), mode = (document.querySelector("#tvModes .fchip.on") || { dataset: {} }).dataset.tvmode || "other";
+    if (!what) return toast(`Say how you're getting ${there ? "there" : "home"}.`);
+    const data = { leg: there ? "there" : "home", mode, what, day: el("tvDay").value, time: el("tvTime").value || "", note: el("tvNote").value.trim() };
+    try { if (c) await updateDoc(doc(subCol(ev, "comments"), c.id), data); else await addDoc(subCol(ev, "comments"), { kind: "travel", ...data, authorId: me, authorName: S.profile.name || "", text: "", createdAt: Date.now() }); closeDialog(); } catch (e) { toast(e.message); } });
+  document.querySelectorAll("#tvModes [data-tvmode]").forEach(b => b.onclick = () => { document.querySelectorAll("#tvModes .fchip").forEach(x => x.classList.toggle("on", x === b)); el("tvWhat").placeholder = ph[b.dataset.tvmode] || ph.other; });
+  if (el("tvRemove")) el("tvRemove").onclick = async () => { await deleteComment(ev, c.id); closeDialog(); };
+}
+// Hosts put people in a cabin or room (the same claim the guests' Take a spot button writes).
+function openAssignSheet(ev, c) {
+  const s = bringState(c), people = evPeople(ev), cur = new Set(s.who);
+  dialog(`<h3>Who's in ${esc(c.item)}?</h3><p class="muted sm" style="margin:0 0 8px">${c.qty ? `Sleeps ${esc(c.qty)}. ` : ""}Tick everyone sleeping here.</p>
+    <div class="assign-list">${people.map(u => `<label class="trip-pack-row"><input type="checkbox" data-asg="${esc(u)}" ${cur.has(u) ? "checked" : ""}>${avatar(u, "xs")}<span>${esc(nameOf(u))}${u === ev.hostId ? ' <span class="muted sm">· host</span>' : ""}</span></label>`).join("")}</div>`, "Save", async () => {
+    const chosen = [...document.querySelectorAll("[data-asg]:checked")].map(x => x.dataset.asg), names = {};
+    for (const u of chosen) names[u] = (((c.reactions || {}).claimNames || {})[u]) || nameOf(u);
+    try { await updateDoc(doc(subCol(ev, "comments"), c.id), { "reactions.claim": chosen, "reactions.claimNames": names, "reactions.claimQty": deleteField() }); closeDialog(); } catch (e) { toast(e.message); } });
 }
 // One stop on the itinerary: add or edit it (hosts), or see it (guests). Removing takes two taps, no system pop-up.
 const STOP_SHEET_EMOJIS = [...new Set([...Object.values(TRIP_KINDS).map(k => k[0]), ...STOP_EMOJIS])];
