@@ -564,8 +564,8 @@ const milesOf = m => CURATE_MILES.includes(Number(m)) ? Number(m) : DEFAULT_MILE
 const curatedKey = (city, miles) => cityKeyOf(city) + (milesOf(miles) === DEFAULT_MILES ? "" : "--" + milesOf(miles) + "mi");
 const nearArea = (city, miles) => { const m = milesOf(miles); return m <= 5 ? `in ${city} itself, within about 5 miles of it (nothing farther)` : `in or around ${city}, within about ${m} miles of it (nothing farther)`; };
 // ---- Real venue facts: Google Places API (New). "unset" = not configured; everything degrades to Dot's own words. ----
-// placeFacts/{key} caches one place for a day. The nightly Curate check asks for the cheaper "pro" fields only; the
-// in-app details sheet and booking rows ask for the extras (reservable, outdoor seating, parking, summary, photos).
+// placeFacts/{key} caches one place for a month (details for a week). The nightly Curate check asks for Pro fields only;
+// the in-app details sheet and booking rows ask for the Enterprise details and Atmosphere extras by place id.
 // Optional API keys live in Firestore config/keys { places, ticketmaster } (no client access; Wes pastes them in the
 // Firebase console). Missing or "unset" means off, and everything degrades to Dot's own words.
 const KEYS = { at: 0, v: {} };
@@ -590,33 +590,49 @@ async function findPlacesKey() {
 }
 const PRICE_WORDS = { PRICE_LEVEL_FREE: "Free", PRICE_LEVEL_INEXPENSIVE: "$", PRICE_LEVEL_MODERATE: "$$", PRICE_LEVEL_EXPENSIVE: "$$$", PRICE_LEVEL_VERY_EXPENSIVE: "$$$$" };
 const factsKey = (name, near) => (venueKey(name) + "|" + venueKey(near)).replace(/[^a-z0-9|]+/g, "-").slice(0, 120) || "x";
-const PRO_FIELDS = "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.priceLevel,places.nationalPhoneNumber,places.websiteUri,places.googleMapsUri,places.currentOpeningHours,places.businessStatus,places.primaryTypeDisplayName";
-const MORE_FIELDS = "reservable,outdoorSeating,parkingOptions,editorialSummary,photos";
+// Google bills a lookup by the dearest field it asks for. The nightly check asks for Pro fields only (name, address,
+// pin, Maps link, still open, type), which sit inside Google's free monthly allowance; the Enterprise details (rating,
+// price, phone, website, hours) and the Atmosphere extras (reservable, outdoor seating, parking, summary, photos) are
+// fetched only when someone opens a venue in the app, by place id, so there is no second text search. A venue's facts
+// keep for a month and its details for a week, and the nightly pass stops after PLACES_NIGHT_CAP new lookups a day.
+const PRO_FIELDS = "places.id,places.displayName,places.formattedAddress,places.location,places.googleMapsUri,places.businessStatus,places.primaryTypeDisplayName";
+const MORE_FIELDS = "rating,userRatingCount,priceLevel,nationalPhoneNumber,websiteUri,currentOpeningHours,reservable,outdoorSeating,parkingOptions,editorialSummary,photos";
+const FACTS_TTL = 30 * 864e5, MORE_TTL = 7 * 864e5, PLACES_NIGHT_CAP = 150;
 const parkingWords = p => { if (!p) return ""; const w = []; if (p.freeParkingLot) w.push("free lot"); if (p.paidParkingLot) w.push("paid lot"); if (p.freeGarageParking) w.push("free garage"); if (p.paidGarageParking) w.push("paid garage"); if (p.freeStreetParking) w.push("free street parking"); if (p.paidStreetParking) w.push("paid street parking"); if (p.valetParking) w.push("valet"); return w.join(", "); };
+// The nightly pass's lookups today (config/placesDay). Past the cap it stops asking Google; the app's own lookups don't count.
+async function nightLookupsLeft() {
+  const day = new Date().toISOString().slice(0, 10), ref = db.doc("config/placesDay");
+  const snap = await ref.get(); const d = snap.exists ? snap.data() : {}; const n = d.day === day ? (d.n || 0) : 0;
+  if (n >= PLACES_NIGHT_CAP) { if (n === PLACES_NIGHT_CAP) logger.info("places: nightly cap reached for " + day); return false; }
+  await ref.set(d.day === day ? { n: FieldValue.increment(1) } : { day, n: 1 }, { merge: true }).catch(() => {});
+  return true;
+}
 async function placeFacts(name, near, more) {
   const key = await apiKey("places"); name = sv(name, 100); near = sv(near, 80); if (!key || !name) return null;
   const ref = db.doc("placeFacts/" + factsKey(name, near)); const snap = await ref.get(); const c = snap.exists ? snap.data() : null;
-  if (c && Date.now() - (c.at || 0) < 24 * 36e5 && (!more || c.more || c.missing)) return c.missing ? null : c;
+  const now = Date.now(), fresh = !!c && now - (c.at || 0) < FACTS_TTL;
+  if (fresh && c.missing) return null;
+  if (fresh && (!more || (c.more && now - (c.moreAt || 0) < MORE_TTL))) return c;
+  if (!more && !(await nightLookupsLeft())) return c && !c.missing ? c : null;
   const hdr = { "Content-Type": "application/json", "X-Goog-Api-Key": key };
-  let f = null;
+  let f = fresh && c.id ? { ...c } : null;
   try {
-    const r = await fetch("https://places.googleapis.com/v1/places:searchText", { method: "POST", headers: { ...hdr, "X-Goog-FieldMask": PRO_FIELDS }, body: JSON.stringify({ textQuery: near ? name + " near " + near : name, maxResultCount: 1, languageCode: "en" }) });
-    if (!r.ok) throw new Error("places " + r.status + " " + (await r.text()).slice(0, 120));
-    const p = ((await r.json()).places || [])[0];
-    if (p) {
-      f = { id: p.id, name: (p.displayName || {}).text || name, address: p.formattedAddress || "", lat: p.location ? p.location.latitude : null, lng: p.location ? p.location.longitude : null, rating: p.rating || 0, ratings: p.userRatingCount || 0, price: PRICE_WORDS[p.priceLevel] || "", phone: p.nationalPhoneNumber || "", website: p.websiteUri || "", maps: p.googleMapsUri || "", openNow: p.currentOpeningHours ? !!p.currentOpeningHours.openNow : null, hours: (p.currentOpeningHours || {}).weekdayDescriptions || [], status: p.businessStatus || "", type: (p.primaryTypeDisplayName || {}).text || "", at: Date.now() };
-      if (more) {
-        const r2 = await fetch(`https://places.googleapis.com/v1/places/${p.id}`, { headers: { ...hdr, "X-Goog-FieldMask": MORE_FIELDS } });
-        if (r2.ok) {
-          const q = await r2.json();
-          f.reservable = q.reservable === true ? true : q.reservable === false ? false : null; f.outdoor = !!q.outdoorSeating; f.parking = parkingWords(q.parkingOptions); f.summary = (q.editorialSummary || {}).text || ""; f.photos = [];
-          for (const ph of (q.photos || []).slice(0, 3)) { try { const r3 = await fetch(`https://places.googleapis.com/v1/${ph.name}/media?maxWidthPx=640&skipHttpRedirect=true&key=${key}`); if (r3.ok) { const j = await r3.json(); if (j.photoUri) f.photos.push(j.photoUri); } } catch {} }
-          f.more = true;
-        }
-      }
+    if (!f) {
+      const r = await fetch("https://places.googleapis.com/v1/places:searchText", { method: "POST", headers: { ...hdr, "X-Goog-FieldMask": PRO_FIELDS }, body: JSON.stringify({ textQuery: near ? name + " near " + near : name, maxResultCount: 1, languageCode: "en" }) });
+      if (!r.ok) throw new Error("places " + r.status + " " + (await r.text()).slice(0, 120));
+      const p = ((await r.json()).places || [])[0];
+      if (p) f = { ...(c && c.id === p.id ? c : {}), id: p.id, name: (p.displayName || {}).text || name, address: p.formattedAddress || "", lat: p.location ? p.location.latitude : null, lng: p.location ? p.location.longitude : null, maps: p.googleMapsUri || "", status: p.businessStatus || "", type: (p.primaryTypeDisplayName || {}).text || "", at: now };
+    }
+    if (f && more) {
+      const r2 = await fetch(`https://places.googleapis.com/v1/places/${f.id}`, { headers: { ...hdr, "X-Goog-FieldMask": MORE_FIELDS } });
+      if (!r2.ok) throw new Error("place " + r2.status + " " + (await r2.text()).slice(0, 120));
+      const q = await r2.json();
+      Object.assign(f, { rating: q.rating || 0, ratings: q.userRatingCount || 0, price: PRICE_WORDS[q.priceLevel] || "", phone: q.nationalPhoneNumber || "", website: q.websiteUri || "", openNow: q.currentOpeningHours ? !!q.currentOpeningHours.openNow : null, hours: (q.currentOpeningHours || {}).weekdayDescriptions || [],
+        reservable: q.reservable === true ? true : q.reservable === false ? false : null, outdoor: !!q.outdoorSeating, parking: parkingWords(q.parkingOptions), summary: (q.editorialSummary || {}).text || "", photos: [], more: true, moreAt: now });
+      for (const ph of (q.photos || []).slice(0, 3)) { try { const r3 = await fetch(`https://places.googleapis.com/v1/${ph.name}/media?maxWidthPx=640&skipHttpRedirect=true&key=${key}`); if (r3.ok) { const j = await r3.json(); if (j.photoUri) f.photos.push(j.photoUri); } } catch {} }
     }
   } catch (err) { logger.warn("placeFacts " + name + ": " + err.message); return c && !c.missing ? c : null; }
-  await ref.set(f || { missing: true, at: Date.now() }).catch(() => {});
+  await ref.set(f || { missing: true, at: now }).catch(() => {});
   return f;
 }
 // In-app lookup (details sheet, booking rows, rides): signed-in users only, cached a day per place.
@@ -628,7 +644,7 @@ exports.facts = onRequest({ region: "us-central1", invoker: "public", memory: "2
   if (!(await apiKey("places"))) { res.json({ off: true }); return; }
   const q = sv(req.query.q, 100), near = sv(req.query.near, 80); if (!q) { res.status(400).json({ error: "q" }); return; }
   const f = await placeFacts(q, near, true);
-  res.json(f || { missing: true });
+  res.json(f ? { ...f, openNow: f.moreAt && Date.now() - f.moreAt < 36e5 ? f.openNow : null } : { missing: true });
 });
 // Nightly: check each night's places against Google (pro facts only) and drop any that closed for good.
 async function attachFacts(nights, city) {
@@ -637,7 +653,7 @@ async function attachFacts(nights, city) {
   const work = async () => { while (i < nights.length) { const k = i++; const n = nights[k];
     for (const s of (n.stops || []).slice(0, 3)) { if (!s.name || s.kind === "go") continue; const f = await placeFacts(s.name, city, false); if (!f) continue;
       if (f.status === "CLOSED_PERMANENTLY") { keep[k] = false; break; }
-      s.facts = { rating: f.rating, ratings: f.ratings, price: f.price, phone: f.phone, maps: f.maps, website: f.website, lat: f.lat, lng: f.lng, hours: (f.hours || []).slice(0, 7), address: f.address, type: f.type }; }
+      s.facts = { rating: f.rating || 0, ratings: f.ratings || 0, price: f.price || "", phone: f.phone || "", maps: f.maps || "", website: f.website || "", lat: f.lat == null ? null : f.lat, lng: f.lng == null ? null : f.lng, hours: (f.hours || []).slice(0, 7), address: f.address || "", type: f.type || "" }; }
     if (keep[k]) n.checkedAt = Date.now(); else logger.info("curate: dropped " + n.title + " (closed for good)"); } };
   await Promise.all([1, 2, 3, 4].map(work));
   const out = nights.filter((n, k) => keep[k]); return out.length ? out : nights;
