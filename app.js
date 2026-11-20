@@ -177,7 +177,9 @@ if (NATIVE) wireAppLinks();
 // Android's back button/gesture: close an open dialog or tour first, then go back a page, and only leave the app from Events.
 if (NATIVE && IS_ANDROID) { const AppPlugin = plugin("App"); if (AppPlugin && AppPlugin.addListener) AppPlugin.addListener("backButton", () => {
   if (typeof tourStep !== "undefined" && tourStep >= 0) return endTour();
+  if (pv && pv.box.classList.contains("pv-plain")) return closePhoto();
   if (document.querySelector("#appDialog[open], dialog[open]")) return closeDialog();
+  if (pv) return pv.sheet ? pv.sheetTo(false) : closePhoto();
   if (location.hash && location.hash !== "#/" && location.hash !== "#") return history.length > 1 ? history.back() : go("#/");
   if (AppPlugin.exitApp) AppPlugin.exitApp();
 }); }
@@ -225,7 +227,7 @@ async function registerPush(uid) {
     // held until auth answers (a few hundred ms), then the screen is opened once.
     Push.addListener("pushNotificationActionPerformed", a => { S._notifTapAt = Date.now(); try { fz.add("notification tap"); if (endReplay) endReplay(true); } catch {} const url = a && a.notification && a.notification.data && a.notification.data.url; if (!url) return;
       if (!S._authKnown) { S._pendingNotif = url; fz.add("notification tap held until sign-in is known"); return; }
-      location.hash = routeTail(url); focusRoute(); });
+      followLink(url); });
     await Push.register();
   } catch {}
 }
@@ -831,10 +833,14 @@ function routeFromPath(h) {
 }
 // New screen, start at the top (the SPA otherwise keeps the old scroll position,
 // so an event page could open at the party wall instead of the cover).
-window.addEventListener("hashchange", () => { S.route = parseRoute(); window.scrollTo(0, 0); render(); focusRoute(); });
+const ownScroll = () => { try { history.scrollRestoration = "manual"; } catch {} }; ownScroll();   // each page change sets its own scroll (below), and closing a picture leaves the last one looked at in view; the browser's own restore on Back would undo that. Set again on every page change: the iPhone gives each new address a fresh "auto".
+window.addEventListener("hashchange", () => { ownScroll(); closePhoto("nav"); S.route = parseRoute(); window.scrollTo(0, 0); render(); focusRoute(); });
 // The "#/..." part of any url (activity items and pushes carry "/#/e/<id>"), with or without a query.
 const routeTail = url => { const s = String(url || ""); const i = s.indexOf("#"); return i < 0 ? "#/" : s.slice(i); };
 const tailOf = url => routeTail(url).split("?")[0];
+// A link followed on purpose (a notification, an Activity row) opens its spot every time, even when it was the last one
+// opened or the page is already on it. Back and Forward landing on the same address do not replay it.
+const followLink = url => { const h = routeTail(url); focusKey = ""; if (location.hash === h) focusRoute(); else location.hash = h; };
 // Notifications and Activity rows open the exact spot: scroll to the message (?c=) or the
 // section (?to=) and flash it. Waits for sign-in and for the data to arrive, since a
 // tapped notification can cold-start the app.
@@ -847,7 +853,7 @@ function focusRoute() {
     if (location.hash !== key) return;
     if (!S.user || !S.ready || document.querySelector(".splash")) { if (tries++ < 400) setTimeout(tick, 250); return; }
     tries++;
-    if (q.photo) { const ev = S.events.get(S.route.id), p = (S.photos || []).find(x => x.id === q.photo); if (ev && p) { openPhoto(ev, p); if (q.c) flashWhenFound(() => document.querySelector(`#pvComments [data-cmsg="${CSS.escape(q.c)}"]`)); return; } if (tries < 60) setTimeout(tick, 250); return; }
+    if (q.photo) { const ev = S.events.get(S.route.id), p = (S.photos || []).find(x => x.id === q.photo); if (ev && p) { openPhoto(ev, p, null, { comments: !!q.c, flash: q.c || "" }); return; } if (tries < 60) setTimeout(tick, 250); return; }
     const msg = q.c && document.querySelector(`[data-cmsg="${CSS.escape(q.c)}"]`);
     const sec = q.to && document.getElementById(q.to);
     // The specific thing behind the alert: a person's row on an expense, a request, a guest's chip, a settle-up row.
@@ -894,7 +900,7 @@ document.addEventListener("click", e => {
 }, true);
 
 // ---------- auth ----------
-const openPendingNotif = () => { const url = S._pendingNotif; if (!url) return; S._pendingNotif = null; fz.add("opening the held notification"); setTimeout(() => { location.hash = routeTail(url); focusRoute(); }, 0); };
+const openPendingNotif = () => { const url = S._pendingNotif; if (!url) return; S._pendingNotif = null; fz.add("opening the held notification"); setTimeout(() => followLink(url), 0); };
 onAuthStateChanged(auth, async u => {
   dogSay({ uid: (u && u.uid) || "" });
   S._authKnown = true; setTimeout(openPendingNotif, 0);
@@ -1230,6 +1236,7 @@ function render() {
   // autosave answers back as a snapshot, and the rebuild closed sections and jumped the form) and a message
   // thread (its own listener paints new messages).
   if (S._bgRender && S.route && ((S.route.name === "new" && el("cTitle")) || (S.route.name === "dm" && el("dmList")))) { try { syncBadge(); } catch {} return; }
+  if (S._bgRender && pv) { S._renderDirty = true; try { syncBadge(); } catch {} return; }   // a photo is open full screen: the page behind redraws once, when it closes
   // Expandable sections you opened stay open through a redraw (keyed by id, else by their summary text).
   const openKeys = new Set([...document.querySelectorAll("#app details[open]")].map(detailsKey));
   withInputKept(renderNow); restoreKept();
@@ -1969,12 +1976,12 @@ function yearBody(y) {
   <div class="yr-two">${spot ? tile("Your spot", esc(spot[0]), spot[1] === 1 ? "Once. So far." : `${spot[1]} times. They know your order.`) : ""}${month ? tile("Busiest month", MONTH_NAMES[+month[0] - 1], `${month[1]} plan${month[1] === 1 ? "" : "s"}.`) : ""}</div>
   <div class="yr-two">${crew ? tile("Top crew", `${groupMini(crew)} ${esc(crew.name)}`, `${d.crews[0][1]} plan${d.crews[0][1] === 1 ? "" : "s"}`, "#/g/" + crew.id) : ""}${shooter ? tile("Camera roll MVP", esc(shooter[0] === me ? "You" : first(nameOf(shooter[0]))), `${shooter[1]} photo${shooter[1] === 1 ? "" : "s"} added`) : d.hosted ? tile("You hosted", d.hosted + (d.hosted === 1 ? " plan" : " plans"), "The crew owes you one.") : ""}</div>
   <div class="hd-h"><h3>Firsts and bests</h3></div><div class="card hd-list">${firsts.map(([i, k, v, id]) => `<a class="member-row" data-go="${id.startsWith("x:") ? "#/x/" + esc(id.slice(2)) : "#/e/" + esc(id)}"><span class="li">${i}</span><div style="flex:1;min-width:0"><div class="muted sm">${k}</div><b>${v}</b></div><span class="chev">›</span></a>`).join("")}</div>
-  ${pics.length ? `<div class="hd-h"><h3>The year in pictures</h3><a class="hd-link" data-go="#/photos">All memories ›</a></div><div class="yr-grid">${pics.map(x => `<img src="${esc(x.p.img)}" data-ymem="${esc(x.ev.id)}|${esc(x.p.id)}" alt="" loading="lazy">`).join("")}</div>` : S._memLoading ? `<p class="muted sm">Gathering photos…</p>` : ""}
+  ${pics.length ? `<div class="hd-h"><h3>The year in pictures</h3><a class="hd-link" data-go="#/photos">All memories ›</a></div><div class="yr-grid">${pics.map(x => `<img src="${esc(x.p.img)}" data-ymem="${esc(x.ev.id)}|${esc(x.p.id)}" alt="Photo" role="button" tabindex="0" loading="lazy">`).join("")}</div>` : S._memLoading ? `<p class="muted sm">Gathering photos…</p>` : ""}
   <div class="btnrow" style="margin-top:18px;justify-content:center"><button class="btn primary" id="yrShare">Share the recap</button></div>
   <p class="muted sm" style="text-align:center;margin-top:10px">Counts plans you went to, photos on their walls, and tabs you were on.</p>`;
 }
 function wireYear() {
-  document.querySelectorAll("[data-ymem]").forEach(im => im.onclick = () => { const [eid, pid] = im.dataset.ymem.split("|"); const ev = S.events.get(eid), p = (S.memories.get(eid) || []).find(x => x.id === pid); if (ev && p) openPhoto(ev, p); });
+  document.querySelectorAll("[data-ymem]").forEach(im => im.onclick = () => openThumb(im, "[data-ymem]", nd => nd.dataset.ymem.split("|")));
   if (el("yrShare")) el("yrShare").onclick = () => shareYearCard(S.route.y);
 }
 // Draws a share card (stats on cream, with a strip of the year's photos) and hands it to the share sheet.
@@ -2123,7 +2130,7 @@ function afterCard() {
   const owe = [...S.expenses.values()].filter(x => x.eventId === ev.id && x.paidBy !== me && !(x.paid || {})[me]).reduce((n, x) => n + (x.shares ? (x.shares[me] || 0) : ((x.split || []).includes(me) ? Math.round(x.amountCents / x.split.length) : 0)), 0);
   return `<div class="card lv-after">
     <div class="lv-after-grid">${coral("party", 40)}<div class="lv-after-text"><b>${isTripEv(ev) ? "What a trip!" : evening ? "Last night was a good one!" : "That was a good one!"}</b><p>Add your photos from ${esc(ev.title)}.${others.length ? ` ${esc(andNames(others.map(u => first(nameOf(u)))))} already added ${pics.length}.` : ""}</p></div><button type="button" class="today-x lv-after-x" data-hide-after="${esc(ev.id)}" aria-label="Hide this">✕</button></div>
-    ${pics.length ? `<div class="hd-scroll hd-mems lv-after-pics">${pics.slice(0, 6).map(p => `<img src="${esc(p.img)}" data-hdmem="${esc(ev.id)}|${esc(p.id)}" alt="" loading="lazy">`).join("")}</div>` : ""}
+    ${pics.length ? `<div class="hd-scroll hd-mems lv-after-pics">${pics.slice(0, 6).map(p => `<img src="${esc(p.img)}" data-hdmem="${esc(ev.id)}|${esc(p.id)}" alt="Photo" role="button" tabindex="0" loading="lazy">`).join("")}</div>` : ""}
     ${(v => v && !((ev.spotVotes || {})[me] || {})[v.key] ? `<div class="lv-after-how"><span class="sm"><b>How was ${esc(v.name)}?</b> <span class="muted">A tap helps Dot pick for this crew.</span></span><span class="btnrow" style="gap:6px"><button type="button" class="btn small" data-spot="${esc(ev.id)}|${esc(v.key)}|1">👍 Go again</button><button type="button" class="btn small" data-spot="${esc(ev.id)}|${esc(v.key)}|-1">👎 Not for us</button></span></div>` : "")(bookableStops(ev)[0])}
     <div class="lv-after-btns">${owe ? `<a class="btn ghost small" data-go="#/money?to=settleCard">Settle up ${fmt$(owe)}</a>` : `<a class="btn ghost small" data-go="#/e/${esc(ev.id)}?to=wall">Say thanks</a>`}<a class="btn primary small" data-go="#/e/${esc(ev.id)}?to=photosCard">Add photos</a></div></div>`;
 }
@@ -2272,7 +2279,7 @@ function moneyGlance() {
 function memoriesStrip() {
   const pics = [...S.memories.entries()].flatMap(([eid, ps]) => ps.map(p => ({ eid, p }))).filter(x => x.p.img).sort((a, b) => (b.p.createdAt || 0) - (a.p.createdAt || 0)).slice(0, 8);
   if (!pics.length) return "";
-  return `<div class="hd-h"><h3>Memories</h3><a class="hd-link" data-go="#/photos">See all ›</a></div><div class="hd-scroll hd-mems">${pics.map(x => `<img src="${esc(x.p.img)}" data-hdmem="${esc(x.eid)}|${esc(x.p.id)}" alt="" loading="lazy">`).join("")}</div>`;
+  return `<div class="hd-h"><h3>Memories</h3><a class="hd-link" data-go="#/photos">See all ›</a></div><div class="hd-scroll hd-mems">${pics.map(x => `<img src="${esc(x.p.img)}" data-hdmem="${esc(x.eid)}|${esc(x.p.id)}" alt="Photo" role="button" tabindex="0" loading="lazy">`).join("")}</div>`;
 }
 function latestList() {
   const acts = (S.activity || []).slice(0, 4); if (!acts.length) return "";
@@ -2288,8 +2295,8 @@ function wireHomeDash() {
   document.querySelectorAll("[data-mascot]").forEach(b => b.onclick = () => openMascot(b.dataset.mascot));
   startMascotShow();
   document.querySelectorAll("[data-ev]").forEach(a => a.onclick = e => { e.preventDefault(); go("#/e/" + a.dataset.ev); });
-  document.querySelectorAll("[data-act]").forEach(a => a.onclick = e => { e.preventDefault(); location.hash = routeTail(a.dataset.act); });
-  document.querySelectorAll("[data-hdmem]").forEach(im => im.onclick = () => { const [eid, pid] = im.dataset.hdmem.split("|"), ev = S.events.get(eid), p = (S.memories.get(eid) || []).find(x => x.id === pid); if (ev && p) openPhoto(ev, p); });
+  document.querySelectorAll("[data-act]").forEach(a => a.onclick = e => { e.preventDefault(); followLink(a.dataset.act); });
+  document.querySelectorAll("[data-hdmem]").forEach(im => im.onclick = () => openThumb(im, "[data-hdmem]", nd => nd.dataset.hdmem.split("|")));
   // Memories come mostly from past plans, which load on request: ask for them, then gather photos for any plan we
   // haven't looked at yet (past plans arrive a moment after the first paint, so this runs again on that redraw).
   if (!S.pastOn) startPast();
@@ -4182,7 +4189,7 @@ function renderEventPage(root, id) {
   sub("photos", rows => { const seen = S._photoIds && S._photoIds.get(id); const fresh = seen ? rows.filter(p => !seen.has(p.id) && p.addedBy !== myUid() && Date.now() - (p.createdAt || 0) < 300e3) : [];
     (S._photoIds = S._photoIds || new Map()).set(id, new Set(rows.map(p => p.id)));
     if (fresh.length) { const who = first(nameOf(fresh[0].addedBy)); toast(`Ooh, ${who} just added ${fresh.length === 1 ? "a photo" : fresh.length + " photos"}!`, null, null, "coral:party"); }
-    S.photos = rows.sort((a, b) => b.createdAt - a.createdAt); S.memories.set(id, S.photos.filter(visibleContent)); const b = el("photosCard"); if (b) { b.innerHTML = photosInner(ev); wirePhotos(ev); } });
+    S.photos = rows.sort((a, b) => b.createdAt - a.createdAt); S.memories.set(id, S.photos.filter(visibleContent)); const b = el("photosCard"); if (b) { if (pv) S._photosDirty = id; else { const g0 = b.querySelector(".photo-grid"), y = g0 ? g0.scrollTop : 0, a = document.activeElement, f = a && b.contains(a) && a.dataset && a.dataset.photo; b.innerHTML = photosInner(ev); wirePhotos(ev); const g1 = b.querySelector(".photo-grid"); if (g1) g1.scrollTop = y; const t = f && b.querySelector(`[data-photo="${CSS.escape(f)}"]`); if (t) t.focus({ preventScroll: true }); } } });
   sub("polls", rows => { S.polls = rows.sort((a, b) => a.createdAt - b.createdAt); const b = el("pollsCard"); if (b) { b.innerHTML = pollsInner(ev); wirePolls(ev); } });
   sub("songs", rows => { S.songs = rows.sort((a, b) => (Object.keys(b.votes || {}).length - Object.keys(a.votes || {}).length) || a.createdAt - b.createdAt); const b = el("playlistCard"); if (b) { b.innerHTML = playlistInner(ev); wirePlaylist(ev); } });
 }
@@ -4426,7 +4433,7 @@ async function uploadOriginal(eid, pid, file) {
 // The best copy of a photo we have: the original from storage when it's there, else the full-size copy, else the preview.
 async function bestPhoto(ev, p) {
   if (p.fullUrl) return p.fullUrl;
-  if (p.full && !photoFullCache.has(p.id)) { try { const d = await getDoc(doc(db, "events", ev.id, "photoFull", p.id)); if (d.exists()) photoFullCache.set(p.id, d.data().img); } catch {} }
+  if (p.full && !photoFullCache.has(p.id)) { try { const d = await getDoc(doc(db, "events", ev.id, "photoFull", p.id)); if (d.exists()) fullKeep(p.id, d.data().img); } catch {} }
   return photoFullCache.get(p.id) || p.img;
 }
 // Save to the camera roll: on a phone the share sheet (its Save Image), elsewhere a download.
@@ -4463,51 +4470,381 @@ async function savePhoto(ev, p, btn) {
 }
 const photoBadges = p => { const r = Object.values(p.reactions || {}).reduce((t, v) => t + (Array.isArray(v) ? v.length : 0), 0), c = p.commentCount || 0;
   return r || c ? `<span class="ph-badges">${r ? `<span>❤️ ${r}</span>` : ""}${c ? `<span>💬 ${c}</span>` : ""}</span>` : ""; };
-function closePhoto() { const v = el("photoViewer"); if (!v) return; (v._unsubs || []).forEach(fn => fn()); v.remove(); if (!el("appDialog")) unlockScroll(); }
-function openPhoto(ev, p) {
-  closePhoto();
-  const me = myUid(), host = ev.hostId === me || (ev.cohostUids || []).includes(me) || isAdmin();
-  const box = document.createElement("div"); box.className = "photo-viewer"; box.id = "photoViewer"; box._unsubs = []; box.dataset.pid = p.id;
-  box.innerHTML = `<div class="pv-top"><div class="pv-who">${avatar(p.addedBy)}<div><b>${esc(first(nameOf(p.addedBy)))}</b><div class="pv-sub">${esc(ev.title || "")}${p.createdAt ? " · " + esc(ago(p.createdAt)) : ""}</div></div></div><span class="pv-btns"><button type="button" class="pv-save" id="pvSave" aria-label="Save photo"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M4 19h16"/></svg><span>Save</span></button><button type="button" class="pv-x" id="pvClose" aria-label="Close">✕</button></span></div>
-    <div class="pv-img"><img id="pvImg" src="${esc(photoFullCache.get(p.id) || p.img)}" alt=""></div>
-    <div class="pv-panel"><div class="pv-reacts" id="pvReacts"></div><div class="pv-who-line" id="pvWho"></div>
-      <div class="pv-comments" id="pvComments"><p class="pv-empty">Loading comments…</p></div>
-      <form class="pv-form" id="pvForm"><input id="pvText" placeholder="Add a comment…" maxlength="500" autocomplete="off" enterkeyhint="send"><button class="btn primary small" type="submit">Post</button></form></div>`;
-  document.body.appendChild(box); lockScroll();
-  el("pvClose").onclick = closePhoto;
-  el("pvSave").onclick = () => savePhoto(ev, cur, el("pvSave"));
-  const pref = doc(db, "events", ev.id, "photos", p.id);
-  let cur = p;
-  const paintReacts = () => {
-    const r = cur.reactions || {}, box2 = el("pvReacts"); if (!box2) return;
-    box2.innerHTML = QUICK_REACTS.slice(0, 6).map(e => { const k = rkey(e), who = r[k] || [], on = who.includes(me);
-      return `<button type="button" class="pv-react ${on ? "on" : ""}" data-pr="${k}" title="${esc(who.map(u => first(nameOf(u))).join(", "))}">${e}${who.length ? `<span>${who.length}</span>` : ""}</button>`; }).join("");
-    const who = el("pvWho"); if (who) who.innerHTML = reactWhoLine("photo:" + cur.id, Object.entries(r).filter(([k, us]) => rshow(k) && Array.isArray(us)).map(([k, us]) => [rshow(k), us]));
-    box2.querySelectorAll("[data-pr]").forEach(b => b.onclick = () => { const k = b.dataset.pr, on = ((cur.reactions || {})[k] || []).includes(me);
-      updateDoc(pref, { [`reactions.${k}`]: on ? arrayRemove(me) : arrayUnion(me) }).catch(e => toast(e.message)); });
-  };
-  paintReacts();
-  box._unsubs.push(onSnapshot(pref, d => { if (!d.exists()) { closePhoto(); toast("That photo was removed."); return; } cur = { id: d.id, ...d.data() }; paintReacts(); }, () => {}));
-  box._unsubs.push(onSnapshot(query(collection(db, "events", ev.id, "photos", p.id, "comments"), orderBy("createdAt")), snap => {
-    const list = el("pvComments"); if (!list) return;
-    const rows = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(visibleContent);
-    list.innerHTML = rows.length ? rows.map(c => `<div class="pv-c" data-cmsg="${esc(c.id)}">${avatar(c.authorId, "sm")}<div class="pv-c-body"><b>${esc(first(c.authorName || nameOf(c.authorId)))}</b> ${renderText(c.text || "", c.mentions)}<div class="pv-sub">${esc(ago(c.createdAt))}${c.authorId === me || host ? ` · <button type="button" class="pv-del" data-pcdel="${c.id}">Delete</button>` : ""}</div></div></div>`).join("")
-      : `<p class="pv-empty">No comments yet. Say something nice.</p>`;
-    list.querySelectorAll("[data-pcdel]").forEach(b => b.onclick = () => deleteDoc(doc(db, "events", ev.id, "photos", p.id, "comments", b.dataset.pcdel)).catch(e => toast(e.message)));
-    list.scrollTop = list.scrollHeight;
-  }, () => { const list = el("pvComments"); if (list) list.innerHTML = `<p class="pv-empty">Comments aren't available right now.</p>`; }));
-  if (p.full && !photoFullCache.has(p.id)) getDoc(doc(db, "events", ev.id, "photoFull", p.id)).then(d => { if (!d.exists()) return; photoFullCache.set(p.id, d.data().img); const im = el("pvImg"); if (im && !im.dataset.orig) im.src = d.data().img; }).catch(() => {});
-  if (p.fullUrl && showable(p.fullType)) { const big = new Image(); big.onload = () => { const im = el("pvImg"); if (im && im.closest("#photoViewer") && (el("photoViewer") || {}).dataset.pid === p.id) { im.dataset.orig = "1"; im.src = p.fullUrl; } }; big.src = p.fullUrl; }
-  el("pvForm").onsubmit = async e => {
-    e.preventDefault(); const t = el("pvText"), text = t.value.trim(); if (!text) return;
-    t.value = "";
-    try { await addDoc(collection(db, "events", ev.id, "photos", p.id, "comments"), { text, authorId: me, authorName: (S.profile && S.profile.name) || "", createdAt: Date.now() }); }
-    catch (err) { t.value = text; toast(err.message); }
-  };
+// ---------- Photo viewer ----------
+// Every photo in the app opens in one full-screen viewer. Photos sit side by side on a strip: swipe sideways for the
+// previous or next one, pinch or double-tap to zoom, drag to look around a zoomed photo, swipe down to close, tap to hide
+// the buttons. Plan photos carry reactions and comments (the comments fold up from the bottom and the photo makes room);
+// anything else (chat pictures, receipts, screenshots) opens bare. The viewer adds one step to the history, so Back (the
+// browser's button, or the iPhone's edge swipe if it ever gets through) closes the viewer instead of leaving the page, and
+// Forward opens it again. Android's Back button does the same through its own handler, and on the iPhone a swipe that
+// starts at the screen's edge turns the photo rather than the page.
+const PV = { MAX: 5, TOP: 8, DBL: 2.5, GAP: 16, KEEP: 24 };
+let pv = null, pvPopAt = 0, pvLast = null;
+const fullKeep = (id, img) => { photoFullCache.delete(id); photoFullCache.set(id, img); while (photoFullCache.size > PV.KEEP) photoFullCache.delete(photoFullCache.keys().next().value); };
+// why: nothing = closed by hand (a history step, if the viewer took one, is taken back out); "pop" = Back already took it;
+// "nav" = the page changed under it; "keep" = another photo is about to open in its place and inherits everything.
+function closePhoto(why) {
+  const v = pv; if (!v) return false; pv = null;
+  v.unsubs.forEach(fn => fn()); [v.bindT, v.tapT, v.upT].forEach(clearTimeout); v.off.forEach(fn => fn());
+  v.box.remove();
+  if (why === "nav" && lockedY !== null) lockedY = 0;   // the page changed underneath: the new one starts at its top, not at the old page's scroll
+  if (why === "keep") return v.hist;   // another photo takes over: the page stays pinned and out of reach
+  if (!el("appDialog")) unlockScroll();
+  pvLast = why === "nav" ? null : { items: v.items, i: v.i, social: !v.box.classList.contains("pv-plain"), page: v.page };   // Forward can open it again, on its own page only
+  const app = el("app"); if (app) app.inert = false;
+  // The page behind sat still while the viewer was open (every reaction would have rebuilt it underneath); catch it up now.
+  if (S._photosDirty) { const eid = S._photosDirty, e2 = S.events.get(eid), b = el("photosCard"); S._photosDirty = null;
+    if (why !== "nav" && e2 && b && (S.route || {}).id === eid) { const g0 = b.querySelector(".photo-grid"), y = g0 ? g0.scrollTop : 0; b.innerHTML = photosInner(e2); wirePhotos(e2); const g1 = b.querySelector(".photo-grid"); if (g1) g1.scrollTop = y; } }
+  if (S._renderDirty) { S._renderDirty = false; if (why !== "nav") { S._bgRender = true; try { render(); } catch {} finally { S._bgRender = false; } } }
+  // Back on the page, the photo last looked at is in view and holds the focus.
+  if (why !== "nav") { try { const it = v.items[v.i], p = it && it.p, k = p && CSS.escape(p.id), ek = p && CSS.escape(it.ev.id + "|" + p.id);
+    // The same photo can sit on a page twice (Memories: "One year ago" and the dated list; Home: the morning-after card and the
+    // Memories strip). The page is back where it was, so the copy whose strip is on screen is the one it was opened from.
+    const c = p ? [...document.querySelectorAll(`[data-photo="${k}"], [data-mem="${k}"], [data-hdmem="${ek}"], [data-ymem="${ek}"], [data-fsp="${ek}"]`)] : [];
+    const t = c.find(x => { const r = (x.closest(".photo-grid, .hd-mems, .yr-grid") || x).getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; }) || c[0] || (v.from && document.contains(v.from) ? v.from : null);
+    if (t) { if (p) t.scrollIntoView({ block: "nearest", inline: "nearest" }); if (t.focus) t.focus({ preventScroll: true }); } } catch {} }
+  if (v.hist && !why) { pvPopAt = Date.now(); history.back(); }
+  return v.hist;
 }
-document.addEventListener("keydown", e => { if (e.key === "Escape" && el("photoViewer")) closePhoto(); });
-window.addEventListener("hashchange", closePhoto);
-function lightbox(src) { const box = document.createElement("div"); box.className = "lightbox"; box.innerHTML = `<img src="${esc(src)}" alt="">`; box.onclick = () => box.remove(); document.body.appendChild(box); }
+function openViewer(items, at, social, opts = {}) {
+  if (!items || !items.length) return;
+  const had = closePhoto("keep"), me = myUid(), mq = q => !!(window.matchMedia && matchMedia(q).matches), calm = mq("(prefers-reduced-motion: reduce)"), desk = mq("(hover: hover) and (pointer: fine)"), lowMem = (navigator.deviceMemory || 4) <= 2;
+  const box = document.createElement("div"); box.id = "photoViewer"; box.className = "photo-viewer" + (social ? "" : " pv-plain"); box.tabIndex = -1;
+  box.setAttribute("role", "dialog"); box.setAttribute("aria-modal", "true"); box.setAttribute("aria-label", "Photo viewer");
+  box.innerHTML = `<div class="pv-stage" id="pvStage"><div class="pv-track"></div></div>
+    <div class="pv-top"><div class="pv-who" id="pvBy"></div><span class="pv-btns">${social ? `<button type="button" class="pv-save" id="pvSave" aria-label="Save photo"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M4 19h16"/></svg><span>Save</span></button><button type="button" class="pv-x" id="pvMenu" aria-label="More">⋯</button>` : ""}<button type="button" class="pv-x" id="pvClose" aria-label="Close">✕</button></span></div>
+    <div class="pv-count" id="pvCount" aria-live="polite" aria-atomic="true"></div>
+    <button type="button" class="pv-nav prev" id="pvPrev" aria-label="Previous photo">‹</button><button type="button" class="pv-nav next" id="pvNext" aria-label="Next photo">›</button>
+    ${social ? `<div class="pv-bottom" id="pvBottom"><div class="pv-grab" id="pvGrab" aria-hidden="true"><span></span></div><div class="pv-who-line" id="pvWho"></div>
+      <div class="pv-bar"><div class="pv-reacts" id="pvReacts"></div><button type="button" class="pv-cbtn" id="pvCBtn" aria-expanded="false" aria-controls="pvMore"><span aria-hidden="true">💬</span><b id="pvCN"></b></button></div>
+      <div class="pv-more" id="pvMore"><div class="pv-comments" id="pvComments"></div>
+        <form class="pv-form" id="pvForm"><input id="pvText" placeholder="Add a comment…" maxlength="500" autocomplete="off" enterkeyhint="send" aria-label="Add a comment"><button class="btn primary small" type="submit">Post</button></form></div></div>` : ""}`;
+  const v = pv = { box, items: items.slice(), i: Math.max(0, Math.min(items.length - 1, at || 0)), s: 1, tx: 0, ty: 0, dragX: 0, unsubs: [], off: [], token: 0, sheet: false, hist: !!had, page: location.hash, from: document.activeElement, img: null, cur: null,
+    pending: null, leaving: false, big: null, waiting: [], t0: performance.now(), autoBare: false, flash: opts.flash || "", drafts: new Map(), painted: "", busy: new Map() };
+  document.body.appendChild(box); lockScroll(); pvLast = null;
+  { const app = el("app"); if (app) app.inert = true; }   // the page behind is out of reach of the keyboard and screen readers
+  if (opts.adopt) v.hist = true;   // opened by Forward, onto the step an earlier viewer left
+  else if (!had) { try { history.pushState({ pv: 1 }, ""); v.hist = true; } catch {} }
+  const stage = el("pvStage"), track = stage.firstChild, n = () => v.items.length, live = () => pv === v;
+  const W = () => stage.clientWidth || innerWidth, H = () => stage.clientHeight || innerHeight;
+  const previewOf = it => it.src || photoFullCache.get(it.p.id) || it.p.img;
+
+  // --- where everything sits. The strip slides as one piece; the photo in front also carries its own zoom and drag. ---
+  const place = anim => { track.classList.toggle("anim", !!anim); track.style.transform = `translate3d(${v.dragX}px,0,0)`; const step = W() + PV.GAP; for (const d of track.children) d.style.transform = `translate3d(${(d._j - v.i) * step}px,0,0)`; };
+  const paint = anim => { const im = v.img; if (!im) return; im.classList.toggle("anim", anim === true); im.classList.toggle("glide", anim === "glide"); im.style.transform = `translate3d(${v.tx}px,${v.ty}px,0) scale(${v.s})`; };
+  const fade = (a, anim) => { box.classList.toggle("fading", !!anim); box.style.setProperty("--pv-a", a); };
+  // The photo's rectangle at rest. A plan photo always fills the screen one way or the other, so its small preview and
+  // its sharp copy sit in exactly the same place; a plain picture is never blown up past its own size.
+  const fitSize = () => { const im = v.img, w = W(), h = H(), nw = im && im.naturalWidth, nh = im && im.naturalHeight; if (!nw || !nh) return [w, h]; const k = Math.min(w / nw, h / nh, social ? Infinity : 1); return [nw * k, nh * k]; };
+  const fillS = () => { const [fw, fh] = fitSize(); return Math.max(W() / fw, H() / fh); };   // the zoom at which the photo covers the whole screen
+  // How far in it goes: to 5x when the camera's original can be fetched, otherwise about three screen pixels per pixel of
+  // the copy that's loaded (never under 3x), and always far enough to cover the screen (a panorama fills it top to bottom).
+  const maxS = () => { const it = v.items[v.i], p = it && it.p, im = v.img, [fw] = fitSize(), big = !lowMem && p && p.fullUrl && showable(p.fullType) && !it.noBig, px = im && im.naturalWidth ? im.naturalWidth / (fw * (devicePixelRatio || 1)) : 1;
+    return Math.min(PV.TOP, Math.max(big ? PV.MAX : Math.max(3, Math.min(PV.MAX, 3 * px)), fillS())); };
+  const bounds = () => { const [fw, fh] = fitSize(); return [Math.max(0, (fw * v.s - W()) / 2), Math.max(0, (fh * v.s - H()) / 2)]; };
+  const clampT = () => { const [bx, by] = bounds(); v.tx = Math.max(-bx, Math.min(bx, v.tx)); v.ty = Math.max(-by, Math.min(by, v.ty)); };
+  const soft = (t, b) => t > b ? b + (t - b) * 0.35 : t < -b ? -b + (t + b) * 0.35 : t;
+  // Zoomed in, a phone gets the whole screen for the photo: the buttons step aside, and come back when it returns to full view.
+  const zoomed = () => { const z = v.s > 1.01; box.classList.toggle("zoomed", z); if (z) original();
+    if (!desk && social && !v.sheet) { if (z && !box.classList.contains("bare")) { box.classList.add("bare"); v.autoBare = true; } else if (!z && v.autoBare) { box.classList.remove("bare"); v.autoBare = false; } } };
+  // Zoom to s2 while the point (fx, fy), measured from the middle of the screen, stays under the finger.
+  const zoomTo = (s2, fx, fy, anim) => { s2 = Math.max(1, Math.min(maxS(), s2)); const k = s2 / v.s; v.tx = fx - (fx - v.tx) * k; v.ty = fy - (fy - v.ty) * k; v.s = s2; if (s2 < 1.01) { v.s = 1; v.tx = v.ty = 0; } clampT(); paint(anim); zoomed(); };
+  const settle = () => { v.s = Math.max(1, Math.min(maxS(), v.s)); if (v.s < 1.02) { v.s = 1; v.tx = v.ty = 0; } clampT(); paint(true); zoomed(); };
+  const after = (node, fn) => { let done = false; const f = e => { if (done || (e && e.target !== node)) return; done = true; node.removeEventListener("transitionend", f); if (v.pending === f) v.pending = null; fn(); }; node.addEventListener("transitionend", f); setTimeout(f, calm ? 0 : 340); return f; };
+  // A change that would redraw the photo under a finger waits until the fingers are up.
+  const later = fn => { if (g || pts.size) v.waiting.push(fn); else fn(); };
+  const flush = () => { if (g || pts.size) return; for (const fn of v.waiting.splice(0)) fn(); };
+
+  // --- the strip: the photo in front and one neighbor on each side ---
+  const slide = j => { const d = document.createElement("div"); d.className = "pv-slide"; d._j = j; d._it = v.items[j]; const im = new Image(); im.alt = ""; im.draggable = false; im.decoding = j === v.i ? "sync" : "async";
+    im.onload = () => { if (live() && v.img === im && v.s > 1) { clampT(); paint(false); } }; im.src = previewOf(d._it); d.appendChild(im); return d; };
+  const sync = first => {
+    v.i = Math.max(0, Math.min(n() - 1, v.i));
+    const want = [v.i - 1, v.i, v.i + 1].filter(j => j >= 0 && j < n());
+    for (const d of [...track.children]) if (!want.includes(d._j) || d._it !== v.items[d._j]) d.remove();
+    for (const j of want) if (![...track.children].some(d => d._j === j)) track.appendChild(slide(j));
+    for (const d of track.children) { const im = d.firstChild, cur = d._j === v.i; d.classList.toggle("cur", cur); d.setAttribute("aria-hidden", cur ? "false" : "true"); d.inert = !cur;
+      if (cur) { im.id = "pvImg"; v.img = im; } else { im.removeAttribute("id"); im.classList.remove("anim", "glide"); im.style.transform = ""; if (im.dataset.orig) { delete im.dataset.orig; im.src = previewOf(d._it); } } }   // a neighbor goes back to its lighter copy
+    dropBig(); v.waiting.length = 0; v.s = 1; v.tx = v.ty = 0; v.dragX = 0; paint(false); zoomed(); place(false); chrome();
+    clearTimeout(v.upT); if (first) upgrade(); else v.upT = setTimeout(upgrade, 260); rebind();
+  };
+  const chrome = () => {
+    const it = v.items[v.i], p = it.p; box.dataset.pid = p ? p.id : "";
+    el("pvCount").textContent = n() > 1 ? `${v.i + 1} of ${n()}` : ""; el("pvPrev").disabled = v.i === 0; el("pvNext").disabled = v.i >= n() - 1;
+    if (v.img) v.img.alt = p ? `Photo from ${first(nameOf(p.addedBy)) || "a friend"}${it.ev.title ? ", " + it.ev.title : ""}` : "Picture";
+    if (!social) return;
+    el("pvBy").innerHTML = `${avatar(p.addedBy)}<div><b>${esc(first(nameOf(p.addedBy)))}</b><div class="pv-sub">${esc(it.ev.title || "")}${p.createdAt ? " · " + esc(ago(p.createdAt)) : ""}</div></div>`;
+    const t = el("pvText"); if (v.cur && v.cur.id !== p.id) { v.drafts.set(v.cur.id, t.value); t.value = v.drafts.get(p.id) || ""; }   // a half-typed comment stays with its own photo
+    if (!v.cur || v.cur.id !== p.id) { el("pvComments").innerHTML = `<p class="pv-empty">Loading comments…</p>`; v.painted = ""; }
+    v.cur = p; paintReacts(); count(p.commentCount || 0);
+  };
+  // The sharper copies. A photo arrives as a small preview; its 1400px copy lives in the database and is fetched for the
+  // photo in front straight away, then for its two neighbors so the next swipe lands sharp. The camera's original lives in
+  // storage and can be many megabytes: a phone only fetches it once the photo is zoomed (at full screen the 1400px copy
+  // already matches the display), a desktop a beat after landing. Nothing swaps in under a finger, and an original that
+  // is still on its way is dropped when the photo changes.
+  const fullOf = it => { const p = it && it.p; if (!p || !p.full) return Promise.resolve(null); if (photoFullCache.has(p.id)) return Promise.resolve(photoFullCache.get(p.id)); if (v.busy.has(p.id)) return v.busy.get(p.id);
+    const job = getDoc(doc(db, "events", it.ev.id, "photoFull", p.id)).then(d => { v.busy.delete(p.id); if (!d.exists()) return null; fullKeep(p.id, d.data().img); return d.data().img; }, () => { v.busy.delete(p.id); return null; }); v.busy.set(p.id, job); return job; };
+  const sharpen = it => fullOf(it).then(src => { if (!src || !live()) return; const put = () => { if (!live()) return; for (const d of track.children) if (d._it === it && !d.firstChild.dataset.orig && d.firstChild.getAttribute("src") !== src) d.firstChild.src = src; }; if (it === v.items[v.i]) later(put); else put(); });
+  const upgrade = () => { const it = v.items[v.i]; if (!live() || !it || !it.p) return;
+    sharpen(it).then(() => { if (!live() || v.items[v.i] !== it) return; original(); if (navigator.connection && navigator.connection.saveData) return; sharpen(v.items[v.i + 1]); sharpen(v.items[v.i - 1]); }); };
+  // Worth fetching the original: on a desktop, or once the copy on screen is being stretched well past its own pixels.
+  const thin = () => { const im = v.img, [fw] = fitSize(); return desk || !im || !im.naturalWidth || fw * v.s * (devicePixelRatio || 1) > im.naturalWidth * 1.5; };
+  const original = () => {
+    const it = v.items[v.i], im = v.img, p = it && it.p; if (!live() || !p || !im || im.dataset.orig || v.big || it.noBig || lowMem || !(p.fullUrl && showable(p.fullType)) || !thin()) return;
+    const big = v.big = new Image(), still = () => live() && v.img === im && v.items[v.i] === it && v.big === big, give = () => { if (v.big === big) v.big = null; }, never = () => { it.noBig = true; give(); };
+    const show = () => { if (!still()) return; later(() => { if (!still()) return; v.big = null; im.dataset.orig = "1"; im.src = p.fullUrl; }); };
+    // A huge original (past about 26 megapixels), or any original on a phone short of memory, can take the whole page down when it unpacks: those stay on the 1400px copy.
+    big.onload = () => { if (big.naturalWidth * big.naturalHeight > 26e6) return never(); if (big.decode) big.decode().then(show, never); else show(); }; big.onerror = give; big.src = p.fullUrl;
+  };
+  const dropBig = () => { if (v.big) { v.big.onload = v.big.onerror = null; v.big.src = ""; v.big = null; } };
+  v.off.push(dropBig);
+
+  // --- reactions and comments for the photo in front (plan photos only) ---
+  const count = c => { const b = el("pvCN"), btn = el("pvCBtn"); if (b) b.textContent = c ? String(c) : ""; if (btn) btn.setAttribute("aria-label", c ? `${c} comment${c === 1 ? "" : "s"}` : "Comments"); };
+  const paintReacts = () => {
+    const row = el("pvReacts"); if (!row || !v.cur) return; const r = v.cur.reactions || {}, held = row.contains(document.activeElement) ? document.activeElement.dataset.pr : "";
+    row.innerHTML = QUICK_REACTS.slice(0, 6).map(e => { const k = rkey(e), who = r[k] || [], on = who.includes(me);
+      return `<button type="button" class="pv-react ${on ? "on" : ""}" data-pr="${k}" aria-pressed="${on}" aria-label="${e}${who.length ? ", " + who.length : ""}" title="${esc(who.map(u => first(nameOf(u))).join(", "))}">${e}${who.length ? `<span>${who.length}</span>` : ""}</button>`; }).join("");
+    if (held) { const b = row.querySelector(`[data-pr="${held}"]`); if (b) try { b.focus({ preventScroll: true }); } catch {} }
+    const who = el("pvWho"); if (who) who.innerHTML = reactWhoLine("photo:" + v.cur.id, Object.entries(r).filter(([k, us]) => rshow(k) && Array.isArray(us)).map(([k, us]) => [rshow(k), us]));
+    row.querySelectorAll("[data-pr]").forEach(b => b.onclick = () => { if (v.pending) v.pending();   // tapped mid-turn: it lands on the photo now in front
+      const it = v.items[v.i], k = b.dataset.pr, on = (((v.cur || {}).reactions || {})[k] || []).includes(me);
+      updateDoc(doc(db, "events", it.ev.id, "photos", it.p.id), { [`reactions.${k}`]: on ? arrayRemove(me) : arrayUnion(me) }).catch(e => toast(e.message)); });
+  };
+  // A photo that is gone (removed, or just reported or blocked by you) leaves the strip and its neighbor steps in.
+  const gone = (it, quiet) => { if (v.pending) v.pending(); const k = v.items.indexOf(it); if (k < 0) return; v.items.splice(k, 1); if (!quiet) toast("That photo was removed.");
+    if (it.p) { S.memories.set(it.ev.id, (S.memories.get(it.ev.id) || []).filter(x => x.id !== it.p.id)); S._renderDirty = true; }
+    if (!n()) return closePhoto(); if (k < v.i) v.i--; sync(); };
+  // Live updates follow the photo in front, a beat after it lands (flicking through opens nothing); a late answer for a
+  // photo that has since moved on is dropped.
+  const rebind = () => { v.unsubs.splice(0).forEach(fn => fn()); clearTimeout(v.bindT); v.token++; if (social) v.bindT = setTimeout(bind, 160); };
+  const bind = () => {
+    const it = v.items[v.i]; if (!live() || !it) return; const { ev, p } = it, tok = v.token, ok = () => live() && v.token === tok, host = ev.hostId === me || (ev.cohostUids || []).includes(me) || isAdmin();
+    v.unsubs.push(onSnapshot(doc(db, "events", ev.id, "photos", p.id), d => { if (!ok()) return; if (!d.exists()) { if (!d.metadata.fromCache) gone(it); return; }   // offline, a missing copy is not a deleted photo
+      const was = it.p; it.p = v.cur = { id: d.id, ...d.data() }; paintReacts(); if ((!was.full && it.p.full) || (!was.fullUrl && it.p.fullUrl)) upgrade(); }, () => {}));
+    v.unsubs.push(onSnapshot(query(collection(db, "events", ev.id, "photos", p.id, "comments"), orderBy("createdAt")), snap => {
+      const list = el("pvComments"); if (!ok() || !list) return;
+      const rows = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(visibleContent), fresh = v.painted !== p.id, near = list.scrollHeight - list.scrollTop - list.clientHeight < 40; v.painted = p.id; count(rows.length);
+      list.innerHTML = rows.length ? rows.map(c => `<div class="pv-c" data-cmsg="${esc(c.id)}">${avatar(c.authorId, "sm")}<div class="pv-c-body"><b>${esc(first(c.authorName || nameOf(c.authorId)))}</b> ${renderText(c.text || "", c.mentions)}<div class="pv-sub">${esc(ago(c.createdAt))}${c.authorId === me || host ? ` · <button type="button" class="pv-del" data-pcdel="${c.id}">Delete</button>` : ""}</div></div></div>`).join("")
+        : `<p class="pv-empty">No comments yet. Say something nice.</p>`;
+      list.querySelectorAll("[data-pcdel]").forEach(b => b.onclick = () => deleteDoc(doc(db, "events", ev.id, "photos", p.id, "comments", b.dataset.pcdel)).catch(e => toast(e.message)));
+      // A link to one comment lands on it, centered and lit; otherwise the list keeps to the newest unless you've scrolled up to read.
+      const row = v.flash && list.querySelector(`[data-cmsg="${CSS.escape(v.flash)}"]`);
+      if (row) { v.flash = ""; list.scrollTop = row.offsetTop - list.offsetTop - (list.clientHeight - row.offsetHeight) / 2; row.classList.add("focus-flash"); setTimeout(() => row.classList.remove("focus-flash"), 2400); }
+      else if (fresh || near) list.scrollTop = list.scrollHeight;
+    }, () => { const list = el("pvComments"); if (ok() && list) list.innerHTML = `<p class="pv-empty">Comments aren't available right now.</p>`; }));
+  };
+  // With the comments open the photo moves up into the space above them, whole.
+  const refit = () => { const b = el("pvBottom"), sh = v.sheet && b ? b.offsetHeight + "px" : ""; stage.style.bottom = sh; box.style.setProperty("--pv-sh", sh || "0px"); if (v.s > 1.01) zoomTo(1, 0, 0, false); else { clampT(); paint(false); } place(false); };
+  const sheet = on => { if (!social || v.leaving) return; v.sheet = !!on; box.classList.toggle("sheet", v.sheet); if (v.sheet) { box.classList.remove("bare"); v.autoBare = false; } el("pvCBtn").setAttribute("aria-expanded", String(v.sheet));
+    if (v.sheet) { const l = el("pvComments"); l.scrollTop = l.scrollHeight; } else if (document.activeElement === el("pvText")) el("pvText").blur();
+    refit(); };
+
+  // --- turning to the next or previous photo ---
+  const turn = dir => {
+    if (dir && (v.i + dir < 0 || v.i + dir >= n())) dir = 0;
+    if (!dir) { v.dragX = 0; return place(true); }
+    v.dragX = -dir * (W() + PV.GAP); place(true); el("pvCount").textContent = `${v.i + dir + 1} of ${n()}`;
+    v.pending = after(track, () => { if (!live()) return; v.i += dir; sync(); });
+  };
+  const step = dir => { if (v.leaving) return; if (v.pending) v.pending(); if (v.s > 1.01) zoomTo(1, 0, 0, false); turn(dir); };
+  const away = dir => { v.leaving = true; pts.clear(); g = null; v.ty += H() * 0.45 * (dir || 1); v.s = Math.max(0.5, v.s - 0.2); fade(0, true); paint(true); setTimeout(() => { if (live()) closePhoto(); }, calm ? 0 : 200); };
+
+  // --- fingers (and the mouse). One finger: a sideways drag turns the page, a drag down closes, a drag up opens the
+  // comments, and on a zoomed photo any drag moves it around (unless it is already against that edge, when a sideways drag
+  // turns the page). Two fingers pinch, and a pinch right down to nothing closes. A tap hides or shows the buttons, and two
+  // quick taps zoom in on that spot and back out. ---
+  const pts = new Map(); let g = null;
+  const mid = () => { const r = stage.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
+  const speed = tr => { if (!tr || tr.length < 2) return [0, 0]; const a = tr[0], b = tr[tr.length - 1]; if (performance.now() - b[0] > 90) return [0, 0]; const dt = Math.max(1, b[0] - a[0]); return [(b[1] - a[1]) / dt, (b[2] - a[2]) / dt]; };
+  const calmDown = () => { v.s = 1; v.tx = v.ty = 0; fade(1, true); paint(true); };
+  // A photo caught mid-glide stays under the finger that caught it.
+  const freeze = () => { const im = v.img; if (!im || v.s <= 1.01 || !(im.classList.contains("glide") || im.classList.contains("anim"))) return; try { const m = new DOMMatrixReadOnly(getComputedStyle(im).transform); if (m.a > 1.01) { v.s = m.a; v.tx = m.m41; v.ty = m.m42; } } catch {} paint(false); };
+  const pinch = () => { const [a, b] = [...pts.values()], [cx, cy] = mid();
+    if (g && g.mode && g.mode !== "pan" && g.mode !== "done") { v.dragX = 0; place(false); if (g.mode !== "page") { v.s = 1; v.tx = v.ty = 0; fade(1); } }   // a second finger lands mid-swipe: the swipe is off (a page turn never moved the photo itself, so a zoomed one keeps its zoom)
+    g = { mode: "pinch", d0: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, s0: v.s, raw: v.s, mx0: (a[0] + b[0]) / 2 - cx, my0: (a[1] + b[1]) / 2 - cy, tx0: v.tx, ty0: v.ty }; };
+  // Opening pins the page behind in place, and for a moment afterwards the iPhone reports a touch as if the page were
+  // still scrolled (off by exactly that scroll, then right again within about a tenth of a second). A finger can't land
+  // that soon after the tap that opened the viewer, so a touch starting then is ignored, and for the first half second
+  // any position that lands far off the screen is too.
+  const wild = e => performance.now() - v.t0 < 600 && (e.clientY < -40 || e.clientY > innerHeight + 40 || e.clientX < -40 || e.clientX > innerWidth + 40);
+  stage.addEventListener("pointerdown", e => {
+    if ((e.pointerType === "mouse" && e.button !== 0) || v.leaving) return;
+    if (e.pointerType !== "mouse" && (performance.now() - v.t0 < 150 || wild(e))) return;
+    if (e.isPrimary && pts.size) { pts.clear(); g = null; }   // a first finger while one is still on the books: that one was lost
+    if (pts.size >= 2) return;
+    if (v.pending) v.pending();   // caught mid-turn: land on the new photo now
+    freeze();
+    try { stage.setPointerCapture(e.pointerId); } catch {}
+    pts.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pts.size === 2) return pinch();
+    g = { mode: null, x0: e.clientX, y0: e.clientY, sx: e.clientX, sy: e.clientY, t0: performance.now(), tx0: v.tx, ty0: v.ty, far: 0, dir: 1, trail: [[performance.now(), e.clientX, e.clientY]] };
+  });
+  // The system took the touch (a notification, the back swipe, a long-press menu), the mouse button came up somewhere
+  // else, or the app went to the background: whatever was mid-drag springs back and nothing is committed.
+  const abort = () => { pts.clear(); const q = g; g = null; if (!q || v.leaving) return; if (q.mode === "page") turn(0); else if (q.mode === "away" || q.mode === "up") calmDown(); else if (q.mode === "pan" || q.mode === "pinch") settle(); flush(); };
+  stage.addEventListener("pointermove", e => {
+    if (!g || !pts.has(e.pointerId) || wild(e)) return; if (e.pointerType === "mouse" && e.buttons === 0) return abort();
+    pts.set(e.pointerId, [e.clientX, e.clientY]);
+    if (g.mode === "pinch") { if (pts.size < 2) return; const [a, b] = [...pts.values()], [cx, cy] = mid(), mx = (a[0] + b[0]) / 2 - cx, my = (a[1] + b[1]) / 2 - cy, top = maxS();
+      let s2 = g.raw = g.s0 * Math.hypot(a[0] - b[0], a[1] - b[1]) / g.d0; s2 = s2 < 1 ? 1 - (1 - s2) * 0.5 : s2 > top ? top + (s2 - top) * 0.3 : s2;   // soft past either end
+      const k = s2 / g.s0; v.s = s2; v.tx = mx - (g.mx0 - g.tx0) * k; v.ty = my - (g.my0 - g.ty0) * k; original(); return paint(false); }
+    if (g.mode === "done") return;
+    g.trail.push([performance.now(), e.clientX, e.clientY]); if (g.trail.length > 6) g.trail.shift();
+    let dx = e.clientX - g.x0, dy = e.clientY - g.y0;
+    if (!g.mode) { g.far = Math.max(g.far, Math.hypot(dx, dy)); if (g.far < 10) return;
+      const flat = Math.abs(dx) >= Math.abs(dy) * 0.8;   // leaning sideways counts as sideways: turning a page is easy to take back, closing is not
+      if (v.sheet && document.activeElement === el("pvText")) { el("pvText").blur(); g.mode = "done"; return; }   // comments open with the keyboard up: the first drag only lowers the keyboard
+      if (v.sheet && !flat) { if (dy > 0) sheet(false); g.mode = "done"; return; }                                // comments open: a pull down folds them, it doesn't close the photo
+      if (v.s > 1.01) { const [bx] = bounds(), out = n() > 1 && Math.abs(dx) > Math.abs(dy) * 1.5 && ((dx > 0 && g.tx0 >= bx - 1) || (dx < 0 && g.tx0 <= -bx + 1)); g.mode = out ? "page" : "pan"; }
+      else if (flat) g.mode = "page"; else if (dy > 0 || !social) { g.mode = "away"; g.dir = dy > 0 ? 1 : -1; } else g.mode = "up";
+      g.x0 = e.clientX; g.y0 = e.clientY; dx = dy = 0; }
+    if (g.mode === "pan") { const [bx, by] = bounds(); v.tx = soft(g.tx0 + dx, bx); v.ty = soft(g.ty0 + dy, by); return paint(false); }
+    if (g.mode === "page") { const edge = (dx > 0 && v.i === 0) || (dx < 0 && v.i === n() - 1); v.dragX = edge ? dx * 0.3 : dx; return place(false); }
+    if (g.mode === "away") { const y = Math.max(0, dy * g.dir), k = Math.min(1, y / (H() * 0.55)); v.tx = dx * 0.6; v.ty = y * g.dir; v.s = 1 - k * 0.3; fade(1 - k * 0.85); return paint(false); }
+    v.ty = Math.max(-70, Math.min(0, dy * 0.3)); paint(false);
+  });
+  const tap = e => {
+    const now = performance.now(), [cx, cy] = mid(), last = v.lastTap;
+    if (last && now - last.t < 300 && Math.hypot(e.clientX - last.x, e.clientY - last.y) < 40) { clearTimeout(v.tapT); v.lastTap = null;
+      return v.s > 1.01 ? zoomTo(1, 0, 0, true) : zoomTo(Math.max(PV.DBL, fillS()), e.clientX - cx, e.clientY - cy, true); }   // in: at least 2.5x, and enough to cover the screen
+    v.lastTap = { t: now, x: e.clientX, y: e.clientY }; clearTimeout(v.tapT);
+    const [fw, fh] = fitSize(), mouse = e.pointerType === "mouse", off = v.s <= 1.01 && (Math.abs(e.clientX - cx) > fw / 2 || Math.abs(e.clientY - cy) > fh / 2);   // on the dark around the photo
+    // A finger tap hides or shows a plan photo's buttons. With a mouse the buttons stay, and a click on the dark around the
+    // photo closes; so does a tap there on a plain picture, whose Close button never hides.
+    v.tapT = setTimeout(() => { if (!live()) return; if (v.sheet) return sheet(false); if (off && (mouse || !social)) return closePhoto(); if (!mouse && social) { box.classList.toggle("bare"); v.autoBare = false; } }, 280);
+  };
+  const up = e => {
+    if (!pts.has(e.pointerId)) return; pts.delete(e.pointerId); try { stage.releasePointerCapture(e.pointerId); } catch {}
+    if (!g) return; const stop = e.type === "pointercancel";
+    if (g.mode === "pinch") {
+      if (!stop && g.s0 < 1.05 && g.raw < 0.7) return away(1);   // pinched right down from full view: close, the way Photos does
+      settle();
+      if (pts.size) { const [x, y] = [...pts.values()][0]; g = { mode: v.s > 1.01 ? "pan" : "done", x0: x, y0: y, sx: x, sy: y, t0: 0, tx0: v.tx, ty0: v.ty, far: 99, dir: 1, trail: [] }; return; }   // the finger left behind carries on
+      g = null; return flush(); }
+    if (pts.size) return;
+    const q = g, dx = e.clientX - q.sx, dy = e.clientY - q.sy, [vx, vy] = speed(q.trail); g = null;   // the whole travel, from where the finger landed
+    if (q.mode === "pan") { const [bx, by] = bounds(), inside = Math.abs(v.tx) <= bx + 0.5 && Math.abs(v.ty) <= by + 0.5;
+      if (!stop && !calm && inside && Math.hypot(vx, vy) > 0.2) { v.tx += vx * 300; v.ty += vy * 300; clampT(); paint("glide"); } else settle();   // a flick lets the photo glide to a stop
+      return flush(); }
+    if (q.mode === "page") { const far = Math.min(W() * 0.2, 140);   // far enough, and not on the way back; or a flick
+      turn(stop ? 0 : (dx < -far && vx < 0.2) || (vx < -0.35 && dx < -20) ? 1 : (dx > far && vx > -0.2) || (vx > 0.35 && dx > 20) ? -1 : 0); return flush(); }
+    if (q.mode === "away") { const y = dy * q.dir, vv2 = vy * q.dir; if (!stop && ((y > 120 && vv2 > -0.2) || (vv2 > 0.5 && y > 40))) return away(q.dir); calmDown(); return flush(); }
+    if (q.mode === "up") { v.ty = 0; paint(true); if (!stop && (dy < -50 || (vy < -0.5 && dy < -20))) sheet(true); return flush(); }
+    if (!q.mode && !stop && q.far < 10 && performance.now() - q.t0 < 400 && performance.now() - v.t0 > 500) tap(e);   // not the tail of the double-click or double-tap that opened it
+    flush();
+  };
+  stage.addEventListener("pointerup", up); stage.addEventListener("pointercancel", up);
+  stage.addEventListener("lostpointercapture", e => { if (pts.has(e.pointerId)) abort(); });
+  stage.addEventListener("contextmenu", e => { if (e.pointerType && e.pointerType !== "mouse") return e.preventDefault(); abort(); });   // a long press with a finger (Android sends this): no menu, and the finger keeps its gesture
+  stage.addEventListener("dragstart", e => e.preventDefault());
+  { const hid = () => { if (document.hidden) abort(); }; window.addEventListener("blur", abort); document.addEventListener("visibilitychange", hid); v.off.push(() => { window.removeEventListener("blur", abort); document.removeEventListener("visibilitychange", hid); }); }
+  // The iPhone's own back swipe starts at the screen's edge. Inside the viewer a swipe from the edge is for the photo, so
+  // a touch that starts there is claimed before the system reads it as "go back" (fingers still report as usual).
+  box.addEventListener("touchstart", e => { const t = e.touches[0]; if (e.touches.length === 1 && t && (t.clientX < 24 || t.clientX > innerWidth - 24) && !e.target.closest("button, input, a, .pv-comments, .pv-reacts")) e.preventDefault(); }, { passive: false });
+  // A mouse wheel zooms on the pointer; so does a trackpad pinch (it arrives as a wheel with Ctrl held). A sideways
+  // two-finger swipe turns one page per swipe, however long it coasts, or slides a zoomed photo across.
+  let wacc = 0, wlock = false, wt = 0, wlow = 0, wpeak = 0, wz = 1;
+  box.addEventListener("wheel", e => {   // on the whole viewer, so a swipe with the pointer over a button isn't read by the browser as Back
+    if (e.target.closest(".pv-comments, input")) return;   // the comments still scroll
+    e.preventDefault(); if (v.leaving || (v.sheet && e.target.closest(".pv-bottom"))) return; const u = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? H() : 1, dx = e.deltaX * u, dy = e.deltaY * u, [cx, cy] = mid(), pinchy = e.ctrlKey || e.metaKey;
+    clearTimeout(wt); wt = setTimeout(() => { wacc = 0; wlock = false; wlow = wpeak = 0; wz = 1; if (pv === v && !g && !v.leaving && !v.pending && v.s > 1 && v.s < 1.05) zoomTo(1, 0, 0, true); }, 180);   // the gesture is over: a photo left a hair zoomed goes back to full view
+    // Zoom. Small steps add up in wz (a slow trackpad pinch sends steps under 1%, which on their own would each snap back to full view).
+    if (pinchy || Math.abs(dy) >= Math.abs(dx)) { if (!v.pending) { wz = Math.max(1, (v.s > 1.01 ? v.s : wz) * Math.exp(-Math.max(-60, Math.min(60, dy)) * (pinchy ? 0.012 : 0.0025))); zoomTo(wz, e.clientX - cx, e.clientY - cy, false); } return; }
+    if (v.s >= 1.05) { v.tx -= dx; clampT(); return paint(false); }   // a barely zoomed photo (a stray nudge) still turns the page; step() puts it back to full view first
+    // One page per swipe: after a turn, the rest of that swipe's coasting is ignored. A new push (the other way, or the
+    // coasting having faded and the movement clearly picking up again) counts at once; so does anything after a short quiet.
+    const a = Math.abs(dx); if (wlock && ((a > 4 && (dx > 0) !== (wacc > 0)) || (wlow < wpeak * 0.5 && a > wlow + 8))) { wlock = false; wacc = 0; wpeak = 0; }
+    wacc += dx; if (a >= wpeak) wpeak = wlow = a; else wlow = Math.min(wlow, a);   // wlow: the quietest it has got since its strongest moment; a gentle new push shows as a climb back up from there
+    if (!wlock && Math.abs(wacc) > 60) { wlock = true; step(wacc > 0 ? 1 : -1); }
+  }, { passive: false });
+  // Safari on a Mac sends a trackpad pinch as its own gesture events (an iPhone sends them too, on top of the fingers we
+  // already follow, so they only count when no finger is down). Either way Safari's page zoom stays out of it.
+  let gs0 = 1;
+  box.addEventListener("gesturestart", e => { e.preventDefault(); gs0 = v.s; });
+  box.addEventListener("gesturechange", e => { e.preventDefault(); if (pts.size || v.leaving || v.pending) return; const [cx, cy] = mid(); zoomTo(gs0 * (e.scale || 1), (e.clientX || cx) - cx, (e.clientY || cy) - cy, false); });
+  box.addEventListener("gestureend", e => e.preventDefault());
+  box.addEventListener("focusin", e => { if (e.target !== box) { box.classList.remove("bare"); v.autoBare = false; } });   // tabbing to a hidden button brings the buttons back
+
+  // --- buttons ---
+  el("pvClose").onclick = () => closePhoto(); el("pvPrev").onclick = () => step(-1); el("pvNext").onclick = () => step(1);
+  if (social) {
+    el("pvSave").onclick = () => { if (v.pending) v.pending(); const it = v.items[v.i]; savePhoto(it.ev, v.cur || it.p, el("pvSave")); };
+    // More: your own photo can come down; someone else's can be reported, or its sender blocked (it then leaves the strip).
+    el("pvMenu").onclick = () => { if (v.pending) v.pending(); const it = v.items[v.i], p = v.cur || it.p;
+      if (p.addedBy === me || isAdmin()) { if (confirm("Remove this photo?")) { deleteDoc(doc(db, "events", it.ev.id, "photos", p.id)).catch(e => toast(e.message)); gone(it, true); toast("Photo removed."); } return; }
+      moderationMenu(it.ev, "photo", p.id, p);
+      let left = 10; const chk = setInterval(() => { if (!live()) return clearInterval(chk); if (el("appDialog")) return; if (!visibleContent(p)) { clearInterval(chk); for (const x of v.items.filter(x => x === it || (x.p && !visibleContent(x.p)))) { if (!live()) break; gone(x, true); } return; } if (--left <= 0) clearInterval(chk); }, 400); v.off.push(() => clearInterval(chk)); };   // the hiding lands a moment after the sheet closes
+    el("pvCBtn").onclick = () => { if (v.pending) v.pending(); sheet(!v.sheet); };
+    el("pvText").addEventListener("focus", () => sheet(true));
+    el("pvForm").onsubmit = async e => {
+      e.preventDefault(); if (v.pending) v.pending(); const it = v.items[v.i], t = el("pvText"), text = t.value.trim(); if (!text) return;
+      t.value = "";
+      try { await addDoc(collection(db, "events", it.ev.id, "photos", it.p.id, "comments"), { text, authorId: me, authorName: (S.profile && S.profile.name) || "", createdAt: Date.now() }); }
+      catch (err) { if (live() && v.items[v.i] === it) t.value = text; else v.drafts.set(it.p.id, text); toast(err.message); }   // it goes back where it was typed
+    };
+    // the little handle on the open comments: tap it or drag it down to fold them away
+    const grab = el("pvGrab"); let gy = null;
+    grab.addEventListener("pointerdown", e => { gy = e.clientY; try { grab.setPointerCapture(e.pointerId); } catch {} });
+    grab.addEventListener("pointerup", e => { if (gy !== null && e.clientY - gy > -6) sheet(false); gy = null; });
+    grab.addEventListener("pointercancel", () => { gy = null; });
+    if (window.ResizeObserver) { const ro = new ResizeObserver(() => { if (live() && v.sheet) refit(); }); ro.observe(el("pvBottom")); v.off.push(() => ro.disconnect()); }
+  }
+  // The viewer covers exactly what is visible: when the keyboard comes up the comment box rides above it, when the phone
+  // turns the photo refits, and if the page behind was pinched larger the viewer still fills the screen.
+  { const vv = window.visualViewport; let w0 = 0, h0 = 0;
+    const fit = () => { if (vv) { box.style.left = vv.offsetLeft + "px"; box.style.top = vv.offsetTop + "px"; box.style.width = vv.width + "px"; box.style.height = vv.height + "px"; if (w0 && Math.abs(vv.width - w0) > 40) h0 = 0; h0 = Math.max(h0, vv.height); box.classList.toggle("kb", vv.height < h0 - 120); box.classList.toggle("tight", vv.height < 330); }
+      const w = vv ? vv.width : W(); if (w0 && Math.abs(w - w0) > 40 && v.s > 1.01) zoomTo(1, 0, 0, false); else if (!g) { clampT(); paint(false); } w0 = w; place(false); if (v.sheet) refit(); };
+    if (vv) { vv.addEventListener("resize", fit); vv.addEventListener("scroll", fit); v.off.push(() => { vv.removeEventListener("resize", fit); vv.removeEventListener("scroll", fit); }); }
+    else { window.addEventListener("resize", fit); v.off.push(() => window.removeEventListener("resize", fit)); }
+    fit(); }
+  v.step = step; v.sheetTo = sheet;
+  sync(true); if (opts.comments) sheet(true);
+  try { box.focus({ preventScroll: true }); } catch {}
+}
+// A plan's photo, with the rest of that plan's photos lined up to swipe through (in the order the grid shows them).
+// Photos you've hidden, or from someone you've blocked, never open, by tap, swipe, or link.
+function openPhoto(ev, p, list, opts) {
+  if (!list && !visibleContent(p)) return toast("That photo isn't available.");
+  const base = list || ((S.route || {}).id === ev.id && (S.photos || []).some(x => x.id === p.id) ? S.photos.filter(visibleContent) : (S.memories.get(ev.id) || [])).filter(x => x.img).map(x => ({ ev, p: x }));
+  let at = base.findIndex(x => x.ev.id === ev.id && x.p.id === p.id); if (at < 0) { base.unshift({ ev, p }); at = 0; }
+  openViewer(base, at, true, opts);
+}
+// A thumbnail's photo, with every thumbnail beside it (in the order they sit on the page, even across plans) to swipe through.
+const memItem = (eid, pid) => { const ev = S.events.get(eid), p = (S.memories.get(eid) || []).find(x => x.id === pid); return ev && p && visibleContent(p) ? { ev, p } : null; };
+function openThumb(im, sel, key) {
+  const seen = new Set(), mine = key(im).join("|"), pairs = [...(im.closest(".photo-grid, .hd-mems, .yr-grid") || document).querySelectorAll(sel)].map(nd => [nd, memItem(...key(nd)), key(nd).join("|")])
+    .filter(x => x[1] && (x[0] === im || x[2] !== mine) && !seen.has(x[2]) && seen.add(x[2])), at = pairs.findIndex(x => x[0] === im);
+  if (at >= 0) openViewer(pairs.map(x => x[1]), at, true);
+}
+// Any other picture (a chat photo, a receipt, a screenshot): the same viewer without the reactions and comments. `all`
+// is the pictures beside it to swipe through and `at` its place among them (the same GIF can appear twice).
+function lightbox(src, all, at) { const list = (all && all.length ? all : [src]).filter(Boolean), i = typeof at === "number" && list[at] === src ? at : list.indexOf(src); if (i < 0) return openViewer([{ src }], 0, false); openViewer(list.map(s => ({ src: s })), i, false); }
+document.addEventListener("keydown", e => {
+  const v = pv; if (!v || e.isComposing) return; const plain = v.box.classList.contains("pv-plain"), under = !plain && !!el("appDialog");   // a dialog (Who reacted) is open over the viewer
+  if (e.key === "Escape") { if (under) return; e.preventDefault(); e.stopImmediatePropagation(); return v.sheet ? v.sheetTo(false) : closePhoto(); }   // one press closes one layer
+  if (under) return;
+  if (e.key === "Tab") { const f = [...v.box.querySelectorAll("button, input")].filter(b => !b.disabled && b.offsetParent !== null); if (!f.length) return; const a = document.activeElement, k = f.indexOf(a), out = a === v.box || !v.box.contains(a);
+    if (e.shiftKey ? (k === 0 || out) : (k === f.length - 1 || out)) { e.preventDefault(); f[e.shiftKey ? f.length - 1 : 0].focus(); } return; }
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || "") || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+  e.preventDefault(); if (!(e.repeat && v.pending)) v.step(e.key === "ArrowLeft" ? -1 : 1);
+});
+window.addEventListener("popstate", e => {
+  if (Date.now() - pvPopAt < 800) { pvPopAt = 0; return; }   // our own step back, after a close by hand
+  const v = pv;
+  if (v && v.hist) {   // Back closes one layer: a dialog over the viewer, then the open comments, then the viewer (the first two keep the viewer's step)
+    if (location.hash !== v.page) return closePhoto("nav");   // the address changed (a link, a notification, a button in a sheet): a page change, not Back. It arrives here before the router hears of it.
+    const again = () => { try { history.pushState({ pv: 1 }, ""); } catch {} };
+    if (!v.box.classList.contains("pv-plain") && el("appDialog")) { closeDialog(); return again(); }
+    if (v.sheet) { v.sheetTo(false); return again(); }
+    return closePhoto("pop");
+  }
+  if (v || !(e.state && e.state.pv)) return;
+  // Forward onto the step a closed viewer left: open that photo again. With nothing to reopen, pass through.
+  const L = pvLast; pvLast = null; if (L && L.items.length && L.page === location.hash && !el("appDialog")) openViewer(L.items, L.i, L.social, { adopt: true }); else history.back();
+});
 function wallInner(ev, title) {
   title = title || (isTripEv(ev) ? "Trip wall" : "Party wall");
   const all = S.comments.filter(c => !c.kind && visibleContent(c)); const me = myUid();
@@ -4552,7 +4889,7 @@ function wireWall(ev) {
     const inp = el("wallInput"); if (inp) inp.focus();
   });
   const cr = el("cancelReply"); if (cr) cr.onclick = () => { replyTo = null; el("replyChip").hidden = true; };
-  document.querySelectorAll(".wall-img").forEach(im => im.onclick = () => lightbox(im.src));
+  document.querySelectorAll(".wall-img").forEach(im => im.onclick = () => { const all = [...document.querySelectorAll(".wall-img")]; lightbox(im.src, all.map(x => x.src), all.indexOf(im)); });
   const ph = el("wallPhoto"); if (ph) ph.onclick = async () => {
     const file = await pickFile("image/*", "wall photo"); if (!file) return; toast("Adding photo…");
     try { await addDoc(subCol(ev, "comments"), { authorId: myUid(), authorName: S.profile.name, text: "", img: await compressImage(file, 1200, 0.8), ...parentPatch(ev), createdAt: Date.now() }); replyTo = null; }
@@ -5624,7 +5961,7 @@ function addSongDialog(ev) {
 // ----- Photo wall -----
 function photosInner(ev) {
   const ps = S.photos.filter(visibleContent);
-  const tiles = ps.map(p => `<div class="photo-tile"><img src="${esc(p.img)}" data-photo="${p.id}" alt="" loading="lazy">${photoBadges(p)}${p.addedBy === myUid() || isAdmin() ? `<button class="photo-act" data-delphoto="${p.id}" title="Remove">✕</button>` : `<button class="photo-act" data-more="photo|${p.id}" title="Report">⚑</button>`}</div>`).join("");
+  const tiles = ps.map(p => `<div class="photo-tile"><img src="${esc(p.img)}" data-photo="${p.id}" alt="Photo" role="button" tabindex="0" loading="lazy">${photoBadges(p)}${p.addedBy === myUid() || isAdmin() ? `<button class="photo-act" data-delphoto="${p.id}" title="Remove">✕</button>` : `<button class="photo-act" data-more="photo|${p.id}" title="Report">⚑</button>`}</div>`).join("");
   return `<div class="glass-head">Photos <span>${ps.length}</span></div>${albumRowHtml(ev, ps)}<div class="photo-grid"><button class="photo-add" id="addPhoto">＋</button>${tiles || ""}</div>${ps.length ? "" : `<p class="muted-th" style="margin-top:8px">${isTripEv(ev) ? "Photos from the trip go here, for everyone who went." : "Share pics from the night."}</p>`}`;
 }
 function wirePhotos(ev) {
@@ -5809,14 +6146,14 @@ const REPORT_REASONS = ["Spam", "Harassment or bullying", "Hate or violence", "N
 // Hide anything I reported and everything from people I blocked.
 const visibleContent = item => !(S.profile.blockedUids || []).includes(item.authorId || item.addedBy) && !(S.profile.hiddenIds || []).includes(item.id);
 // "⋯" on someone else's message or photo: report it, or block the person outright.
-function moderationMenu(ev, kind, id) {
-  const item = (kind === "photo" ? S.photos : S.comments).find(x => x.id === id); if (!item) return;
+function moderationMenu(ev, kind, id, given) {
+  const item = given || (kind === "photo" ? S.photos : S.comments).find(x => x.id === id); if (!item) return;
   const who = item.authorId || item.addedBy; const name = first(nameOf(who));
   dialog(`<h3>${kind === "photo" ? "This photo" : "This message"}</h3>
     <div class="stack"><button type="button" class="btn" id="modReport">⚑ Report ${kind === "photo" ? "this photo" : "this message"}</button>
     <button type="button" class="btn danger-ghost" id="modBlock">🚫 Block ${esc(name)}</button></div>
     <p class="muted sm" style="margin:10px 0 0">Reports go to the Friendly team within 24 hours. Blocking hides everything ${esc(name)} posts from you, instantly, and tells us.</p>`, null, null);
-  el("modReport").onclick = () => { closeDialog(); reportContent(ev, kind, id); };
+  el("modReport").onclick = () => { closeDialog(); reportContent(ev, kind, id, item); };
   el("modBlock").onclick = () => blockUser(who, ev, kind, id);
 }
 async function blockUser(who, ev, kind, id) {
@@ -5829,8 +6166,8 @@ async function blockUser(who, ev, kind, id) {
     closeDialog(); toast(name + " is blocked");
   } catch (e) { toast(e.message); }
 }
-function reportContent(ev, kind, id) {
-  const item = (kind === "photo" ? S.photos : S.comments).find(x => x.id === id); if (!item) return;
+function reportContent(ev, kind, id, given) {
+  const item = given || (kind === "photo" ? S.photos : S.comments).find(x => x.id === id); if (!item) return;
   const who = item.authorId || item.addedBy;
   dialog(`<h3>Report this ${kind === "photo" ? "photo" : "comment"}</h3>
     <p class="muted" style="margin-top:-6px">We review every report within 24 hours. Reported content is hidden from you right away.</p>
@@ -7333,7 +7670,7 @@ function fsRest(u, d) {
     if (now.join(",") !== had.join(",")) LS.set(key, now.join(","));
     if (fresh.length) { const x = reached.find(y => y.id === fresh[fresh.length - 1]); setTimeout(() => coralCheer(x.title + " with " + fn + "!", x.sub), 900); } }
   const highlights = hl.length ? `<div class="section-head"><h2>Highlights</h2></div><div class="card">${hl.map(([i, k, v, id]) => `<div class="member-row ${id ? "dm-row" : ""}" ${id ? `data-go="#/e/${id}" role="button"` : ""}><span class="li">${i}</span><div style="flex:1;min-width:0"><div class="muted sm">${k}</div><b>${v}</b></div>${id ? `<span class="chev">›</span>` : ""}</div>`).join("")}</div>` : "";
-  const mem = d.photos.length ? `<div class="section-head"><h2>Memories</h2><span class="muted sm">${d.photos.length} from your plans</span></div><div class="photo-grid mem-grid fs-mem">${d.photos.slice(0, n("mem")).map(({ p, ev }) => `<div class="photo-tile"><img src="${esc(p.img)}" data-fsp="${esc(ev.id)}|${esc(p.id)}" alt="" loading="lazy">${photoBadges(p)}</div>`).join("")}</div>${fsMoreBtn("mem", d.photos.length - n("mem"))}` : "";
+  const mem = d.photos.length ? `<div class="section-head"><h2>Memories</h2><span class="muted sm">${d.photos.length} from your plans</span></div><div class="photo-grid mem-grid fs-mem">${d.photos.slice(0, n("mem")).map(({ p, ev }) => `<div class="photo-tile"><img src="${esc(p.img)}" data-fsp="${esc(ev.id)}|${esc(p.id)}" alt="Photo" role="button" tabindex="0" loading="lazy">${photoBadges(p)}</div>`).join("")}</div>${fsMoreBtn("mem", d.photos.length - n("mem"))}` : "";
   const evRow = ev => { const k = (S.memories.get(ev.id) || []).length, host = ev.hostId === u ? `${esc(fn)} hosted` : ev.hostId === me ? "You hosted" : "";
     return `<div class="member-row dm-row" data-go="#/e/${ev.id}" role="button">${ev.cover ? `<img class="fs-thumb" src="${esc(ev.cover)}" alt="">` : `<span class="fs-thumb fs-emo">${esc(ev.emoji || "🎉")}</span>`}<div style="flex:1;min-width:0"><b>${esc(ev.title)}</b><div class="muted sm">${when(ev)}${host ? " · " + host : ""}${k ? ` · ${k} photo${k === 1 ? "" : "s"}` : ""}</div></div><span class="chev">›</span></div>`; };
   const plans = d.evs.length ? `<div class="section-head"><h2>Plans together</h2></div><div class="card">${d.next.length ? `<div class="fs-sub">Coming up</div>${d.next.slice(0, n("next")).map(evRow).join("")}${fsMoreBtn("next", d.next.length - n("next"))}` : ""}${d.past.length ? `<div class="fs-sub">Been there</div>${d.past.slice(0, n("past")).map(evRow).join("")}${fsMoreBtn("past", d.past.length - n("past"))}` : ""}</div>` : "";
@@ -7370,7 +7707,7 @@ function wireFsRest(u) {
   const rest = el("fsRest"); if (!rest) return;
   rest.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
   rest.querySelectorAll("[data-fsmore]").forEach(b => b.onclick = () => { const k = b.dataset.fsmore; if (!S._fsMore || S._fsMore.u !== u) S._fsMore = { u }; S._fsMore[k] = fsShown(u, k) + (k === "money" || k === "groups" ? 10 : FS_STEP[k] * (k === "cm" ? 1.5 : 1)); fsPatch(u); });
-  rest.querySelectorAll("[data-fsp]").forEach(im => im.onclick = () => { const [eid, pid] = im.dataset.fsp.split("|"), ev = S.events.get(eid), p = (S.memories.get(eid) || []).find(x => x.id === pid); if (ev && p) openPhoto(ev, p); });
+  rest.querySelectorAll("[data-fsp]").forEach(im => im.onclick = () => openThumb(im, "[data-fsp]", nd => nd.dataset.fsp.split("|")));
 }
 function wireFriendship(u) {
   document.querySelectorAll(".fs-hero .fsp-l, .fs-hero .fsp-r").forEach(g => g.onclick = e => { e.stopPropagation(); openMascot(g.classList.contains("fsp-l") ? "dot" : "coral"); });
@@ -7630,7 +7967,7 @@ function wireDm(fid) {
   if (list) list.onclick = e => {
     const q = e.target.closest("[data-jumpmsg]"); if (q) { const t = list.querySelector(`[data-cmsg="${CSS.escape(q.dataset.jumpmsg)}"]`); if (t) { t.scrollIntoView({ block: "center" }); t.classList.add("focus-flash"); setTimeout(() => t.classList.remove("focus-flash"), 2400); } return; }
     if (e.target.closest("a, audio")) return;
-    const img = e.target.closest("[data-dmimg]"); if (img) return lightbox(img.src);
+    const img = e.target.closest("[data-dmimg]"); if (img) { const all = [...document.querySelectorAll("[data-dmimg]")]; return lightbox(img.src, all.map(x => x.src), all.indexOf(img)); }
     const m = e.target.closest("[data-dmmsg]"); if (!m || !dmSub || !dmSub.msgs) return;
     const msg = dmSub.msgs.find(x => x.id === m.dataset.dmmsg); if (msg) dmMessageSheet(fid, msg);
   };
@@ -7692,7 +8029,7 @@ function dmConversationSheet(fid, u) {
   el("cvPin").onclick = () => save({ pinnedDms: pinned ? arrayRemove(fid) : arrayUnion(fid) }, pinned ? "Unpinned" : "Pinned to the top of Messages");
   el("cvMute").onclick = () => save({ mutedDms: muted ? arrayRemove(fid) : arrayUnion(fid) }, muted ? "Alerts are back on" : "Alerts hidden for this conversation");
   el("cvUnread").onclick = async () => { closeDialog(); const t = S.dms.get(fid); if (!t || !t.lastAt || t.lastBy === myUid()) return toast("Nothing from them to mark unread yet."); try { await updateDoc(doc(db, "dms", fid), { [`readAt.${myUid()}`]: t.lastAt - 1 }); go("#/messages"); } catch (err) { toast(err.message); } };
-  if (el("cvPhotos")) el("cvPhotos").onclick = () => { dialog(`<h3>Photos</h3><div class="dm-gallery">${media.map(m => `<img src="${esc(m.photo || m.gif)}" alt="" loading="lazy" data-gal>`).join("")}</div>`, null, null); document.querySelectorAll("[data-gal]").forEach(i => i.onclick = () => lightbox(i.src)); };
+  if (el("cvPhotos")) el("cvPhotos").onclick = () => { dialog(`<h3>Photos</h3><div class="dm-gallery">${media.map(m => `<img src="${esc(m.photo || m.gif)}" alt="" loading="lazy" data-gal>`).join("")}</div>`, null, null); document.querySelectorAll("[data-gal]").forEach(i => i.onclick = () => { const all = [...document.querySelectorAll("[data-gal]")]; lightbox(i.src, all.map(x => x.src), all.indexOf(i)); }); };
   el("cvDelete").onclick = () => { if (!confirm(`Delete this conversation? It disappears for you only; ${first(personName(u))} keeps their copy.`)) return; save({ [`hiddenDms.${fid}`]: Date.now() }, "Conversation deleted").then(() => go("#/messages")); };
   if (el("dmUnfriend")) el("dmUnfriend").onclick = () => { if (confirm(`Remove ${first(personName(u))} as a friend? You won't be able to message each other.`)) { closeDialog(); dropFriendship(f, "Removed"); } };
   el("dmBlock").onclick = () => { closeDialog(); blockUser(u, null, "user", null); };
@@ -7863,7 +8200,7 @@ function friendAlertNow(a) {
   return { ...a, title: `${name} wanted to be friends`, body: "That request isn't open anymore.", url: "#/friends" };
 }
 function wireActivity() {
-  document.querySelectorAll("[data-act]").forEach(a => a.onclick = e => { if (e.target.closest("button")) return; e.preventDefault(); location.hash = routeTail(a.dataset.act); });
+  document.querySelectorAll("[data-act]").forEach(a => a.onclick = e => { if (e.target.closest("button")) return; e.preventDefault(); followLink(a.dataset.act); });
   document.querySelectorAll(".act-acts [data-friendaccept]").forEach(b => b.onclick = async e => { e.preventDefault(); e.stopPropagation(); const f = S.friends.get(b.dataset.friendaccept); if (!f) return; b.disabled = true; await acceptFriend(f); });
   document.querySelectorAll(".act-acts [data-frienddecline]").forEach(b => b.onclick = e => { e.preventDefault(); e.stopPropagation(); const f = S.friends.get(b.dataset.frienddecline); if (f) dropFriendship(f, "Request declined"); });
   // Seen up to the newest item's own time (server clock), not this phone's: a phone clock running behind left the
@@ -8003,7 +8340,7 @@ function photosPageBody() {
   const evs = [...S.events.values()].filter(ev => (S.memories.get(ev.id) || []).length).sort((a, b) => b.date.localeCompare(a.date));
   const ago1 = yearAgoEvents().filter(ev => (S.memories.get(ev.id) || []).length);
   const section = (ev, label) => `<div class="section-head" style="margin-top:18px"><h2>${label ? label + " · " : ""}${esc(ev.emoji || "")} ${esc(ev.title)}</h2><a class="muted sm" data-go="#/e/${ev.id}">${esc(fmtWhen(ev))} ›</a></div>
-    <div class="photo-grid mem-grid">${(S.memories.get(ev.id) || []).map(p => `<div class="photo-tile"><img src="${esc(p.img)}" data-mem="${p.id}" data-mev="${ev.id}" alt="" loading="lazy">${photoBadges(p)}</div>`).join("")}</div>`;
+    <div class="photo-grid mem-grid">${(S.memories.get(ev.id) || []).map(p => `<div class="photo-tile"><img src="${esc(p.img)}" data-mem="${p.id}" data-mev="${ev.id}" alt="Photo" role="button" tabindex="0" loading="lazy">${photoBadges(p)}</div>`).join("")}</div>`;
   return `<button class="link-back" data-go="#/">‹ Back</button>
   <div class="section-head"><h2>Memories</h2><span class="muted sm">${(n => n + (n === 1 ? " photo" : " photos"))(evs.reduce((t, ev) => t + S.memories.get(ev.id).length, 0))}</span></div>
   ${(recapSeason() || isAdmin()) && yearData().plans.length >= 2 ? `<a class="card yr-link" data-go="#/year">${dot("party", 34)}${coral("party", 34)}<span style="flex:1;min-width:0"><b>A year with the crew</b><span class="muted sm">${yearData().plans.length} plans so far in ${new Date().getFullYear()}${recapSeason() ? "" : " · admin preview, everyone else sees this Dec 10"}</span></span><span class="chev">›</span></a>` : ""}
@@ -8012,7 +8349,7 @@ function photosPageBody() {
   ${evs.length ? evs.map(ev => section(ev)).join("") : (S._memLoading ? "" : emptyState("📸", "No photos yet", "Photos from your plans land here, newest first. Coral is ready for them.", "coral:idle"))}`;
 }
 function wirePhotosPage() {
-  document.querySelectorAll("[data-mem]").forEach(im => im.onclick = () => { const ev = S.events.get(im.dataset.mev), p = (S.memories.get(im.dataset.mev) || []).find(x => x.id === im.dataset.mem); if (ev && p) openPhoto(ev, p); });
+  document.querySelectorAll("[data-mem]").forEach(im => im.onclick = () => openThumb(im, "[data-mem]", nd => [nd.dataset.mev, nd.dataset.mem]));
   // Each visit re-checks every event (photos added since the last look used to stay missing until a restart);
   // events that arrived since are fetched too. The 20-second window keeps render -> wire -> load from looping.
   const missing = [...S.events.values()].some(ev => !S.memories.has(ev.id));
@@ -8249,9 +8586,9 @@ function dialog(inner, okLabel, onOk) {
   document.body.appendChild(bd); document.body.appendChild(d); d.show();
   el("dlgCancel").onclick = closeDialog;
   if (el("dlgOk")) el("dlgOk").onclick = onOk;
-  d.addEventListener("close", () => { d.remove(); if (!el("appDialog")) { const b = el("dlgBackdrop"); if (b) b.remove(); unlockScroll(); } });
+  d.addEventListener("close", () => { d.remove(); if (!el("appDialog")) { const b = el("dlgBackdrop"); if (b) b.remove(); if (!pv) unlockScroll(); } });
 }
-function closeDialog() { try { ctTrace.end(); } catch {} const d = el("appDialog"); if (d) { d.close(); d.remove(); } const b = el("dlgBackdrop"); if (b) b.remove(); unlockScroll(); }
+function closeDialog() { try { ctTrace.end(); } catch {} const d = el("appDialog"); if (d) { d.close(); d.remove(); } const b = el("dlgBackdrop"); if (b) b.remove(); if (!pv) unlockScroll(); }
 document.addEventListener("keydown", e => { if (e.key === "Escape" && el("appDialog")) closeDialog(); });
 // While a dialog is open the page underneath is pinned in place (body fixed at the scrolled offset) and put
 // back on close. In the iPhone app, a modal dialog opened over a page scrolled far down stopped receiving
@@ -8292,7 +8629,7 @@ const TAB_ORDER = [["home", "#/"], ["plans", "#/plans"], ["groups", "#/groups"],
   const reset = () => { if (!mainEl) return; const m = mainEl; m.style.transition = "transform .2s ease, opacity .2s ease"; m.style.transform = ""; m.style.opacity = ""; setTimeout(() => { m.style.transition = ""; }, 220); };
   document.addEventListener("touchstart", e => {
     active = false; horiz = null; if (e.touches.length !== 1) return;
-    const t = e.touches[0]; if (tabIdx() < 0 || el("appDialog") || document.querySelector("dialog[open], .pv, .lightbox, .cheer")) return;
+    const t = e.touches[0]; if (tabIdx() < 0 || el("appDialog") || document.querySelector("dialog[open], .photo-viewer, .cheer")) return;
     if (t.clientX < 24 || t.clientX > innerWidth - 24) return;
     if (e.target.closest("input, textarea, select, [contenteditable], canvas, iframe, .map, .chiprow, .hd-scroll, .tabs, [data-noswipe]") || scrollsX(e.target)) return;
     sx = t.clientX; sy = t.clientY; st = Date.now(); active = true; mainEl = document.querySelector("main");

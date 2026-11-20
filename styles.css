@@ -406,8 +406,6 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .photo-tile{position:relative}
 .photo-act{position:absolute;top:4px;right:4px;width:30px;height:30px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:0.75rem;display:grid;place-items:center}
 .photo-add{aspect-ratio:1;border-radius:10px;border:2px dashed rgba(255,255,255,.35);color:var(--th-ink);display:grid;place-items:center;font-size:1.5rem;background:var(--th-chip)}
-.lightbox{position:fixed;inset:0;background:rgba(0,0,0,.9);display:grid;place-items:center;z-index:200;padding:20px}
-.lightbox img{max-width:100%;max-height:90vh;border-radius:12px}
 
 /* ---------- POLLS ---------- */
 .poll{margin-bottom:14px} .poll:last-child{margin-bottom:0}
@@ -922,8 +920,8 @@ html{background:var(--bg)}
 .book-name b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .book-on{color:var(--good);font-weight:600}
 /* Dialogs are plain fixed overlays (not the modal top layer), centered over a dimmed backdrop. */
-.app-dialog[open]{position:fixed;inset:0;margin:auto;height:fit-content;z-index:1001}
-.dlg-backdrop{position:fixed;inset:0;background:rgba(30,16,10,.5);z-index:1000}
+.app-dialog[open]{position:fixed;inset:0;margin:auto;height:fit-content;z-index:1061}
+.dlg-backdrop{position:fixed;inset:0;background:rgba(30,16,10,.5);z-index:1060}
 #toast{z-index:1100}
 /* Day of setup: "I'm driving" sits under Carpool as an indented row, same style as the switches above */
 .day-sub{margin-left:30px}
@@ -961,34 +959,82 @@ p .linkish{display:inline;margin:0;padding:0;color:var(--accent)}
 .today-x::before{content:"";position:absolute;inset:-8px}   /* ~48pt touch target around the 32pt circle */
 .today-x:active{background:rgba(42,32,25,.16)}
 .today-card{padding-right:48px}
-/* Photo viewer: one photo full screen with reactions and its own comments */
+/* Photo viewer: photos side by side, full screen. Swipe, pinch, and double-tap; reactions and comments ride on top. */
+[data-photo]:focus-visible,[data-mem]:focus-visible,[data-hdmem]:focus-visible,[data-ymem]:focus-visible,[data-fsp]:focus-visible{outline:3px solid var(--accent);outline-offset:-3px}[data-photo],[data-mem],[data-hdmem],[data-ymem],[data-fsp]{scroll-margin:calc(env(safe-area-inset-top,0px) + 72px) 12px calc(env(safe-area-inset-bottom,0px) + 96px)}
 .photo-tile{position:relative}
 .ph-badges{position:absolute;left:6px;bottom:6px;display:flex;gap:4px;pointer-events:none}
 .ph-badges span{background:rgba(20,14,10,.62);color:#fff;font-size:0.6875rem;font-weight:700;border-radius:999px;padding:2px 7px;line-height:1.5}
-.photo-viewer{position:fixed;inset:0;z-index:1050;background:#0d0a08;color:#fff;display:flex;flex-direction:column;padding:calc(env(safe-area-inset-top) + 8px) 0 env(safe-area-inset-bottom)}
-.pv-top{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 14px 10px}
+.photo-viewer{position:fixed;left:0;top:0;width:100%;height:100%;z-index:1050;background:rgba(13,10,8,var(--pv-a,1));color:#fff;overflow:hidden;overflow:clip;outline:0;touch-action:none;user-select:none;-webkit-user-select:none;overscroll-behavior:contain;animation:pvIn .16s ease-out}
+.photo-viewer.pv-plain{z-index:1070}
+.photo-viewer.fading{transition:background-color .18s ease}
+@keyframes pvIn{from{opacity:0}to{opacity:1}}
+.pv-stage{position:absolute;inset:0;overflow:hidden;overflow:clip;touch-action:none}
+@media (hover:hover) and (pointer:fine){.pv-stage{cursor:zoom-in}.photo-viewer.zoomed .pv-stage{cursor:grab}.photo-viewer.zoomed .pv-stage:active{cursor:grabbing}}
+.pv-track{position:absolute;inset:0}
+.pv-track.anim{transition:transform .26s cubic-bezier(.2,.8,.2,1)}
+.pv-slide{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+.pv-slide img{display:block;max-width:100%;max-height:100%;object-fit:contain;transform-origin:50% 50%;-webkit-user-drag:none}
+.pv-slide img.anim{transition:transform .22s cubic-bezier(.2,.8,.2,1)}
+.pv-slide img.glide{transition:transform .55s cubic-bezier(.17,.84,.44,1)}
+/* A plan photo fills the screen one way or the other whatever copy is loaded (small preview or sharp), and saves from its own button, so the iPhone's press-and-hold menu stays out of the gestures */
+.photo-viewer:not(.pv-plain) .pv-slide img{width:100%;height:100%;-webkit-touch-callout:none}
+.pv-top,.pv-bottom,.pv-count{opacity:var(--pv-a,1)}
+.pv-top,.pv-bottom,.pv-count,.pv-nav{transition:opacity .18s ease}
+.photo-viewer.bare .pv-top,.photo-viewer.bare .pv-bottom,.photo-viewer.bare .pv-count,.photo-viewer.bare .pv-nav{opacity:0;pointer-events:none}
+/* The whole screen is the photo: the bars and their shading let a swipe or pinch through, and only the actual buttons take a touch */
+.pv-top,.pv-bottom{pointer-events:none}
+.pv-top .pv-who .avatar,.pv-top .pv-btns,.pv-react,.pv-cbtn{pointer-events:auto}
+.photo-viewer.sheet .pv-bottom{pointer-events:auto}
+.photo-viewer.kb .pv-bottom{padding-bottom:10px}
+.photo-viewer.bare .pv-top *,.photo-viewer.bare .pv-bottom *{pointer-events:none}
+.pv-top{position:absolute;left:0;right:0;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:calc(env(safe-area-inset-top) + 10px) max(14px,env(safe-area-inset-right)) 28px max(14px,env(safe-area-inset-left));background:linear-gradient(rgba(13,10,8,.76),rgba(13,10,8,0));touch-action:manipulation}
+.pv-plain .pv-top{justify-content:flex-end}
 .pv-who{display:flex;align-items:center;gap:10px;min-width:0}
-.pv-who b{font-size:0.9375rem}
-.pv-sub{font-size:0.75rem;color:rgba(255,255,255,.62)}
-.pv-x{width:40px;height:40px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;font-size:1.0625rem;font-weight:700;flex:none;cursor:pointer}
+.pv-who>div{min-width:0}
+.pv-who b{font-size:0.9375rem;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pv-sub{font-size:0.75rem;color:rgba(255,255,255,.7);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pv-x{width:40px;height:40px;border-radius:50%;border:0;background:rgba(255,255,255,.16);color:#fff;font-size:1.0625rem;font-weight:700;flex:none;cursor:pointer;position:relative}
+.pv-x::before{content:"";position:absolute;inset:-4px}
 .pv-btns{display:flex;align-items:center;gap:8px;flex:none}
-.pv-save{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 13px 0 10px;border-radius:999px;background:rgba(255,255,255,.14);color:#fff;font-weight:600;font-size:0.8125rem;cursor:pointer} .pv-save:disabled{opacity:.5}
-.cur-guess{margin:-6px 0 10px}
-.pv-img{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:0 8px}
-.pv-img img{max-width:100%;max-height:100%;object-fit:contain;border-radius:10px}
-.pv-panel{flex:none;background:#1a1411;border-radius:18px 18px 0 0;padding:12px 14px 10px;max-height:46vh;display:flex;flex-direction:column}
-.pv-reacts{display:flex;gap:8px;overflow-x:auto;padding-bottom:10px}
-.pv-react{flex:none;display:inline-flex;align-items:center;gap:5px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#fff;border-radius:999px;padding:6px 11px;font-size:1.0625rem;cursor:pointer}
+.pv-save{display:inline-flex;align-items:center;gap:6px;height:40px;padding:0 14px 0 11px;border:0;border-radius:999px;background:rgba(255,255,255,.16);color:#fff;font-weight:600;font-size:0.8125rem;cursor:pointer} .pv-save:disabled{opacity:.5}
+.pv-count{position:absolute;left:50%;top:calc(env(safe-area-inset-top) + 26px + max(40px,2.55rem));transform:translateX(-50%);z-index:2;background:rgba(20,14,10,.58);border-radius:999px;padding:3px 11px;font-size:0.75rem;font-weight:700;letter-spacing:.02em;font-variant-numeric:tabular-nums;pointer-events:none;white-space:nowrap}
+.pv-count:empty{display:none}
+/* Previous and next: on screen for a mouse, and always there for a keyboard or a screen reader (a finger swipes instead) */
+.pv-nav{position:absolute;top:calc((100% - var(--pv-sh,0px)) / 2);margin-top:-22px;z-index:2;width:44px;height:44px;border-radius:50%;border:0;background:rgba(255,255,255,.16);color:#fff;font-size:1.625rem;line-height:1;cursor:pointer;opacity:0;pointer-events:none}
+.pv-nav.prev{left:max(14px,env(safe-area-inset-left))} .pv-nav.next{right:max(14px,env(safe-area-inset-right))} .pv-nav:disabled{visibility:hidden}
+@media (hover:hover) and (pointer:fine){.pv-nav{opacity:var(--pv-a,1);pointer-events:auto}}
+.pv-nav:focus-visible{opacity:1;pointer-events:auto}
+.photo-viewer button:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.pv-bottom{position:absolute;left:0;right:0;bottom:0;z-index:2;display:flex;flex-direction:column;padding:30px max(14px,env(safe-area-inset-right)) calc(env(safe-area-inset-bottom) + 10px) max(14px,env(safe-area-inset-left));background:linear-gradient(rgba(13,10,8,0),rgba(13,10,8,.82) 48%);touch-action:manipulation}
+.pv-grab{display:none}
+.pv-grab span{width:40px;height:5px;border-radius:3px;background:rgba(255,255,255,.32)}
+.pv-bar{display:flex;align-items:center;gap:8px}
+.pv-reacts{display:flex;gap:8px;overflow-x:auto;flex:1 1 auto;min-width:0;padding:2px 0;touch-action:pan-x;scrollbar-width:none}
+.pv-reacts::-webkit-scrollbar{display:none}
+.pv-react{flex:none;display:inline-flex;align-items:center;gap:5px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.1);color:#fff;border-radius:999px;padding:7px 12px;font-size:1.0625rem;cursor:pointer}
 .pv-react span{font-size:0.8125rem;font-weight:700}
-.pv-react.on{background:rgba(255,107,87,.28);border-color:var(--accent)}
-.pv-comments{flex:1 1 auto;overflow-y:auto;min-height:44px;display:flex;flex-direction:column;gap:10px;padding:2px 0 10px}
+.pv-react.on{background:rgba(255,107,87,.3);border-color:var(--accent)}
+.pv-cbtn{flex:none;display:inline-flex;align-items:center;gap:6px;height:40px;padding:0 13px;border-radius:999px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.1);color:#fff;font-size:1.0625rem;cursor:pointer}
+.pv-cbtn b{font-size:0.8125rem} .pv-cbtn b:empty{display:none}
+.photo-viewer.sheet .pv-cbtn{background:#fff;color:var(--ink);border-color:#fff}
+.pv-more{display:none;flex-direction:column;flex:1 1 auto;min-height:0;margin-top:12px}
+.photo-viewer.sheet .pv-bottom{background:#1a1411;border-radius:18px 18px 0 0;padding-top:0;max-height:64%;box-shadow:0 -10px 30px rgba(0,0,0,.45);animation:pvUp .22s cubic-bezier(.2,.8,.2,1)}
+.photo-viewer.sheet .pv-grab{display:flex;justify-content:center;padding:12px 0 15px;cursor:grab;touch-action:none}
+.photo-viewer.sheet .pv-more{display:flex}
+@keyframes pvUp{from{transform:translateY(36px);opacity:.6}to{transform:none;opacity:1}}
+@media (min-width:700px){.photo-viewer.sheet .pv-bottom{max-width:560px;margin:0 auto}.pv-bar{width:100%;max-width:532px;margin:0 auto}}
+/* A phone on its side with the keyboard up leaves a sliver: the comments take all of it and drop their handle */
+.photo-viewer.tight.sheet .pv-bottom{max-height:100%}.photo-viewer.tight.sheet .pv-grab{display:none}.photo-viewer.tight .pv-comments{min-height:0}
+.pv-comments{flex:1 1 auto;overflow-y:auto;min-height:60px;display:flex;flex-direction:column;gap:10px;padding:2px 0 10px;touch-action:pan-y;overscroll-behavior:contain;user-select:text;-webkit-user-select:text}
 .pv-c{display:flex;gap:9px;align-items:flex-start;font-size:0.875rem;line-height:1.4}
 .pv-c-body{min-width:0;overflow-wrap:anywhere}
+.pv-c .pv-sub{white-space:normal}
 .pv-del{background:none;border:0;padding:0;color:rgba(255,255,255,.62);font:inherit;text-decoration:underline;cursor:pointer}
 .pv-empty{color:rgba(255,255,255,.55);font-size:0.8125rem;margin:4px 0}
-.pv-form{display:flex;gap:8px}
-.pv-form input{flex:1;min-width:0;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);color:#fff;border-radius:999px;padding:10px 14px;font:inherit;font-size:1rem}
+.pv-form{display:flex;gap:8px;flex:none}
+.pv-form input{flex:1;min-width:0;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);color:#fff;border-radius:999px;padding:10px 14px;font:inherit;font-size:max(16px,1rem);user-select:text;-webkit-user-select:text}
 .pv-form input::placeholder{color:rgba(255,255,255,.5)}
+.cur-guess{margin:-6px 0 10px}
 /* AI cover looks */
 .style-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .style-chips button{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:6px 11px;font:inherit;font-size:0.8125rem;font-weight:600;cursor:pointer}
@@ -1087,8 +1133,6 @@ body.replaying #app *{animation-play-state:paused!important}
 .rs-e{font-size:1.5rem;line-height:1;width:30px;flex:none;text-align:center;padding-top:2px}
 .rs-people{display:flex;flex-wrap:wrap;gap:8px 14px}
 .rs-p{display:inline-flex;align-items:center;gap:6px;font-size:0.875rem;font-weight:600}
-body:has(.photo-viewer) .dlg-backdrop{z-index:1060}
-body:has(.photo-viewer) .app-dialog[open]{z-index:1061}
 
 .settle-why{font-size:0.75rem;color:var(--muted);font-weight:500;line-height:1.35;margin-top:2px}
 /* Press-and-hold on a reaction shows who reacted: no text selection or iOS callout on those chips. */
