@@ -169,7 +169,7 @@ function wireAppLinks() {
       if (p) location.hash = "#/e/" + p;
       else if (g) location.hash = "#/join/" + g;
       else if (u.searchParams.get("mode") === "resetPassword") location.href = url;
-      else if (u.hash && u.hash.length > 1) location.hash = u.hash;
+      else if (u.hash && u.hash.length > 1) followLink(u.hash);
     } catch {}
   });
 }
@@ -833,8 +833,10 @@ function routeFromPath(h) {
 }
 // New screen, start at the top (the SPA otherwise keeps the old scroll position,
 // so an event page could open at the party wall instead of the cover).
-const ownScroll = () => { try { history.scrollRestoration = "manual"; } catch {} }; ownScroll();   // each page change sets its own scroll (below), and closing a picture leaves the last one looked at in view; the browser's own restore on Back would undo that. Set again on every page change: the iPhone gives each new address a fresh "auto".
-window.addEventListener("hashchange", () => { ownScroll(); closePhoto("nav"); S.route = parseRoute(); window.scrollTo(0, 0); render(); focusRoute(); });
+const ownScroll = () => { try { history.scrollRestoration = "manual"; } catch {} }; ownScroll(); try { if (history.state && history.state.pv) history.back(); else if (history.state == null) history.replaceState({ seen: 1 }, ""); } catch {}   // reloaded while a photo was open: step off the viewer's history step, so Back is not a dead press   // each page change sets its own scroll (below), and closing a picture leaves the last one looked at in view; the browser's own restore on Back would undo that. Set again on every page change: the iPhone gives each new address a fresh "auto".
+// A new address has no history state yet: it is marked the first time it is drawn, and if it is the spot last opened (a second
+// notification for the same photo, tapped from a browser), that spot opens again. Back and Forward land on marked entries and do not replay.
+window.addEventListener("hashchange", () => { ownScroll(); closePhoto("nav"); pvRouted = location.hash; if (history.state == null) { if (location.hash === focusKey) focusKey = ""; try { history.replaceState({ seen: 1 }, ""); } catch {} } S.route = parseRoute(); window.scrollTo(0, 0); render(); focusRoute(); });
 // The "#/..." part of any url (activity items and pushes carry "/#/e/<id>"), with or without a query.
 const routeTail = url => { const s = String(url || ""); const i = s.indexOf("#"); return i < 0 ? "#/" : s.slice(i); };
 const tailOf = url => routeTail(url).split("?")[0];
@@ -4479,7 +4481,7 @@ const photoBadges = p => { const r = Object.values(p.reactions || {}).reduce((t,
 // Forward opens it again. Android's Back button does the same through its own handler, and on the iPhone a swipe that
 // starts at the screen's edge turns the photo rather than the page.
 const PV = { MAX: 5, TOP: 8, DBL: 2.5, GAP: 16, KEEP: 24 };
-let pv = null, pvPopAt = 0, pvLast = null;
+let pv = null, pvPopAt = 0, pvLast = null, pvRouted = location.hash;   // pvRouted: the address the router last drew (popstate arrives before the router hears of a change)
 const fullKeep = (id, img) => { photoFullCache.delete(id); photoFullCache.set(id, img); while (photoFullCache.size > PV.KEEP) photoFullCache.delete(photoFullCache.keys().next().value); };
 // why: nothing = closed by hand (a history step, if the viewer took one, is taken back out); "pop" = Back already took it;
 // "nav" = the page changed under it; "keep" = another photo is about to open in its place and inherits everything.
@@ -4502,7 +4504,8 @@ function closePhoto(why) {
     // Memories strip). The page is back where it was, so the copy whose strip is on screen is the one it was opened from.
     const c = p ? [...document.querySelectorAll(`[data-photo="${k}"], [data-mem="${k}"], [data-hdmem="${ek}"], [data-ymem="${ek}"], [data-fsp="${ek}"]`)] : [];
     const t = c.find(x => { const r = (x.closest(".photo-grid, .hd-mems, .yr-grid") || x).getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; }) || c[0] || (v.from && document.contains(v.from) ? v.from : null);
-    if (t) { if (p) t.scrollIntoView({ block: "nearest", inline: "nearest" }); if (t.focus) t.focus({ preventScroll: true }); } } catch {} }
+    if (t) { if (p) { const r = t.getBoundingClientRect(), b = (t.closest(".photo-grid, .hd-mems, .yr-grid") || t).getBoundingClientRect(), cs = getComputedStyle(t);   // already in clear view (inside its own grid, clear of the screen's bars): nothing moves
+      if (r.top < Math.max(b.top, parseFloat(cs.scrollMarginTop) || 0) || r.bottom > Math.min(b.bottom, innerHeight - (parseFloat(cs.scrollMarginBottom) || 0)) || r.left < Math.max(b.left, 0) || r.right > Math.min(b.right, innerWidth)) t.scrollIntoView({ block: "nearest", inline: "nearest" }); } if (t.focus) t.focus({ preventScroll: true }); } } catch {} }
   if (v.hist && !why) { pvPopAt = Date.now(); history.back(); }
   return v.hist;
 }
@@ -4751,7 +4754,7 @@ function openViewer(items, at, social, opts = {}) {
     e.preventDefault(); if (v.leaving || (v.sheet && e.target.closest(".pv-bottom"))) return; const u = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? H() : 1, dx = e.deltaX * u, dy = e.deltaY * u, [cx, cy] = mid(), pinchy = e.ctrlKey || e.metaKey;
     clearTimeout(wt); wt = setTimeout(() => { wacc = 0; wlock = false; wlow = wpeak = 0; wz = 1; if (pv === v && !g && !v.leaving && !v.pending && v.s > 1 && v.s < 1.05) zoomTo(1, 0, 0, true); }, 180);   // the gesture is over: a photo left a hair zoomed goes back to full view
     // Zoom. Small steps add up in wz (a slow trackpad pinch sends steps under 1%, which on their own would each snap back to full view).
-    if (pinchy || Math.abs(dy) >= Math.abs(dx)) { if (!v.pending) { wz = Math.max(1, (v.s > 1.01 ? v.s : wz) * Math.exp(-Math.max(-60, Math.min(60, dy)) * (pinchy ? 0.012 : 0.0025))); zoomTo(wz, e.clientX - cx, e.clientY - cy, false); } return; }
+    if (pinchy || Math.abs(dy) >= Math.abs(dx)) { if (!v.pending) { wz = Math.max(1, (v.s > 1.01 ? v.s : Math.min(wz, 1.01)) * Math.exp(-Math.max(-60, Math.min(60, dy)) * (pinchy ? 0.012 : 0.0025))); zoomTo(wz, e.clientX - cx, e.clientY - cy, false); } return; }
     if (v.s >= 1.05) { v.tx -= dx; clampT(); return paint(false); }   // a barely zoomed photo (a stray nudge) still turns the page; step() puts it back to full view first
     // One page per swipe: after a turn, the rest of that swipe's coasting is ignored. A new push (the other way, or the
     // coasting having faded and the movement clearly picking up again) counts at once; so does anything after a short quiet.
@@ -4843,7 +4846,11 @@ window.addEventListener("popstate", e => {
   }
   if (v || !(e.state && e.state.pv)) return;
   // Forward onto the step a closed viewer left: open that photo again. With nothing to reopen, pass through.
-  const L = pvLast; pvLast = null; if (L && L.items.length && L.page === location.hash && !el("appDialog")) openViewer(L.items, L.i, L.social, { adopt: true }); else history.back();
+  // Same address as the page on screen: Forward from the page onto its viewer step. A different address: Back from a later page, which passes straight through.
+  // A step with nothing to reopen is only ever left backwards. (Passing through forwards as well made two such steps in a row bounce the history between them without end.)
+  const L = pvLast, fwd = pvRouted === location.hash; pvLast = null;
+  if (fwd && L && L.items.length && L.page === location.hash && !el("appDialog")) openViewer(L.items, L.i, L.social, { adopt: true });
+  else history.back();
 });
 function wallInner(ev, title) {
   title = title || (isTripEv(ev) ? "Trip wall" : "Party wall");
